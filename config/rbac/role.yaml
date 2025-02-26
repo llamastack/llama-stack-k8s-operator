@@ -1,0 +1,33 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: manager-role
+rules:
+- apiGroups:
+  - llama.x-k8s.io
+  resources:
+  - llamastacks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - llama.x-k8s.io
+  resources:
+  - llamastacks/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - llama.x-k8s.io
+  resources:
+  - llamastacks/status
+  verbs:
+  - get
+  - patch
+  - update

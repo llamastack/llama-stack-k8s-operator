@@ -1,0 +1,20 @@
+# permissions for end users to view llamastacks.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: llamastack-viewer-role
+rules:
+- apiGroups:
+  - llama.x-k8s.io
+  resources:
+  - llamastacks
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - llama.x-k8s.io
+  resources:
+  - llamastacks/status
+  verbs:
+  - get

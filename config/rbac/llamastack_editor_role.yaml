@@ -1,0 +1,24 @@
+# permissions for end users to edit llamastacks.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: llamastack-editor-role
+rules:
+- apiGroups:
+  - llama.x-k8s.io
+  resources:
+  - llamastacks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - llama.x-k8s.io
+  resources:
+  - llamastacks/status
+  verbs:
+  - get
