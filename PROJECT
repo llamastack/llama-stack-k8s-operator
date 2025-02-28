@@ -12,7 +12,7 @@ resources:
     namespaced: true
   controller: true
   domain: llama.x-k8s.io
-  kind: LlamaStack
+  kind: LlamaStackDistribution
   path: github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

@@ -24,19 +24,17 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// LlamaStackSpec defines the desired state of LlamaStack
-type LlamaStackSpec struct {
-	Replicas     *int32         `json:"replicas,omitempty"`
-	Distribution string         `json:"distribution"` // e.g., "ollama", "vllm-gpu"; mutually exclusive
-	Image        string         `json:"image"`        // Custom Image, mutually exclusive with Distribution
-	Template     corev1.PodSpec `json:"template,omitempty"`
+// LlamaStackDistributionSpec defines the desired state of LlamaStackDistribution
+type LlamaStackDistributionSpec struct {
+	Replicas *int32         `json:"replicas,omitempty"`
+	Image    string         `json:"image"`
+	Template corev1.PodSpec `json:"template,omitempty"`
 }
 
-// LlamaStackStatus defines the observed state of LlamaStack
-type LlamaStackStatus struct {
-	Distribution string `json:"distribution"`
-	Image        string `json:"image,omitempty"`
-	Ready        bool   `json:"ready"`
+// LlamaStackDistributionStatus defines the observed state of LlamaStackDistribution
+type LlamaStackDistributionStatus struct {
+	Image string `json:"image,omitempty"`
+	Ready bool   `json:"ready"`
 }
 
 //+kubebuilder:object:root=true
@@ -44,25 +42,25 @@ type LlamaStackStatus struct {
 //+kubebuilder:printcolumn:name="Distribution",type="string",JSONPath=".status.distribution"
 //+kubebuilder:printcolumn:name="Image",type="string",JSONPath=".status.image"
 //+kubebuilder:printcolumn:name="Ready",type="boolean",JSONPath=".status.ready"
-// LlamaStack is the Schema for the llamastacks API
+// LlamaStackDistribution is the Schema for the llamastackdistributions API
 
-type LlamaStack struct {
+type LlamaStackDistribution struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   LlamaStackSpec   `json:"spec,omitempty"`
-	Status LlamaStackStatus `json:"status,omitempty"`
+	Spec   LlamaStackDistributionSpec   `json:"spec"`
+	Status LlamaStackDistributionStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
-// LlamaStackList contains a list of LlamaStack
-type LlamaStackList struct {
+// LlamaStackDistributionList contains a list of LlamaStackDistribution
+type LlamaStackDistributionList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []LlamaStack `json:"items"`
+	Items           []LlamaStackDistribution `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&LlamaStack{}, &LlamaStackList{})
+	SchemeBuilder.Register(&LlamaStackDistribution{}, &LlamaStackDistributionList{})
 }

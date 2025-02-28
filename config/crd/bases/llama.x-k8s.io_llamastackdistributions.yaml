@@ -5,14 +5,14 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.9.2
   creationTimestamp: null
-  name: llamastacks.llama.x-k8s.io
+  name: llamastackdistributions.llama.x-k8s.io
 spec:
   group: llama.x-k8s.io
   names:
-    kind: LlamaStack
-    listKind: LlamaStackList
-    plural: llamastacks
-    singular: llamastack
+    kind: LlamaStackDistribution
+    listKind: LlamaStackDistributionList
+    plural: llamastackdistributions
+    singular: llamastackdistribution
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -42,10 +42,8 @@ spec:
           metadata:
             type: object
           spec:
-            description: LlamaStackSpec defines the desired state of LlamaStack
+            description: LlamaStackDistributionSpec defines the desired state of LlamaStackDistribution
             properties:
-              distribution:
-                type: string
               image:
                 type: string
               replicas:
@@ -6902,22 +6900,21 @@ spec:
                 - containers
                 type: object
             required:
-            - distribution
             - image
             type: object
           status:
-            description: LlamaStackStatus defines the observed state of LlamaStack
+            description: LlamaStackDistributionStatus defines the observed state of
+              LlamaStackDistribution
             properties:
-              distribution:
-                type: string
               image:
                 type: string
               ready:
                 type: boolean
             required:
-            - distribution
             - ready
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true

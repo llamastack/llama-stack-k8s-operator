@@ -27,15 +27,15 @@ import (
 	llamaxk8siov1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
 )
 
-// LlamaStackReconciler reconciles a LlamaStack object
-type LlamaStackReconciler struct {
+// LlamaStackDistributionReconciler reconciles a LlamaStack object
+type LlamaStackDistributionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=llama.x-k8s.io,resources=llamastacks,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=llama.x-k8s.io,resources=llamastacks/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=llama.x-k8s.io,resources=llamastacks/finalizers,verbs=update
+//+kubebuilder:rbac:groups=llama.x-k8s.io,resources=llamastackdistributions,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=llama.x-k8s.io,resources=llamastackdistributions/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=llama.x-k8s.io,resources=llamastackdistributions/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -46,7 +46,7 @@ type LlamaStackReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.12.2/pkg/reconcile
-func (r *LlamaStackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
 
 	// TODO(user): your logic here
@@ -55,8 +55,8 @@ func (r *LlamaStackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *LlamaStackReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *LlamaStackDistributionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&llamaxk8siov1alpha1.LlamaStack{}).
+		For(&llamaxk8siov1alpha1.LlamaStackDistribution{}).
 		Complete(r)
 }
