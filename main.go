@@ -20,20 +20,20 @@ import (
 	"flag"
 	"os"
 
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	// to ensure that exec-entrypoint and run can make use of them.
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
+	llamaxk8siov1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/meta-llama/llama-stack-k8s-operator/controllers"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	llamaxk8siov1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
-	"github.com/meta-llama/llama-stack-k8s-operator/controllers"
-	//+kubebuilder:scaffold:imports
+	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
+	// to ensure that exec-entrypoint and run can make use of them.
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
 var (
@@ -41,7 +41,7 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
-func init() {
+func init() { //nolint:gochecknoinits
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(llamaxk8siov1alpha1.AddToScheme(scheme))
@@ -88,11 +88,19 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
+	cfg, err := config.GetConfig()
+	if err != nil {
+		setupLog.Error(err, "error getting config for setup")
+		os.Exit(1)
+	}
 
-	if err = (&controllers.LlamaStackDistributionReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	cli, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error(err, "error getting client for setup")
+		os.Exit(1)
+	}
+
+	if err = (controllers.NewLlamaStackDistributionReconciler(cli, scheme)).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "LlamaStack")
 		os.Exit(1)
 	}

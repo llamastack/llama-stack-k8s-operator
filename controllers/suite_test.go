@@ -14,15 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controllers
+package controllers_test
 
+//revive:disable:dot-imports
 import (
 	"path/filepath"
 	"testing"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
-
+	llamaxk8siov1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -31,8 +30,8 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	llamaxk8siov1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
-	//+kubebuilder:scaffold:imports
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to

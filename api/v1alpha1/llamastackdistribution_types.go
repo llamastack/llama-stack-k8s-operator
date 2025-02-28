@@ -24,14 +24,37 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// LlamaStackDistributionSpec defines the desired state of LlamaStackDistribution
+// LlamaStackDistributionSpec defines the desired state of LlamaStackDistribution.
 type LlamaStackDistributionSpec struct {
-	Replicas *int32         `json:"replicas,omitempty"`
-	Image    string         `json:"image"`
-	Template corev1.PodSpec `json:"template,omitempty"`
+	// +kubebuilder:default:=1
+	Replicas int32      `json:"replicas,omitempty"`
+	Server   ServerSpec `json:"server"`
 }
 
-// LlamaStackDistributionStatus defines the observed state of LlamaStackDistribution
+// ServerSpec defines the desired state of llama server.
+type ServerSpec struct {
+	ContainerSpec ContainerSpec `json:"containerSpec"`
+	PodOverrides  *PodOverrides `json:"podOverrides,omitempty"` // Optional pod-level overrides
+}
+
+// ContainerSpec defines the llama-stack server container configuration.
+type ContainerSpec struct {
+	// +kubebuilder:default:="llamastack/distribution-ollama:latest"
+	Image string `json:"image"`
+	// +kubebuilder:default:="llama-stack"
+	Name      string                      `json:"name,omitempty"` // Optional, defaults to "llama-stack"
+	Port      int32                       `json:"port,omitempty"` // Defaults to 8321 if unset
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+	Env       []corev1.EnvVar             `json:"env,omitempty"` // Runtime env vars (e.g., INFERENCE_MODEL)
+}
+
+// PodOverrides allows advanced pod-level customization.
+type PodOverrides struct {
+	Volumes      []corev1.Volume      `json:"volumes,omitempty"`
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
+}
+
+// LlamaStackDistributionStatus defines the observed state of LlamaStackDistribution.
 type LlamaStackDistributionStatus struct {
 	Image string `json:"image,omitempty"`
 	Ready bool   `json:"ready"`
@@ -39,7 +62,6 @@ type LlamaStackDistributionStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="Distribution",type="string",JSONPath=".status.distribution"
 //+kubebuilder:printcolumn:name="Image",type="string",JSONPath=".status.image"
 //+kubebuilder:printcolumn:name="Ready",type="boolean",JSONPath=".status.ready"
 // LlamaStackDistribution is the Schema for the llamastackdistributions API
@@ -54,13 +76,18 @@ type LlamaStackDistribution struct {
 
 //+kubebuilder:object:root=true
 
-// LlamaStackDistributionList contains a list of LlamaStackDistribution
+// LlamaStackDistributionList contains a list of LlamaStackDistribution.
 type LlamaStackDistributionList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []LlamaStackDistribution `json:"items"`
 }
 
-func init() {
+func init() { //nolint:gochecknoinits
 	SchemeBuilder.Register(&LlamaStackDistribution{}, &LlamaStackDistributionList{})
+}
+
+// HasPorts checks if the container spec defines a port.
+func (l *LlamaStackDistribution) HasPorts() bool {
+	return l.Spec.Server.ContainerSpec.Port != 0 || len(l.Spec.Server.ContainerSpec.Env) > 0 // Port or env implies service need
 }
