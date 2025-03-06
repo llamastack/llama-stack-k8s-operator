@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/go-logr/logr"
 	llamav1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/meta-llama/llama-stack-k8s-operator/pkg/deploy"
 	appsv1 "k8s.io/api/apps/v1"
@@ -46,7 +47,7 @@ const (
 type LlamaStackDistributionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-	Images map[string]string // Pre-defined image mappings for distributions
+	Log    logr.Logger
 }
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -58,13 +59,13 @@ type LlamaStackDistributionReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.12.2/pkg/reconcile
 func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("llamastack", req.NamespacedName)
+	r.Log = r.Log.WithValues("llamastack", req.NamespacedName)
 
 	// Fetch the LlamaStack instance
 	instance := &llamav1alpha1.LlamaStackDistribution{}
 	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("failed to find LlamaStackDistribution resource")
+			r.Log.Info("failed to find LlamaStackDistribution resource")
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("failed to fetch LlamaStackDistribution: %w", err)
@@ -87,6 +88,7 @@ func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ct
 		return ctrl.Result{}, fmt.Errorf("failed to update status: %w", err)
 	}
 
+	r.Log.Info("Successfully reconciled LlamaStackDistribution")
 	return ctrl.Result{}, nil
 }
 
@@ -153,8 +155,6 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 
 // reconcileService manages the Service if ports are defined.
 func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	logger := log.FromContext(ctx)
-
 	// Use the container's port (defaulted to 8321 if unset)
 	port := instance.Spec.Server.ContainerSpec.Port
 
@@ -176,7 +176,7 @@ func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context,
 		},
 	}
 
-	return deploy.ApplyService(ctx, r.Client, r.Scheme, instance, service, logger)
+	return deploy.ApplyService(ctx, r.Client, r.Scheme, instance, service, r.Log)
 }
 
 // updateStatus refreshes the LlamaStack status.
@@ -202,5 +202,6 @@ func NewLlamaStackDistributionReconciler(client client.Client, scheme *runtime.S
 	return &LlamaStackDistributionReconciler{
 		Client: client,
 		Scheme: scheme,
+		Log:    ctrl.Log.WithName("controller"),
 	}
 }

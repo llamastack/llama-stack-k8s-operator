@@ -101,7 +101,7 @@ func main() {
 	}
 
 	if err = (controllers.NewLlamaStackDistributionReconciler(cli, scheme)).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "LlamaStack")
+		setupLog.Error(err, "unable to create controller", "controller", "LlamaStackDistribution")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder
