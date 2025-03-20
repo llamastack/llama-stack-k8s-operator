@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/go-logr/logr"
 	llamav1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
@@ -42,6 +43,12 @@ const (
 	defaultLabelKey        = "app"
 	defaultLabelValue      = "llama-stack"
 )
+
+// Define a map that translates user-friendly names to actual image references
+var imageMap = map[llamav1alpha1.DistributionType]string{
+	llamav1alpha1.Ollamadistribution: os.Getenv("IMAGE_OLLAMA"),
+	llamav1alpha1.Vllmdistribution:   os.Getenv("IMAGE_VLLM"),
+}
 
 // LlamaStackDistributionReconciler reconciles a LlamaStack object.
 type LlamaStackDistributionReconciler struct {

@@ -21,6 +21,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	Ollamadistribution DistributionType = "ollama-distro"
+	Vllmdistribution   DistributionType = "vllm-distro"
+)
+
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
@@ -33,14 +38,14 @@ type LlamaStackDistributionSpec struct {
 
 // ServerSpec defines the desired state of llama server.
 type ServerSpec struct {
+	// +kubebuilder:default:="ollama-distro"
+	Distribution  string        `json:"distribution"`
 	ContainerSpec ContainerSpec `json:"containerSpec"`
 	PodOverrides  *PodOverrides `json:"podOverrides,omitempty"` // Optional pod-level overrides
 }
 
 // ContainerSpec defines the llama-stack server container configuration.
 type ContainerSpec struct {
-	// +kubebuilder:default:="llamastack/distribution-ollama:latest"
-	Image string `json:"image"`
 	// +kubebuilder:default:="llama-stack"
 	Name      string                      `json:"name,omitempty"` // Optional, defaults to "llama-stack"
 	Port      int32                       `json:"port,omitempty"` // Defaults to 8321 if unset
@@ -56,13 +61,13 @@ type PodOverrides struct {
 
 // LlamaStackDistributionStatus defines the observed state of LlamaStackDistribution.
 type LlamaStackDistributionStatus struct {
-	Image string `json:"image,omitempty"`
-	Ready bool   `json:"ready"`
+	Version string `json:"image,omitempty"`
+	Ready   bool   `json:"ready"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="Image",type="string",JSONPath=".status.image"
+//+kubebuilder:printcolumn:name="Version",type="string",JSONPath=".status.version"
 //+kubebuilder:printcolumn:name="Ready",type="boolean",JSONPath=".status.ready"
 // LlamaStackDistribution is the Schema for the llamastackdistributions API
 
@@ -91,3 +96,6 @@ func init() { //nolint:gochecknoinits
 func (l *LlamaStackDistribution) HasPorts() bool {
 	return l.Spec.Server.ContainerSpec.Port != 0 || len(l.Spec.Server.ContainerSpec.Env) > 0 // Port or env implies service need
 }
+
+// enum to define supported distribution types in llama-stack
+type DistributionType string
