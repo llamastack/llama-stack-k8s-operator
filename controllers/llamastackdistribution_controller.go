@@ -44,7 +44,7 @@ const (
 	defaultLabelValue      = "llama-stack"
 )
 
-// Define a map that translates user-friendly names to actual image references
+// Define a map that translates user-friendly names to actual image references.
 var imageMap = map[llamav1alpha1.DistributionType]string{
 	llamav1alpha1.Ollamadistribution: os.Getenv("IMAGE_OLLAMA"),
 	llamav1alpha1.Vllmdistribution:   os.Getenv("IMAGE_VLLM"),
@@ -111,7 +111,10 @@ func (r *LlamaStackDistributionReconciler) SetupWithManager(mgr ctrl.Manager) er
 // reconcileDeployment manages the Deployment for the LlamaStack server.
 func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
 	logger := log.FromContext(ctx)
-	resolvedImage := instance.Spec.Server.ContainerSpec.Image
+	resolvedImage := imageMap[llamav1alpha1.DistributionType(instance.Spec.Server.Distribution)]
+	if resolvedImage == "" {
+		return fmt.Errorf("invalid distribution type: %s", instance.Spec.Server.Distribution)
+	}
 
 	// Build the container spec
 	container := corev1.Container{
@@ -188,8 +191,6 @@ func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context,
 
 // updateStatus refreshes the LlamaStack status.
 func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	instance.Status.Image = instance.Spec.Server.ContainerSpec.Image
-
 	deployment := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, deployment)
 	if err != nil && !errors.IsNotFound(err) {

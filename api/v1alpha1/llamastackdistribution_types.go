@@ -97,5 +97,5 @@ func (l *LlamaStackDistribution) HasPorts() bool {
 	return l.Spec.Server.ContainerSpec.Port != 0 || len(l.Spec.Server.ContainerSpec.Env) > 0 // Port or env implies service need
 }
 
-// enum to define supported distribution types in llama-stack
+// enum to define supported distribution types in llama-stack.
 type DistributionType string
