@@ -51,20 +51,20 @@ patchesStrategicMerge:
 # the following config is for teaching kustomize how to do var substitution
 vars:
   # Images
-  - name: IMAGES_DSPO
+  - name: OLLAMA_IMAGE
     objref:
       kind: ConfigMap
-      name: dspo-parameters
+      name: lls-parameters
       apiVersion: v1
     fieldref:
-      fieldpath: data.IMAGES_DSPO
-  - name: IMAGES_APISERVER
+      fieldpath: data.OLLAMA_IMAGE
+  - name: VLLM_IMAGE
     objref:
       kind: ConfigMap
-      name: dspo-parameters
+      name: lls-parameters
       apiVersion: v1
     fieldref:
-      fieldpath: data.IMAGES_APISERVER
+      fieldpath: data.VLLM_IMAGE
 # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER' prefix.
 #- name: CERTIFICATE_NAMESPACE # namespace of the certificate CR
 #  objref:
@@ -92,3 +92,6 @@ vars:
 #    kind: Service
 #    version: v1
 #    name: webhook-service
+
+configurations:
+  - params.yaml
