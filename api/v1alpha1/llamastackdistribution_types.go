@@ -39,9 +39,9 @@ type LlamaStackDistributionSpec struct {
 // ServerSpec defines the desired state of llama server.
 type ServerSpec struct {
 	// +kubebuilder:default:="ollama-distro"
-	Distribution  string        `json:"distribution"`
-	ContainerSpec ContainerSpec `json:"containerSpec"`
-	PodOverrides  *PodOverrides `json:"podOverrides,omitempty"` // Optional pod-level overrides
+	Distribution  DistributionType `json:"distribution"`
+	ContainerSpec ContainerSpec    `json:"containerSpec"`
+	PodOverrides  *PodOverrides    `json:"podOverrides,omitempty"` // Optional pod-level overrides
 }
 
 // ContainerSpec defines the llama-stack server container configuration.
@@ -59,10 +59,46 @@ type PodOverrides struct {
 	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 }
 
+// KVStoreConfig represents the configuration for key-value stores.
+type KVStoreConfig struct {
+	Type      string `json:"type,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	DBPath    string `json:"db_path,omitempty"`
+}
+
+// ProviderConfig represents the configuration for a provider.
+type ProviderConfig struct {
+	URL                string        `json:"url,omitempty"`
+	MaxTokens          string        `json:"max_tokens,omitempty"`
+	APIToken           string        `json:"api_token,omitempty"`
+	TLSVerify          string        `json:"tls_verify,omitempty"`
+	ExcludedCategories []string      `json:"excluded_categories,omitempty"`
+	KVStore            KVStoreConfig `json:"kvstore,omitempty"`
+	PersistenceStore   KVStoreConfig `json:"persistence_store,omitempty"`
+	Sinks              string        `json:"sinks,omitempty"`
+	SQLiteDBPath       string        `json:"sqlite_db_path,omitempty"`
+	MaxResults         int           `json:"max_results,omitempty"`
+	APIKey             string        `json:"api_key,omitempty"`
+}
+
+// ProviderInfo represents a single provider from the providers endpoint.
+type ProviderInfo struct {
+	API          string         `json:"api"`
+	ProviderID   string         `json:"provider_id"`
+	ProviderType string         `json:"provider_type"`
+	Config       ProviderConfig `json:"config"`
+}
+
+// DistributionConfig represents the configuration information from the providers endpoint.
+type DistributionConfig struct {
+	Providers []ProviderInfo `json:"providers,omitempty"`
+}
+
 // LlamaStackDistributionStatus defines the observed state of LlamaStackDistribution.
 type LlamaStackDistributionStatus struct {
-	Version string `json:"image,omitempty"`
-	Ready   bool   `json:"ready"`
+	Version            string             `json:"image,omitempty"`
+	DistributionConfig DistributionConfig `json:"distributionConfig,omitempty"`
+	Ready              bool               `json:"ready"`
 }
 
 //+kubebuilder:object:root=true
