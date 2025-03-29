@@ -219,6 +219,10 @@ spec:
                           predefined image in imageMap
                         type: string
                     type: object
+                  distribution:
+                    default: ollama-distro
+                    description: enum to define supported distribution types in llama-stack.
+                    type: string
                   podOverrides:
                     description: PodOverrides allows advanced pod-level customization.
                     properties:
