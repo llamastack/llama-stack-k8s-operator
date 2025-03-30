@@ -64,6 +64,10 @@ endif
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
+# E2E tests additional flags
+# See README.md, default go test timeout 10m
+E2E_TEST_FLAGS = -timeout 30m
+
 .PHONY: all
 all: build
 
@@ -108,7 +112,15 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./... -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./controllers/... ./api/... ./pkg/... -coverprofile cover.out
+
+.PHONY: deploy-prerequisites
+deploy-prerequisites: ## Deploy prerequisites for e2e tests (Ollama)
+	./hack/deploy-ollama.sh
+
+.PHONY: e2e-tests
+e2e-tests: deploy-prerequisites ## Run e2e tests with prerequisites
+	go test -v ./tests/e2e/ -run ^TestE2E -v ${E2E_TEST_FLAGS}
 
 ##@ Build
 

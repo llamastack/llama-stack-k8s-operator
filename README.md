@@ -8,6 +8,7 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
     - [Build Image](#build-image)
     - [Deployment](#deployment)
 - [Deploying Llama Stack Server](#deploying-the-llama-stack-server)
+- [Running E2E Tests](#running-e2e-tests)
 
 
 ## Developer Guide
@@ -82,3 +83,20 @@ spec:
         mountPath: "/root/.llama"
 ```
 3. Verify the server pod is running in the user define namespace.
+
+### Running E2E Tests
+
+The operator includes end-to-end (E2E) tests to verify the complete functionality of the operator. To run the E2E tests:
+
+1. Ensure you have a running Kubernetes cluster
+2. Run the E2E tests using one of the following commands:
+   - If you want to deploy the operator and run tests:
+     ```commandline
+     make deploy e2e-tests
+     ```
+   - If the operator is already deployed:
+     ```commandline
+     make e2e-tests
+     ```
+
+The make target will handle prerequisites including deploying ollama server.
