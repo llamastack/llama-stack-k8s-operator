@@ -268,3 +268,7 @@ lint-fix: golangci-lint ## Run golangci-lint fix against code.
 yq: $(YQ) ## Download yq locally if necessary.
 $(YQ): $(LOCALBIN)
 	test -s $(YQ) || GOBIN=$(LOCALBIN) go install github.com/mikefarah/yq/v4@$(YQ_VERSION)
+
+.PHONY: test-e2e
+test-e2e: ## Run e2e tests
+	go test -v ./test/e2e/... -timeout 30m
