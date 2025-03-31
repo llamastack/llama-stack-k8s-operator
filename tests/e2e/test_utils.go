@@ -1,4 +1,4 @@
-package e2e
+package e2e_test
 
 import (
 	"context"
@@ -25,20 +25,20 @@ const (
 	generalRetryInterval = 5 * time.Second
 )
 
-// TestEnvironment holds the test environment configuration
+// TestEnvironmenst holds the test environment configuration.
 type TestEnvironment struct {
 	Client client.Client
 	Ctx    context.Context
 }
 
-// validateCRD checks if a CustomResourceDefinition is established
+// validateCRD checks if a CustomResourceDefinition is established.
 func validateCRD(c client.Client, ctx context.Context, crdName string) error {
 	crd := &apiextv1.CustomResourceDefinition{}
 	obj := client.ObjectKey{
 		Name: crdName,
 	}
 
-	err := wait.PollWithContext(ctx, generalRetryInterval, func(ctx context.Context) (bool, error) {
+	err := wait.PollWithContext(ctx, generalRetryInterval, testTimeout, func(ctx context.Context) (bool, error) {
 		err := c.Get(ctx, obj, crd)
 		if err != nil {
 			if errors.IsNotFound(err) {
@@ -62,7 +62,7 @@ func validateCRD(c client.Client, ctx context.Context, crdName string) error {
 	return err
 }
 
-// PollDeploymentReady polls until the deployment is ready
+// PollDeploymentReady polls until the deployment is ready.
 func PollDeploymentReady(t *testing.T, c client.Client, name, namespace string, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -88,7 +88,7 @@ func PollDeploymentReady(t *testing.T, c client.Client, name, namespace string, 
 	}
 }
 
-// PollServiceReady polls until the service is ready
+// PollServiceReady polls until the service is ready.
 func PollServiceReady(t *testing.T, c client.Client, name, namespace string, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -114,7 +114,7 @@ func PollServiceReady(t *testing.T, c client.Client, name, namespace string, tim
 	}
 }
 
-// PollCRReady polls until the custom resource is ready
+// PollCRReady polls until the custom resource is ready.
 func PollCRReady(t *testing.T, c client.Client, name, namespace string, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -140,7 +140,7 @@ func PollCRReady(t *testing.T, c client.Client, name, namespace string, timeout 
 	}
 }
 
-// PollDeploymentDeleted polls until the deployment is deleted
+// PollDeploymentDeleted polls until the deployment is deleted.
 func PollDeploymentDeleted(t *testing.T, c client.Client, name, namespace string, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -162,7 +162,7 @@ func PollDeploymentDeleted(t *testing.T, c client.Client, name, namespace string
 	}
 }
 
-// PollServiceDeleted polls until the service is deleted
+// PollServiceDeleted polls until the service is deleted.
 func PollServiceDeleted(t *testing.T, c client.Client, name, namespace string, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -184,7 +184,7 @@ func PollServiceDeleted(t *testing.T, c client.Client, name, namespace string, t
 	}
 }
 
-// PollCRDeleted polls until the custom resource is deleted
+// PollCRDeleted polls until the custom resource is deleted.
 func PollCRDeleted(t *testing.T, c client.Client, name, namespace string, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -206,13 +206,13 @@ func PollCRDeleted(t *testing.T, c client.Client, name, namespace string, timeou
 	}
 }
 
-// SetupTestEnv sets up the test environment
+// SetupTestEnv sets up the test environment.
 func SetupTestEnv() (*TestEnvironment, error) {
 	// Implementation will be added later
 	return nil, nil
 }
 
-// CleanupTestEnv cleans up the test environment
+// CleanupTestEnv cleans up the test environment.
 func CleanupTestEnv(env *TestEnvironment) {
 	// Implementation will be added later
 }
