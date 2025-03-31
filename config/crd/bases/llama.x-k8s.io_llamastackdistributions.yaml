@@ -16,8 +16,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.image
-      name: Image
+    - jsonPath: .status.version
+      name: Version
       type: string
     - jsonPath: .status.ready
       name: Ready
@@ -169,9 +169,6 @@ spec:
                           - name
                           type: object
                         type: array
-                      image:
-                        default: llamastack/distribution-ollama:latest
-                        type: string
                       name:
                         default: llama-stack
                         type: string
@@ -206,9 +203,11 @@ spec:
                               More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
                             type: object
                         type: object
-                    required:
-                    - image
                     type: object
+                  distribution:
+                    default: ollama-distro
+                    description: enum to define supported distribution types in llama-stack.
+                    type: string
                   podOverrides:
                     description: PodOverrides allows advanced pod-level customization.
                     properties:
@@ -1901,6 +1900,7 @@ spec:
                     type: object
                 required:
                 - containerSpec
+                - distribution
                 type: object
             required:
             - server
@@ -1909,6 +1909,76 @@ spec:
             description: LlamaStackDistributionStatus defines the observed state of
               LlamaStackDistribution.
             properties:
+              distributionConfig:
+                description: DistributionConfig represents the configuration information
+                  from the providers endpoint
+                properties:
+                  providers:
+                    items:
+                      description: ProviderInfo represents a single provider from
+                        the providers endpoint
+                      properties:
+                        api:
+                          type: string
+                        config:
+                          description: ProviderConfig represents the configuration
+                            for a provider
+                          properties:
+                            api_key:
+                              type: string
+                            api_token:
+                              type: string
+                            excluded_categories:
+                              items:
+                                type: string
+                              type: array
+                            kvstore:
+                              description: KVStoreConfig represents the configuration
+                                for key-value stores
+                              properties:
+                                db_path:
+                                  type: string
+                                namespace:
+                                  type: string
+                                type:
+                                  type: string
+                              type: object
+                            max_results:
+                              type: integer
+                            max_tokens:
+                              type: string
+                            persistence_store:
+                              description: KVStoreConfig represents the configuration
+                                for key-value stores
+                              properties:
+                                db_path:
+                                  type: string
+                                namespace:
+                                  type: string
+                                type:
+                                  type: string
+                              type: object
+                            sinks:
+                              type: string
+                            sqlite_db_path:
+                              type: string
+                            tls_verify:
+                              type: string
+                            url:
+                              type: string
+                          type: object
+                        provider_id:
+                          type: string
+                        provider_type:
+                          type: string
+                      required:
+                      - api
+                      - config
+                      - provider_id
+                      - provider_type
+                      type: object
+                    type: array
+                type: object
               image:
                 type: string
               ready:

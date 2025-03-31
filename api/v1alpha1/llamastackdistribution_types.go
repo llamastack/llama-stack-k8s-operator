@@ -21,6 +21,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	Ollamadistribution DistributionType = "ollama-distro"
+	Vllmdistribution   DistributionType = "vllm-distro"
+)
+
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
@@ -33,14 +38,14 @@ type LlamaStackDistributionSpec struct {
 
 // ServerSpec defines the desired state of llama server.
 type ServerSpec struct {
-	ContainerSpec ContainerSpec `json:"containerSpec"`
-	PodOverrides  *PodOverrides `json:"podOverrides,omitempty"` // Optional pod-level overrides
+	// +kubebuilder:default:="ollama-distro"
+	Distribution  DistributionType `json:"distribution"`
+	ContainerSpec ContainerSpec    `json:"containerSpec"`
+	PodOverrides  *PodOverrides    `json:"podOverrides,omitempty"` // Optional pod-level overrides
 }
 
 // ContainerSpec defines the llama-stack server container configuration.
 type ContainerSpec struct {
-	// +kubebuilder:default:="llamastack/distribution-ollama:latest"
-	Image string `json:"image"`
 	// +kubebuilder:default:="llama-stack"
 	Name      string                      `json:"name,omitempty"` // Optional, defaults to "llama-stack"
 	Port      int32                       `json:"port,omitempty"` // Defaults to 8321 if unset
@@ -54,15 +59,51 @@ type PodOverrides struct {
 	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 }
 
+// KVStoreConfig represents the configuration for key-value stores.
+type KVStoreConfig struct {
+	Type      string `json:"type,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	DBPath    string `json:"db_path,omitempty"`
+}
+
+// ProviderConfig represents the configuration for a provider.
+type ProviderConfig struct {
+	URL                string        `json:"url,omitempty"`
+	MaxTokens          string        `json:"max_tokens,omitempty"`
+	APIToken           string        `json:"api_token,omitempty"`
+	TLSVerify          string        `json:"tls_verify,omitempty"`
+	ExcludedCategories []string      `json:"excluded_categories,omitempty"`
+	KVStore            KVStoreConfig `json:"kvstore,omitempty"`
+	PersistenceStore   KVStoreConfig `json:"persistence_store,omitempty"`
+	Sinks              string        `json:"sinks,omitempty"`
+	SQLiteDBPath       string        `json:"sqlite_db_path,omitempty"`
+	MaxResults         int           `json:"max_results,omitempty"`
+	APIKey             string        `json:"api_key,omitempty"`
+}
+
+// ProviderInfo represents a single provider from the providers endpoint.
+type ProviderInfo struct {
+	API          string         `json:"api"`
+	ProviderID   string         `json:"provider_id"`
+	ProviderType string         `json:"provider_type"`
+	Config       ProviderConfig `json:"config"`
+}
+
+// DistributionConfig represents the configuration information from the providers endpoint.
+type DistributionConfig struct {
+	Providers []ProviderInfo `json:"providers,omitempty"`
+}
+
 // LlamaStackDistributionStatus defines the observed state of LlamaStackDistribution.
 type LlamaStackDistributionStatus struct {
-	Image string `json:"image,omitempty"`
-	Ready bool   `json:"ready"`
+	Version            string             `json:"image,omitempty"`
+	DistributionConfig DistributionConfig `json:"distributionConfig,omitempty"`
+	Ready              bool               `json:"ready"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="Image",type="string",JSONPath=".status.image"
+//+kubebuilder:printcolumn:name="Version",type="string",JSONPath=".status.version"
 //+kubebuilder:printcolumn:name="Ready",type="boolean",JSONPath=".status.ready"
 // LlamaStackDistribution is the Schema for the llamastackdistributions API
 
@@ -91,3 +132,6 @@ func init() { //nolint:gochecknoinits
 func (l *LlamaStackDistribution) HasPorts() bool {
 	return l.Spec.Server.ContainerSpec.Port != 0 || len(l.Spec.Server.ContainerSpec.Env) > 0 // Port or env implies service need
 }
+
+// enum to define supported distribution types in llama-stack.
+type DistributionType string
