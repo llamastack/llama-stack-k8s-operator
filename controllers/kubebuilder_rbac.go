@@ -20,3 +20,7 @@ package controllers
 // +kubebuilder:rbac:groups="core",resources=services/finalizers,verbs=create;delete;list;update;watch;patch;get
 // +kubebuilder:rbac:groups="core",resources=services,verbs=get;create;watch;update;patch;list;delete
 // +kubebuilder:rbac:groups="core",resources=services,verbs=*
+
+// +kubebuilder:rbac:groups="networking.k8s.io",resources=networkpolicies,verbs=*
+
+// +kubebuilder:rbac:groups="config.openshift.io",resources=clusterversions,verbs=get;list;watch
