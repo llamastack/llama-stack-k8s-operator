@@ -1,4 +1,4 @@
-package e2e
+package e2e_test
 
 import (
 	"flag"
@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// TestOptions defines the configuration for running tests
+// TestOptions defines the configuration for running tests.
 type TestOptions struct {
 	skipValidation    bool
 	skipCreation      bool
@@ -16,13 +16,13 @@ type TestOptions struct {
 	operatorNS        string
 }
 
-// String returns a string representation of the test options
+// String returns a string representation of the test options.
 func (o *TestOptions) String() string {
 	return fmt.Sprintf("Test Options: skipValidation=%v, skipCreation=%v, skipDeletion=%v, skipSCCValidation=%v, components=%s, operatorNS=%s",
 		o.skipValidation, o.skipCreation, o.skipDeletion, o.skipSCCValidation, o.components, o.operatorNS)
 }
 
-// ParseFlags parses command line flags and returns TestOptions
+// ParseFlags parses command line flags and returns TestOptions.
 func ParseFlags() *TestOptions {
 	opts := &TestOptions{}
 
@@ -37,7 +37,7 @@ func ParseFlags() *TestOptions {
 	return opts
 }
 
-// ShouldRunComponent checks if a specific component should be tested
+// ShouldRunComponent checks if a specific component should be tested.
 func (o *TestOptions) ShouldRunComponent(component string) bool {
 	if o.components == "all" {
 		return true
