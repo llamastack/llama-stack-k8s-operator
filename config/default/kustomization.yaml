@@ -11,7 +11,7 @@ namePrefix: llama-stack-k8s-operator-
 # Labels to add to all resources and selectors.
 commonLabels:
   app.kubernetes.io/component: controller-manager
-  app.kubernetes.io/name: llama-stack-k8s-operator 
+  app.kubernetes.io/name: llama-stack-k8s-operator
 
 bases:
 - ../crd
