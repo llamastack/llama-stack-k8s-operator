@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -298,20 +299,57 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 
 	// Only check health and providers if deployment is ready
 	if deploymentReady {
-		// Check health endpoint
-		healthy, err := r.checkHealth(ctx, instance)
-		if err != nil {
-			r.Log.Error(err, "failed to check health endpoint")
+		// Use goroutines for concurrent health and provider checks
+		// Use a channel of size 1 to avoid goroutine leaks due to blocking sends
+		var wg sync.WaitGroup
+		healthChan := make(chan struct {
+			healthy bool
+			err     error
+		}, 1)
+		providersChan := make(chan struct {
+			providers []llamav1alpha1.ProviderInfo
+			err       error
+		}, 1)
+
+		// Check health endpoint in a goroutine
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			healthy, err := r.checkHealth(ctx, instance)
+			healthChan <- struct {
+				healthy bool
+				err     error
+			}{healthy, err}
+		}()
+
+		// Get provider information in a goroutine
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			providers, err := r.getProviderInfo(ctx, instance)
+			providersChan <- struct {
+				providers []llamav1alpha1.ProviderInfo
+				err       error
+			}{providers, err}
+		}()
+
+		// Wait for both goroutines to complete and collect results
+		wg.Wait()
+
+		// Process health check results by reading from the channel
+		healthResult := <-healthChan
+		if healthResult.err != nil {
+			r.Log.Error(healthResult.err, "failed to check health endpoint")
 		} else {
-			instance.Status.Ready = healthy
+			instance.Status.Ready = healthResult.healthy
 		}
 
-		// Get provider information
-		providers, err := r.getProviderInfo(ctx, instance)
-		if err != nil {
-			r.Log.Error(err, "failed to get provider information")
+		// Process provider information results
+		providersResult := <-providersChan
+		if providersResult.err != nil {
+			r.Log.Error(providersResult.err, "failed to get provider information")
 		} else {
-			instance.Status.DistributionConfig.Providers = providers
+			instance.Status.DistributionConfig.Providers = providersResult.providers
 		}
 	} else {
 		instance.Status.Ready = false
