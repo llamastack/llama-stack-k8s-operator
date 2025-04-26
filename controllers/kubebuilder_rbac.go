@@ -21,6 +21,6 @@ package controllers
 // +kubebuilder:rbac:groups="core",resources=services,verbs=get;create;watch;update;patch;list;delete
 // +kubebuilder:rbac:groups="core",resources=services,verbs=*
 
-// +kubebuilder:rbac:groups="networking.k8s.io",resources=networkpolicies,verbs=*
+// +kubebuilder:rbac:groups="core",resources=configmaps,verbs=*
 
-// +kubebuilder:rbac:groups="config.openshift.io",resources=clusterversions,verbs=get;list;watch
+// +kubebuilder:rbac:groups="networking.k8s.io",resources=networkpolicies,verbs=*

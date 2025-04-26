@@ -105,7 +105,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (controllers.NewLlamaStackDistributionReconciler(ctx, cli, scheme)).SetupWithManager(mgr); err != nil {
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(ctx, cli, scheme)
+	if err != nil {
+		setupLog.Error(err, "failed to create reconciler")
+		os.Exit(1)
+	}
+	if err = reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "LlamaStackDistribution")
 		os.Exit(1)
 	}

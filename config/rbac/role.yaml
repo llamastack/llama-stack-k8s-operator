@@ -18,13 +18,11 @@ rules:
   verbs:
   - '*'
 - apiGroups:
-  - config.openshift.io
+  - ""
   resources:
-  - clusterversions
+  - configmaps
   verbs:
-  - get
-  - list
-  - watch
+  - '*'
 - apiGroups:
   - ""
   resources:
