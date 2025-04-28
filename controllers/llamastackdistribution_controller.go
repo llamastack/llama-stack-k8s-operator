@@ -33,6 +33,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -40,14 +41,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-)
-
-const (
-	defaultContainerName   = "llama-stack"
-	defaultPort            = 8321 // Matches the QuickStart guide
-	defaultServicePortName = "http"
-	defaultLabelKey        = "app"
-	defaultLabelValue      = "llama-stack"
 )
 
 // Define a map that translates user-friendly names to actual image references.
@@ -81,6 +74,13 @@ func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ct
 		return ctrl.Result{}, fmt.Errorf("failed to fetch LlamaStackDistribution: %w", err)
 	}
 
+	// Reconcile the PVC if storage is configured
+	if instance.Spec.Server.Storage != nil {
+		if err := r.reconcilePVC(ctx, instance); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to reconcile PVC: %w", err)
+		}
+	}
+
 	// Reconcile the Deployment
 	if err := r.reconcileDeployment(ctx, instance); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to reconcile Deployment: %w", err)
@@ -108,7 +108,55 @@ func (r *LlamaStackDistributionReconciler) SetupWithManager(mgr ctrl.Manager) er
 		For(&llamav1alpha1.LlamaStackDistribution{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
+		Owns(&corev1.PersistentVolumeClaim{}).
 		Complete(r)
+}
+
+// reconcilePVC creates or updates the PVC for the LlamaStack server.
+func (r *LlamaStackDistributionReconciler) reconcilePVC(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	logger := log.FromContext(ctx)
+
+	// Use default size if none specified
+	size := instance.Spec.Server.Storage.Size
+	if size == "" {
+		size = llamav1alpha1.DefaultStorageSize
+	}
+
+	// Validate the storage size format
+	if _, err := resource.ParseQuantity(size); err != nil {
+		return fmt.Errorf("invalid storage size format: %s. Must be a valid Kubernetes quantity (e.g. 10Gi, 1Ti)", size)
+	}
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      instance.Name + "-pvc",
+			Namespace: instance.Namespace,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse(size),
+				},
+			},
+		},
+	}
+
+	if err := ctrl.SetControllerReference(instance, pvc, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set controller reference: %w", err)
+	}
+
+	found := &corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, types.NamespacedName{Name: pvc.Name, Namespace: pvc.Namespace}, found)
+	if err != nil && k8serrors.IsNotFound(err) {
+		logger.Info("Creating PVC", "pvc", pvc.Name)
+		return r.Create(ctx, pvc)
+	} else if err != nil {
+		return fmt.Errorf("failed to fetch PVC: %w", err)
+	}
+
+	// PVCs are immutable after creation, so we don't need to update them
+	return nil
 }
 
 // reconcileDeployment manages the Deployment for the LlamaStack server.
@@ -136,7 +184,7 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 
 	// Build the container spec
 	container := corev1.Container{
-		Name:      defaultContainerName,
+		Name:      llamav1alpha1.DefaultContainerName,
 		Image:     resolvedImage,
 		Resources: instance.Spec.Server.ContainerSpec.Resources,
 		Env:       instance.Spec.Server.ContainerSpec.Env,
@@ -147,15 +195,50 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 	if instance.Spec.Server.ContainerSpec.Port != 0 {
 		container.Ports = []corev1.ContainerPort{{ContainerPort: instance.Spec.Server.ContainerSpec.Port}}
 	} else {
-		container.Ports = []corev1.ContainerPort{{ContainerPort: defaultPort}}
+		container.Ports = []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}}
 	}
+
+	// Determine mount path
+	mountPath := llamav1alpha1.DefaultMountPath
+	if instance.Spec.Server.Storage != nil && instance.Spec.Server.Storage.MountPath != "" {
+		mountPath = instance.Spec.Server.Storage.MountPath
+	}
+
+	// Add volume mount for storage
+	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+		Name:      "lls-storage",
+		MountPath: mountPath,
+	})
 
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container},
 	}
+
+	// Add storage volume
+	if instance.Spec.Server.Storage != nil {
+		// Use PVC for persistent storage
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: "lls-storage",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: instance.Name + "-pvc",
+				},
+			},
+		})
+	} else {
+		// Use emptyDir for non-persistent storage
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: "lls-storage",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		})
+	}
+
+	// Add any pod overrides
 	if instance.Spec.Server.PodOverrides != nil {
-		podSpec.Volumes = instance.Spec.Server.PodOverrides.Volumes
-		container.VolumeMounts = instance.Spec.Server.PodOverrides.VolumeMounts
+		podSpec.Volumes = append(podSpec.Volumes, instance.Spec.Server.PodOverrides.Volumes...)
+		container.VolumeMounts = append(container.VolumeMounts, instance.Spec.Server.PodOverrides.VolumeMounts...)
 		podSpec.Containers[0] = container // Update with volume mounts
 	}
 
@@ -167,11 +250,11 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &instance.Spec.Replicas,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{defaultLabelKey: defaultLabelValue},
+				MatchLabels: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{defaultLabelKey: defaultLabelValue},
+					Labels: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
 				},
 				Spec: podSpec,
 			},
@@ -186,7 +269,7 @@ func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context,
 	// Use the container's port (defaulted to 8321 if unset)
 	port := instance.Spec.Server.ContainerSpec.Port
 	if port == 0 {
-		port = defaultPort
+		port = llamav1alpha1.DefaultServerPort
 	}
 
 	service := &corev1.Service{
@@ -195,9 +278,9 @@ func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context,
 			Namespace: instance.Namespace,
 		},
 		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{defaultLabelKey: defaultLabelValue},
+			Selector: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
 			Ports: []corev1.ServicePort{{
-				Name: defaultServicePortName,
+				Name: llamav1alpha1.DefaultServicePortName,
 				Port: port,
 				TargetPort: intstr.IntOrString{
 					IntVal: port,
@@ -215,7 +298,7 @@ func (r *LlamaStackDistributionReconciler) getServerURL(instance *llamav1alpha1.
 	serviceName := fmt.Sprintf("%s-service", instance.Name)
 	port := instance.Spec.Server.ContainerSpec.Port
 	if port == 0 {
-		port = defaultPort
+		port = llamav1alpha1.DefaultServerPort
 	}
 
 	return &url.URL{

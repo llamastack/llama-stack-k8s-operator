@@ -1816,6 +1816,18 @@ spec:
                           type: object
                         type: array
                     type: object
+                  storage:
+                    description: Storage defines the persistent storage configuration
+                    properties:
+                      mountPath:
+                        description: MountPath is the path where the storage will
+                          be mounted in the container
+                        type: string
+                      size:
+                        description: Size is the size of the persistent volume claim
+                          created for holding persistent data of the llama-stack server
+                        type: string
+                    type: object
                 required:
                 - containerSpec
                 - distribution
