@@ -1,4 +1,4 @@
-package e2e_test
+package e2e
 
 import (
 	"testing"
@@ -9,18 +9,24 @@ import (
 )
 
 func TestValidationSuite(t *testing.T) {
-	if testOpts.skipValidation {
+	if TestOpts.SkipValidation {
 		t.Skip("Skipping validation test suite")
 	}
 
 	t.Run("should validate CRDs", func(t *testing.T) {
-		err := validateCRD(testEnv.Client, testEnv.Ctx, "llamastackdistributions.llama.x-k8s.io")
+		err := validateCRD(TestEnv.Client, TestEnv.Ctx, "llamastackdistributions.llama.x-k8s.io")
 		require.NoErrorf(t, err, "error in validating CRD: llamastackdistributions.llama.x-k8s.io")
 	})
 
-	t.Run("should validate operator pod is running", func(t *testing.T) {
+	t.Run("should validate operator deployment", func(t *testing.T) {
+		deployment, err := GetDeployment(TestEnv.Client, TestEnv.Ctx, "llama-stack-k8s-operator", TestOpts.OperatorNS)
+		require.NoError(t, err, "Operator deployment not found")
+		require.Equal(t, int32(1), deployment.Status.ReadyReplicas, "Operator deployment not ready")
+	})
+
+	t.Run("should validate operator pods", func(t *testing.T) {
 		podList := &corev1.PodList{}
-		err := testEnv.Client.List(testEnv.Ctx, podList, client.InNamespace(testOpts.operatorNS))
+		err := TestEnv.Client.List(TestEnv.Ctx, podList, client.InNamespace(TestOpts.OperatorNS))
 		require.NoError(t, err)
 
 		operatorPodFound := false
@@ -31,20 +37,20 @@ func TestValidationSuite(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, operatorPodFound, "Operator pod not found in namespace %s", testOpts.operatorNS)
+		require.True(t, operatorPodFound, "Operator pod not found in namespace %s", TestOpts.OperatorNS)
 	})
 
-	t.Run("should validate Ollama server", func(t *testing.T) {
-		if !testOpts.ShouldRunComponent("ollama") {
-			t.Skip("Skipping Ollama server validation")
-		}
-		// ... existing Ollama server validation code ...
-	})
+	t.Run("should validate prerequisites", func(t *testing.T) {
+		if TestOpts.ShouldRunComponent("ollama") {
+			deployment, err := GetDeployment(TestEnv.Client, TestEnv.Ctx, "ollama-server", ollamaNS)
+			require.NoError(t, err, "Ollama deployment not found")
+			require.Equal(t, int32(1), deployment.Status.ReadyReplicas, "Ollama deployment not ready")
 
-	t.Run("should validate service account and SCC", func(t *testing.T) {
-		if testOpts.skipSCCValidation {
-			t.Skip("Skipping SCC validation")
+			podList := &corev1.PodList{}
+			err = TestEnv.Client.List(TestEnv.Ctx, podList, client.InNamespace(ollamaNS))
+			require.NoError(t, err)
+			require.NotEmpty(t, podList.Items, "No Ollama pods found")
+			require.Equal(t, corev1.PodRunning, podList.Items[0].Status.Phase, "Ollama pod not running")
 		}
-		// ... existing SCC validation code ...
 	})
 }

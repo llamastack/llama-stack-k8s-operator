@@ -1,7 +1,8 @@
-package e2e_test
+package e2e
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"testing"
 	"time"
@@ -14,7 +15,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
 const (
@@ -25,10 +28,51 @@ const (
 	generalRetryInterval = 5 * time.Second
 )
 
-// TestEnvironmenst holds the test environment configuration.
+// TestEnvironment holds the test environment configuration.
 type TestEnvironment struct {
 	Client client.Client
 	Ctx    context.Context
+}
+
+var (
+	// TestEnv is the global test environment
+	TestEnv *TestEnvironment
+)
+
+// SetupTestEnv sets up the test environment.
+func SetupTestEnv() (*TestEnvironment, error) {
+	// Get a config to talk to the apiserver
+	cfg, err := config.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	// Add CRD scheme
+	err = v1alpha1.AddToScheme(scheme.Scheme)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a new client
+	cl, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a new context
+	ctx := context.Background()
+
+	return &TestEnvironment{
+		Client: cl,
+		Ctx:    ctx,
+	}, nil
+}
+
+// InitializeTestEnv initializes the test environment
+func InitializeTestEnv() error {
+	var err error
+	TestEnv, err = SetupTestEnv()
+	return err
 }
 
 // validateCRD checks if a CustomResourceDefinition is established.
@@ -62,8 +106,15 @@ func validateCRD(c client.Client, ctx context.Context, crdName string) error {
 	return err
 }
 
+// GetDeployment gets a deployment by name and namespace
+func GetDeployment(cl client.Client, ctx context.Context, name, namespace string) (*appsv1.Deployment, error) {
+	deployment := &appsv1.Deployment{}
+	err := cl.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, deployment)
+	return deployment, err
+}
+
 // PollDeploymentReady polls until the deployment is ready.
-func PollDeploymentReady(t *testing.T, c client.Client, name, namespace string, timeout time.Duration) {
+func PollDeploymentReady(t *testing.T, c client.Client, name, namespace string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -73,7 +124,7 @@ func PollDeploymentReady(t *testing.T, c client.Client, name, namespace string, 
 	for {
 		select {
 		case <-ctx.Done():
-			require.Fail(t, "Timeout waiting for deployment to be ready")
+			return fmt.Errorf("timeout waiting for deployment to be ready")
 		case <-ticker.C:
 			deployment := &appsv1.Deployment{}
 			err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, deployment)
@@ -82,14 +133,14 @@ func PollDeploymentReady(t *testing.T, c client.Client, name, namespace string, 
 			}
 
 			if deployment.Status.AvailableReplicas == deployment.Status.Replicas {
-				return
+				return nil
 			}
 		}
 	}
 }
 
 // PollServiceReady polls until the service is ready.
-func PollServiceReady(t *testing.T, c client.Client, name, namespace string, timeout time.Duration) {
+func PollServiceReady(t *testing.T, c client.Client, name, namespace string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -99,7 +150,7 @@ func PollServiceReady(t *testing.T, c client.Client, name, namespace string, tim
 	for {
 		select {
 		case <-ctx.Done():
-			require.Fail(t, "Timeout waiting for service to be ready")
+			return fmt.Errorf("timeout waiting for service to be ready")
 		case <-ticker.C:
 			service := &corev1.Service{}
 			err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, service)
@@ -108,10 +159,20 @@ func PollServiceReady(t *testing.T, c client.Client, name, namespace string, tim
 			}
 
 			if len(service.Status.LoadBalancer.Ingress) > 0 {
-				return
+				return nil
 			}
 		}
 	}
+}
+
+// findCondition finds a condition by type in a slice of conditions
+func findCondition(conditions []v1alpha1.Condition, conditionType string) *v1alpha1.Condition {
+	for _, condition := range conditions {
+		if condition.Type == conditionType {
+			return &condition
+		}
+	}
+	return nil
 }
 
 // PollCRReady polls until the custom resource is ready.
@@ -204,12 +265,6 @@ func PollCRDeleted(t *testing.T, c client.Client, name, namespace string, timeou
 			}
 		}
 	}
-}
-
-// SetupTestEnv sets up the test environment.
-func SetupTestEnv() (*TestEnvironment, error) {
-	// Implementation will be added later
-	return nil, nil
 }
 
 // CleanupTestEnv cleans up the test environment.

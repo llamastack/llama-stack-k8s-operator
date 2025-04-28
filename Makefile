@@ -110,6 +110,14 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./... -coverprofile cover.out
 
+.PHONY: deploy-prerequisites
+deploy-prerequisites: ## Deploy prerequisites for e2e tests (Ollama)
+	./hack/deploy-ollama.sh
+
+.PHONY: test-e2e
+test-e2e: deploy-prerequisites ## Run e2e tests with prerequisites
+	go test -v ./test/e2e/... -timeout 30m
+
 ##@ Build
 
 .PHONY: build
@@ -268,7 +276,3 @@ lint-fix: golangci-lint ## Run golangci-lint fix against code.
 yq: $(YQ) ## Download yq locally if necessary.
 $(YQ): $(LOCALBIN)
 	test -s $(YQ) || GOBIN=$(LOCALBIN) go install github.com/mikefarah/yq/v4@$(YQ_VERSION)
-
-.PHONY: test-e2e
-test-e2e: ## Run e2e tests
-	go test -v ./test/e2e/... -timeout 30m
