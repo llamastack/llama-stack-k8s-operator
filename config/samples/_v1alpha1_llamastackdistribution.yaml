@@ -14,10 +14,9 @@ spec:
       name: llama-stack
     distribution:
       name: ollama
-    podOverrides:
-      volumeMounts:
-        - mountPath: /root/.llama
-          name: llama-storage
-      volumes:
-        - emptyDir: {}
-          name: llama-storage
+    # Uncomment the storage section to use persistent storage
+    # storage: {}  # Will use default size of 10Gi and default mount path of /.llama
+    # Or specify custom values:
+    storage:
+      size: "20Gi"
+      mountPath: "/home/lls/.lls"  # Optional, defaults to /.llama. Use with custom distribution images that have a different setup.

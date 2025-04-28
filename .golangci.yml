@@ -36,6 +36,7 @@ linters-settings:
       - error
       - empty
       - stdlib
+      - sigs.k8s.io/controller-runtime/pkg/client.Client
   revive:
     rules:
       - name: dot-imports
