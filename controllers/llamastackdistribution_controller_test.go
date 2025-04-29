@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	llamav1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
@@ -10,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -82,7 +82,7 @@ func TestStorageConfiguration(t *testing.T) {
 		{
 			name: "Storage with custom values",
 			storage: &llamav1alpha1.StorageSpec{
-				Size:      "20Gi",
+				Size:      resource.NewQuantity(20*1024*1024*1024, resource.BinarySI), // 20Gi
 				MountPath: "/custom/path",
 			},
 			expectedVolume: corev1.Volume{
@@ -131,46 +131,13 @@ func TestStorageConfiguration(t *testing.T) {
 			// If storage is configured, verify PVC
 			if tt.storage != nil {
 				expectedSize := tt.storage.Size
-				if expectedSize == "" {
-					expectedSize = llamav1alpha1.DefaultStorageSize
+				if expectedSize == nil {
+					expectedSize = &llamav1alpha1.DefaultStorageSize
 				}
 				verifyPVC(t, client, instance, expectedSize)
 			}
 		})
 	}
-}
-
-func TestInvalidStorageSize(t *testing.T) {
-	t.Run("should return error for invalid storage size", func(t *testing.T) {
-		// Create a LlamaStackDistribution with invalid storage size
-		instance := &llamav1alpha1.LlamaStackDistribution{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-invalid-storage",
-				Namespace: "default",
-			},
-			Spec: llamav1alpha1.LlamaStackDistributionSpec{
-				Server: llamav1alpha1.ServerSpec{
-					Storage: &llamav1alpha1.StorageSpec{
-						Size: "invalid-size", // Invalid size format
-					},
-				},
-			},
-		}
-
-		_, reconciler := setupTestReconciler(instance)
-		_, err := reconciler.Reconcile(context.Background(), ctrl.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      instance.Name,
-				Namespace: instance.Namespace,
-			},
-		})
-		require.Error(t, err, "Expected error for invalid storage size")
-
-		errMsg := strings.ToLower(err.Error())
-		assert.Contains(t, errMsg, "invalid", "Error message should contain 'invalid'")
-		assert.Contains(t, errMsg, "size", "Error message should contain 'size'")
-		assert.Contains(t, errMsg, "storage", "Error message should contain 'storage'")
-	})
 }
 
 // setupTestReconciler creates a fake client and reconciler for testing
@@ -230,13 +197,13 @@ func verifyVolumeMount(t *testing.T, containers []corev1.Container, expectedMoun
 	assert.Equal(t, expectedMount.MountPath, foundMount.MountPath, "mount path should match")
 }
 
-func verifyPVC(t *testing.T, client client.Client, instance *llamav1alpha1.LlamaStackDistribution, expectedSize string) {
+func verifyPVC(t *testing.T, client client.Client, instance *llamav1alpha1.LlamaStackDistribution, expectedSize *resource.Quantity) {
 	pvc := &corev1.PersistentVolumeClaim{}
 	err := client.Get(context.Background(), types.NamespacedName{
 		Name:      instance.Name + "-pvc",
 		Namespace: instance.Namespace,
 	}, pvc)
 	require.NoError(t, err, "should be able to get PVC")
-	assert.Equal(t, expectedSize, pvc.Spec.Resources.Requests.Storage().String(),
+	assert.Equal(t, expectedSize.String(), pvc.Spec.Resources.Requests.Storage().String(),
 		"PVC size should match")
 }

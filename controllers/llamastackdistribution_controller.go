@@ -33,7 +33,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -118,13 +117,8 @@ func (r *LlamaStackDistributionReconciler) reconcilePVC(ctx context.Context, ins
 
 	// Use default size if none specified
 	size := instance.Spec.Server.Storage.Size
-	if size == "" {
-		size = llamav1alpha1.DefaultStorageSize
-	}
-
-	// Validate the storage size format
-	if _, err := resource.ParseQuantity(size); err != nil {
-		return fmt.Errorf("invalid storage size format: %s. Must be a valid Kubernetes quantity (e.g. 10Gi, 1Ti)", size)
+	if size == nil {
+		size = &llamav1alpha1.DefaultStorageSize
 	}
 
 	pvc := &corev1.PersistentVolumeClaim{
@@ -136,7 +130,7 @@ func (r *LlamaStackDistributionReconciler) reconcilePVC(ctx context.Context, ins
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse(size),
+					corev1.ResourceStorage: *size,
 				},
 			},
 		},
