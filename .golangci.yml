@@ -50,6 +50,64 @@ linters-settings:
     enabled-checks:
       - deferInLoop
       - unnecessaryDefer
+  govet:
+    disable:
+      - fieldalignment # Too aggressive about struct field alignment
+    enable:
+      - shadow
+      - assign
+      - atomic
+      - bools
+      - buildtag
+      - cgocall
+      - composites
+      - copylocks
+      - deepequalerrors
+      - errorsas
+      - findcall
+      - httpresponse
+      - ifaceassert
+      - loopclosure
+      - lostcancel
+      - nilfunc
+      - nilness
+      - printf
+      - reflectvaluecompare
+      - shift
+      - sigchanyzer
+      - sortslice
+      - stdmethods
+      - stringintconv
+      - structtag
+      - testinggoroutine
+      - tests
+      - unmarshal
+      - unreachable
+      - unsafeptr
+      - unusedresult
+  errorlint:
+    # Report when error variables are used in string concatenation
+    errorf: true
+    # Report when error is compared to nil and error.Is() should be used instead
+    asserts: true
+    # Enable reporting of issues related to error wrapping
+    errorf-multi: true
+  usetesting:
+    # Same as tenv but enhanced - default is false
+    allow-non-string: true
+  mnd:
+    # Don't report magic numbers in certain contexts
+    ignored-functions: 
+      - time.Duration
+      - time.Sleep
+      - time.Second
+    ignored-numbers:
+      - '0'
+      - '1'
+      - '2'
+      - '5'  # Allow 5 for timeouts
+      - '10'
+      - '100'
 
 linters:
   enable-all: true
@@ -60,7 +118,6 @@ linters:
     - gochecknoglobals # Prevents use of global vars.
     - gofumpt
     - gomoddirectives # Doesnot allow replace in go mod file
-    - mnd
     - nestif
     - nilnil
     - paralleltest # [too many false positives] detects missing usage of t.Parallel() method in your Go test
@@ -68,13 +125,27 @@ linters:
     - varnamelen # doesnot allow shorter names like c,k etc. But golang prefers short named vars.
     - wsl # [too strict and mostly code is not more readable] whitespace linter forces you to use empty lines
     - wrapcheck # check if this is required. Prevents direct return of err.
-    - exportloopref # Since Go1.22 (loopvar) this linter is no longer relevant. Replaced by copyloopvar.
-
-    # Need to check
+    - err113 # Too strict and conflicts with our error handling approach, using errorlint instead
+    - nonamedreturns # Too restrictive and not compatible with our code style
     - nlreturn # [too strict and mostly code is not more readable] checks for a new line before return and branch statements to increase code clarity
-    - err113 # [too strict] checks the errors handling expressions
-
+    - testpackage # Too restrictive for our test organization
+    # Disable linters that need Go 1.22
+    - copyloopvar # Requires Go 1.22
+    - intrange # Requires Go 1.22
+    # Deprecated linters in v1.64.4
+    - tenv # Deprecated since v1.64.0, replaced by usetesting
+    # Remove exportloopref from disabled list as it's already deactivated
 
 issues:
   exclude-dirs:
     - apis
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - dupl
+        - gosec
+        - funlen
+    - path: zz_generated
+      linters:
+        - lll
