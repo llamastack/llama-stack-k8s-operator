@@ -29,8 +29,8 @@ func ApplyNetworkPolicy(ctx context.Context, c client.Client, scheme *runtime.Sc
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			// Create the NetworkPolicy if it doesn't exist
-			if err := c.Create(ctx, networkPolicy); err != nil {
-				return fmt.Errorf("failed to create NetworkPolicy: %w", err)
+			if cerr := c.Create(ctx, networkPolicy); cerr != nil {
+				return fmt.Errorf("failed to create NetworkPolicy: %w", cerr)
 			}
 			log.Info("Created NetworkPolicy", "name", networkPolicy.Name)
 			return nil
