@@ -58,7 +58,7 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
 2. Create LlamaStackDistribution CR to get the server running. Example-
 ```
 apiVersion: llama.x-k8s.io/v1alpha1
-kind: LlamaStackaDistribution
+kind: LlamaStackDistribution
 metadata:
   name: llamastackdistribution-sample
   namespace: <user-defined-namespace>
