@@ -500,7 +500,7 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 						featureflags.EnableNetworkPolicyKey, featureflags.NetworkPolicyDefaultValue),
 				},
 			}
-			if err := client.Create(ctx, configMap); err != nil {
+			if err = client.Create(ctx, configMap); err != nil {
 				return nil, fmt.Errorf("failed to create ConfigMap: %w", err)
 			}
 		} else {
