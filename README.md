@@ -1,22 +1,34 @@
 # llama-stack-operator
 This repo hosts a kubernetes operator that is responsible for creating and managing [llama-stack](https://github.com/meta-llama/llama-stack) server.
 
-### Table of contents
 
+## Features
+
+- Automated deployment of Llama Stack servers
+- Support for multiple [distributions](https://github.com/meta-llama/llama-stack?tab=readme-ov-file#distributions) (includes Ollama, vLLM, and others)
+- Customizable server configurations
+- Volume management for model storage
+- Kubernetes-native resource management
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
 - [Developer Guide](#developer-guide)
-    - [Pre-requisites](#pre-requisites)
-    - [Build Image](#build-image)
+    - [Building the Operator](#building-the-operator)
     - [Deployment](#deployment)
 - [Deploying Llama Stack Server](#deploying-the-llama-stack-server)
 - [Running E2E Tests](#running-e2e-tests)
 
 
-## Developer Guide
+## Prerequisites
 
-#### Pre-requisites
-
+- Kubernetes cluster (v1.20 or later)
 - Go version **go1.23**
 - operator-sdk version can be updated to **v1.33+** (v4 layout)
+- kubectl configured to access your cluster
+- A running inference server:
+  - For local development, you can use the provided script: `/hack/deploy-ollama.sh`
 
 
 #### Build Image
@@ -58,16 +70,22 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
 1. Deploy Inference provider server (ollama, vllm etc)
 2. Create LlamaStackDistribution CR to get the server running. Example-
 ```
+
+2. Deploy an inference provider (e.g., Ollama)
+
+3. Create a LlamaStackDistribution resource:
+```yaml
 apiVersion: llama.x-k8s.io/v1alpha1
 kind: LlamaStackDistribution
 metadata:
   name: llamastackdistribution-sample
-  namespace: <user-defined-namespace>
+  namespace: <your-namespace>
 spec:
   replicas: 1
   server:
+    distribution:
+      name: ollama
     containerSpec:
-      image: "llamastack/distribution-ollama:latest"
       port: 8321
       env:
       - name: INFERENCE_MODEL
