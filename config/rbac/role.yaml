@@ -2,17 +2,60 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  creationTimestamp: null
   name: manager-role
 rules:
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - '*'
+- apiGroups:
+  - apps
+  resources:
+  - deployments/finalizers
+  verbs:
+  - '*'
 - apiGroups:
   - ""
   resources:
   - configmaps
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
   - deployments
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
   - persistentvolumeclaims
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
   - persistentvolumes
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
   - pods
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
   - pods/exec
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
   - pods/log
   verbs:
   - '*'
@@ -20,7 +63,6 @@ rules:
   - ""
   resources:
   - serviceaccounts
-  - services/finalizers
   verbs:
   - create
   - delete
@@ -35,13 +77,25 @@ rules:
   - services
   verbs:
   - '*'
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
-  - apps
+  - ""
   resources:
-  - deployments
-  - deployments/finalizers
+  - services/finalizers
   verbs:
-  - '*'
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - llama.x-k8s.io
   resources:
