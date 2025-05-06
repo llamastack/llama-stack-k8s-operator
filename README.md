@@ -14,8 +14,8 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
 
 #### Pre-requisites
 
-- Go version **go1.21**
-- operator-sdk version can be updated to **v1.31.1**
+- Go version **go1.23**
+- operator-sdk version can be updated to **v1.33+** (v4 layout)
 
 
 #### Build Image
