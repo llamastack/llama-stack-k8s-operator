@@ -26,8 +26,7 @@ import (
 )
 
 // DistributionType defines the distribution configuration for llama-stack.
-// +kubebuilder:validation:XValidation:rule="(self.name == '' && self.image != '') || (self.name != '' && self.image == '')",message="Only one of name or image can be specified"
-// +kubebuilder:validation:XValidation:rule="self.name != '' || self.image != ''",message="Either name or image must be specified"
+// +kubebuilder:validation:XValidation:rule="has(self.name) != has(self.image)",message="Only one of name or image can be specified"
 type DistributionType struct {
 	// Name is the distribution name that maps to supported distributions. Currently supported distributions are ollama and vllm.
 	// +optional
