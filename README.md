@@ -8,7 +8,7 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
     - [Build Image](#build-image)
     - [Deployment](#deployment)
 - [Deploying Llama Stack Server](#deploying-the-llama-stack-server)
- 
+
 
 ## Developer Guide
 
@@ -43,7 +43,7 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
 - Deploy the created image in your cluster using following command:
 
   ```commandline
-  make deploy IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag> 
+  make deploy IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
   ```
 
 - To remove resources created during installation use:
@@ -70,7 +70,7 @@ spec:
       port: 8321
       env:
       - name: INFERENCE_MODEL
-        value: "meta-llama/Llama-3.2-3B-Instruct" 
+        value: "meta-llama/Llama-3.2-3B-Instruct"
       - name: OLLAMA_URL
         value: "http://ollama-server-service.default.svc.cluster.local:11434"
     podOverrides:
@@ -80,5 +80,5 @@ spec:
       volumeMounts:
       - name: llama-storage
         mountPath: "/root/.llama"
-``` 
+```
 3. Verify the server pod is running in the user define namespace.

@@ -97,7 +97,7 @@ linters-settings:
     allow-non-string: true
   mnd:
     # Don't report magic numbers in certain contexts
-    ignored-functions: 
+    ignored-functions:
       - time.Duration
       - time.Sleep
       - time.Second

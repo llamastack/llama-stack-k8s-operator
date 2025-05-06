@@ -9,4 +9,4 @@ spec:
       labels:
         app.kubernetes.io/component: controller-manager
         app.kubernetes.io/instance: llama-stack-k8s-operator
-        app.kubernetes.io/name: llama-stack-k8s-operator 
+        app.kubernetes.io/name: llama-stack-k8s-operator
