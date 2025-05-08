@@ -24,4 +24,3 @@ testbin/*
 *.swo
 *~
 .golangci.mktmp.yml
-
