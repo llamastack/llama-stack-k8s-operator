@@ -22,8 +22,27 @@ package v1alpha1
 //nolint:gci
 import (
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+const (
+	// DefaultContainerName is the default name for the container
+	DefaultContainerName = "llama-stack"
+	// DefaultServerPort is the default port for the server
+	DefaultServerPort int32 = 8321
+	// DefaultServicePortName is the default name for the service port
+	DefaultServicePortName = "http"
+	// DefaultLabelKey is the default key for labels
+	DefaultLabelKey = "app"
+	// DefaultLabelValue is the default value for labels
+	DefaultLabelValue = "llama-stack"
+	// DefaultMountPath is the default mount path for storage
+	DefaultMountPath = "/.llama"
+)
+
+// DefaultStorageSize is the default size for persistent storage
+var DefaultStorageSize = resource.MustParse("10Gi")
 
 // DistributionType defines the distribution configuration for llama-stack.
 // +kubebuilder:validation:XValidation:rule="has(self.name) != has(self.image)",message="Only one of name or image can be specified"
@@ -49,6 +68,17 @@ type ServerSpec struct {
 	Distribution  DistributionType `json:"distribution"`
 	ContainerSpec ContainerSpec    `json:"containerSpec"`
 	PodOverrides  *PodOverrides    `json:"podOverrides,omitempty"` // Optional pod-level overrides
+	// Storage defines the persistent storage configuration
+	// +optional
+	Storage *StorageSpec `json:"storage,omitempty"`
+}
+
+// StorageSpec defines the persistent storage configuration
+type StorageSpec struct {
+	// Size is the size of the persistent volume claim created for holding persistent data of the llama-stack server
+	Size *resource.Quantity `json:"size,omitempty"`
+	// MountPath is the path where the storage will be mounted in the container
+	MountPath string `json:"mountPath,omitempty"`
 }
 
 // ContainerSpec defines the llama-stack server container configuration.

@@ -23,5 +23,4 @@ testbin/*
 *.swp
 *.swo
 *~
-.vscode
 .golangci.mktmp.yml

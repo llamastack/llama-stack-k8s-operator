@@ -1965,6 +1965,22 @@ spec:
                           type: object
                         type: array
                     type: object
+                  storage:
+                    description: Storage defines the persistent storage configuration
+                    properties:
+                      mountPath:
+                        description: MountPath is the path where the storage will
+                          be mounted in the container
+                        type: string
+                      size:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: Size is the size of the persistent volume claim
+                          created for holding persistent data of the llama-stack server
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    type: object
                 required:
                 - containerSpec
                 - distribution
