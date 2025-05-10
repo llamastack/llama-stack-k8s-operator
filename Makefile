@@ -77,6 +77,10 @@ CONTAINER_TOOL ?= podman
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
+# E2E tests additional flags
+# See README.md, default go test timeout 10m
+E2E_TEST_FLAGS = -timeout 30m
+
 .PHONY: all
 all: build
 
@@ -123,11 +127,11 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
-.PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
-test-e2e:
-	go test ./test/e2e/ -v -ginkgo.v
-
+.PHONY: test-e2e
+test-e2e: ## Run e2e tests
+	./hack/deploy-ollama.sh # Deploy Ollama
+  go test -v ./tests/e2e/ -run ^TestE2E -v ${E2E_TEST_FLAGS}
+  
 GOLANGCI_LINT_TIMEOUT ?= 5m0s
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint against code.
