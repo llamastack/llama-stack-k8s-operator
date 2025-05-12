@@ -71,50 +71,75 @@ func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ct
 	r.Log = r.Log.WithValues("llamastack", req.NamespacedName)
 
 	// Fetch the LlamaStack instance
-	instance := &llamav1alpha1.LlamaStackDistribution{}
-	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
-		if k8serrors.IsNotFound(err) {
-			r.Log.Info("failed to find LlamaStackDistribution resource")
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, fmt.Errorf("failed to fetch LlamaStackDistribution: %w", err)
+	instance, err := r.fetchInstance(ctx, req.NamespacedName)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 
-	// Reconcile the PVC if storage is configured
-	if instance.Spec.Server.Storage != nil {
-		if err := r.reconcilePVC(ctx, instance); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to reconcile PVC: %w", err)
-		}
+	// Instance not found - skip reconciliation
+	if instance == nil {
+		return ctrl.Result{}, nil
 	}
 
-	// Reconcile the NetworkPolicy
-	if err := r.reconcileNetworkPolicy(ctx, instance); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to reconcile NetworkPolicy: %w", err)
+	// Reconcile all resources
+	if err := r.reconcileResources(ctx, instance); err != nil {
+		return ctrl.Result{}, err
 	}
 
-	// Reconcile the Deployment
-	if err := r.reconcileDeployment(ctx, instance); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to reconcile Deployment: %w", err)
-	}
-
-	// Reconcile the Service if ports are defined, else use default port
-	if instance.HasPorts() {
-		if err := r.reconcileService(ctx, instance); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to reconcile service: %w", err)
-		}
-	}
-
-	// Update status
-	if err := r.updateStatus(ctx, instance); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to update status: %w", err)
-	}
-
+	// Check if requeue is needed
 	if !instance.Status.Ready {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	r.Log.Info("Successfully reconciled LlamaStackDistribution")
 	return ctrl.Result{}, nil
+}
+
+// fetchInstance retrieves the LlamaStackDistribution instance.
+func (r *LlamaStackDistributionReconciler) fetchInstance(ctx context.Context, namespacedName types.NamespacedName) (*llamav1alpha1.LlamaStackDistribution, error) {
+	instance := &llamav1alpha1.LlamaStackDistribution{}
+	if err := r.Get(ctx, namespacedName, instance); err != nil {
+		if k8serrors.IsNotFound(err) {
+			r.Log.Info("failed to find LlamaStackDistribution resource")
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to fetch LlamaStackDistribution: %w", err)
+	}
+	return instance, nil
+}
+
+// reconcileResources reconciles all resources for the LlamaStackDistribution instance.
+func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	// Reconcile the PVC if storage is configured
+	if instance.Spec.Server.Storage != nil {
+		if err := r.reconcilePVC(ctx, instance); err != nil {
+			return fmt.Errorf("failed to reconcile PVC: %w", err)
+		}
+	}
+
+	// Reconcile the NetworkPolicy
+	if err := r.reconcileNetworkPolicy(ctx, instance); err != nil {
+		return fmt.Errorf("failed to reconcile NetworkPolicy: %w", err)
+	}
+
+	// Reconcile the Deployment
+	if err := r.reconcileDeployment(ctx, instance); err != nil {
+		return fmt.Errorf("failed to reconcile Deployment: %w", err)
+	}
+
+	// Reconcile the Service if ports are defined, else use default port
+	if instance.HasPorts() {
+		if err := r.reconcileService(ctx, instance); err != nil {
+			return fmt.Errorf("failed to reconcile service: %w", err)
+		}
+	}
+
+	// Update status
+	if err := r.updateStatus(ctx, instance); err != nil {
+		return fmt.Errorf("failed to update status: %w", err)
+	}
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -186,10 +211,10 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 	}
 
 	// Build container spec
-	container := r.buildContainerSpec(instance, resolvedImage)
+	container := buildContainerSpec(instance, resolvedImage)
 
 	// Configure storage
-	podSpec := r.configurePodStorage(instance, container)
+	podSpec := configurePodStorage(instance, container)
 
 	// Create deployment object
 	deployment := &appsv1.Deployment{
@@ -238,77 +263,6 @@ func (r *LlamaStackDistributionReconciler) resolveImage(instance *llamav1alpha1.
 	}
 
 	return instance.Spec.Server.Distribution.Image, nil
-}
-
-// buildContainerSpec creates the container specification.
-func (r *LlamaStackDistributionReconciler) buildContainerSpec(instance *llamav1alpha1.LlamaStackDistribution, image string) corev1.Container {
-	container := corev1.Container{
-		Name:      llamav1alpha1.DefaultContainerName,
-		Image:     image,
-		Resources: instance.Spec.Server.ContainerSpec.Resources,
-		Env:       instance.Spec.Server.ContainerSpec.Env,
-	}
-
-	if instance.Spec.Server.ContainerSpec.Name != "" {
-		container.Name = instance.Spec.Server.ContainerSpec.Name
-	}
-
-	port := llamav1alpha1.DefaultServerPort
-	if instance.Spec.Server.ContainerSpec.Port != 0 {
-		port = instance.Spec.Server.ContainerSpec.Port
-	}
-	container.Ports = []corev1.ContainerPort{{ContainerPort: port}}
-
-	// Determine mount path
-	mountPath := llamav1alpha1.DefaultMountPath
-	if instance.Spec.Server.Storage != nil && instance.Spec.Server.Storage.MountPath != "" {
-		mountPath = instance.Spec.Server.Storage.MountPath
-	}
-
-	// Add volume mount for storage
-	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-		Name:      "lls-storage",
-		MountPath: mountPath,
-	})
-
-	return container
-}
-
-// configurePodStorage configures the pod storage and returns the complete pod spec.
-func (r *LlamaStackDistributionReconciler) configurePodStorage(instance *llamav1alpha1.LlamaStackDistribution, container corev1.Container) corev1.PodSpec {
-	podSpec := corev1.PodSpec{
-		Containers: []corev1.Container{container},
-	}
-
-	// Add storage volume
-	if instance.Spec.Server.Storage != nil {
-		// Use PVC for persistent storage
-		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
-			Name: "lls-storage",
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: instance.Name + "-pvc",
-				},
-			},
-		})
-	} else {
-		// Use emptyDir for non-persistent storage
-		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
-			Name: "lls-storage",
-			VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{},
-			},
-		})
-	}
-
-	// Add any pod overrides
-	if instance.Spec.Server.PodOverrides != nil {
-		podSpec.Volumes = append(podSpec.Volumes, instance.Spec.Server.PodOverrides.Volumes...)
-		container.VolumeMounts = append(container.VolumeMounts, instance.Spec.Server.PodOverrides.VolumeMounts...)
-		podSpec.Containers[0] = container // Update with volume mounts
-	}
-
-	return podSpec
 }
 
 // reconcileService manages the Service if ports are defined.
