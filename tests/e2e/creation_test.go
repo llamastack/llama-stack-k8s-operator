@@ -29,6 +29,29 @@ func TestCreationSuite(t *testing.T) {
 		distribution = testCreateDistribution(t)
 	})
 
+	t.Run("should create PVC if storage is configured", func(t *testing.T) {
+		t.Helper()
+		pvcName := distribution.Name + "-pvc"
+		pvc := &corev1.PersistentVolumeClaim{}
+		err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
+			Namespace: distribution.Namespace,
+			Name:      pvcName,
+		}, pvc)
+		if distribution.Spec.Server.Storage == nil {
+			require.Error(t, err, "PVC should not exist when storage is not configured")
+			require.True(t, k8serrors.IsNotFound(err), "Expected not found error for PVC when storage is not configured")
+		} else {
+			require.NoError(t, err, "PVC should be created when storage is configured")
+			// Check storage size
+			expectedSize := v1alpha1.DefaultStorageSize
+			if distribution.Spec.Server.Storage.Size != nil {
+				expectedSize = *distribution.Spec.Server.Storage.Size
+			}
+			actualSize := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+			require.Equal(t, expectedSize.String(), actualSize.String(), "PVC storage size should match CR")
+		}
+	})
+
 	t.Run("should handle direct deployment updates", func(t *testing.T) {
 		testDirectDeploymentUpdates(t, distribution)
 	})
