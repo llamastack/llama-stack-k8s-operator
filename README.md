@@ -13,6 +13,7 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
+- [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Developer Guide](#developer-guide)
     - [Building the Operator](#building-the-operator)
@@ -112,3 +113,21 @@ The operator includes end-to-end (E2E) tests to verify the complete functionalit
      ```
 
 The make target will handle prerequisites including deploying ollama server.
+
+## Installation
+
+You can install the operator directly from a released version or the latest main branch using `kubectl apply -f`.
+
+To install the latest version from the main branch:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/main/release/operator.yaml
+```
+
+To install a specific released version (e.g., v1.0.0), replace `main` with the desired tag:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/v1.0.0/release/operator.yaml
+```
+
+## Quick Start
