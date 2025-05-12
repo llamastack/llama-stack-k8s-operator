@@ -43,7 +43,7 @@ rules:
   verbs:
   - '*'
 - apiGroups:
-  - llama.x-k8s.io
+  - llamastack.io
   resources:
   - llamastackdistributions
   verbs:
@@ -55,13 +55,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - llama.x-k8s.io
+  - llamastack.io
   resources:
   - llamastackdistributions/finalizers
   verbs:
   - update
 - apiGroups:
-  - llama.x-k8s.io
+  - llamastack.io
   resources:
   - llamastackdistributions/status
   verbs:

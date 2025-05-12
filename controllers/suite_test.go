@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	llamaxk8siov1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
+	llamaxk8siov1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"

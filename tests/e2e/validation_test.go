@@ -15,8 +15,8 @@ func TestValidationSuite(t *testing.T) {
 	}
 
 	t.Run("should validate CRDs", func(t *testing.T) {
-		err := validateCRD(TestEnv.Client, TestEnv.Ctx, "llamastackdistributions.llama.x-k8s.io")
-		require.NoErrorf(t, err, "error in validating CRD: llamastackdistributions.llama.x-k8s.io")
+		err := validateCRD(TestEnv.Client, TestEnv.Ctx, "llamastackdistributions.llamastack.io")
+		require.NoErrorf(t, err, "error in validating CRD: llamastackdistributions.llamastack.io")
 	})
 
 	t.Run("should validate operator deployment", func(t *testing.T) {

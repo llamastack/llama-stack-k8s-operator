@@ -20,8 +20,8 @@ import (
 	"flag"
 	"os"
 
-	llamaxk8siov1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
-	"github.com/meta-llama/llama-stack-k8s-operator/controllers"
+	llamaxk8siov1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/controllers"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -76,7 +76,7 @@ func main() {
 		Metrics:                    metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress:     probeAddr,
 		LeaderElection:             enableLeaderElection,
-		LeaderElectionID:           "54e06e98.llama.x-k8s.io",
+		LeaderElectionID:           "54e06e98.llamastack.io",
 		LeaderElectionResourceLock: "leases",
 		LeaderElectionNamespace:    "",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily

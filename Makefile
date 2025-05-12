@@ -28,7 +28,7 @@ BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 # This variable is used to construct full image tags for bundle and catalog images.
 #
 # For example, running 'make bundle-build bundle-push catalog-build catalog-push' will build and push both
-# llama.x-k8s.io/llama-stack-k8s-operator-bundle:$VERSION and llama.x-k8s.io/llama-stack-k8s-operator-catalog:$VERSION.
+# llamastack.io/llama-stack-k8s-operator-bundle:$VERSION and llamastack.io/llama-stack-k8s-operator-catalog:$VERSION.
 IMAGE_TAG_BASE ?= quay.io/opendatahub/llama-stack-k8s-operator
 
 # BUNDLE_IMG defines the image:tag used for the bundle.

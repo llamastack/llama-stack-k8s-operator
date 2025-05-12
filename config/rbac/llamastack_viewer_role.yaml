@@ -5,7 +5,7 @@ metadata:
   name: llamastack-viewer-role
 rules:
 - apiGroups:
-  - llama.x-k8s.io
+  - llamastack.io
   resources:
   - llamastacks
   verbs:
@@ -13,7 +13,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - llama.x-k8s.io
+  - llamastack.io
   resources:
   - llamastacks/status
   verbs:

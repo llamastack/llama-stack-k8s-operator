@@ -5,7 +5,7 @@ metadata:
   name: llamastack-editor-role
 rules:
 - apiGroups:
-  - llama.x-k8s.io
+  - llamastack.io
   resources:
   - llamastacks
   verbs:
@@ -17,7 +17,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - llama.x-k8s.io
+  - llamastack.io
   resources:
   - llamastacks/status
   verbs:

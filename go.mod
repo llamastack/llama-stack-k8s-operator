@@ -1,4 +1,4 @@
-module github.com/meta-llama/llama-stack-k8s-operator
+module github.com/llamastack/llama-stack-k8s-operator
 
 go 1.23.0
 

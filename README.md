@@ -69,12 +69,7 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
 1. Deploy Inference provider server (ollama, vllm etc)
 2. Create LlamaStackDistribution CR to get the server running. Example-
 ```
-
-2. Deploy an inference provider (e.g., Ollama)
-
-3. Create a LlamaStackDistribution resource:
-```yaml
-apiVersion: llama.x-k8s.io/v1alpha1
+apiVersion: llamastack.io/v1alpha1
 kind: LlamaStackDistribution
 metadata:
   name: llamastackdistribution-sample

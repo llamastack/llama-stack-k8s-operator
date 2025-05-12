@@ -1,8 +1,8 @@
 package controllers
 
-//+kubebuilder:rbac:groups=llama.x-k8s.io,resources=llamastackdistributions,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=llama.x-k8s.io,resources=llamastackdistributions/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=llama.x-k8s.io,resources=llamastackdistributions/finalizers,verbs=update
+//+kubebuilder:rbac:groups=llamastack.io,resources=llamastackdistributions,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=llamastack.io,resources=llamastackdistributions/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=llamastack.io,resources=llamastackdistributions/finalizers,verbs=update
 
 // +kubebuilder:rbac:groups="core",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 

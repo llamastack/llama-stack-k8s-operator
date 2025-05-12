@@ -4,7 +4,7 @@ package e2e
 import (
 	"testing"
 
-	"github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -47,7 +47,7 @@ func TestDeletionSuite(t *testing.T) {
 
 		// Wait for CR to be deleted
 		err = EnsureResourceDeleted(t, TestEnv, schema.GroupVersionKind{
-			Group:   "llama.x-k8s.io",
+			Group:   "llamastack.io",
 			Version: "v1alpha1",
 			Kind:    "LlamaStackDistribution",
 		}, instance.Name, instance.Namespace, ResourceReadyTimeout)
