@@ -19,7 +19,7 @@ package controllers
 import (
 	"testing"
 
-	llamav1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
+	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
