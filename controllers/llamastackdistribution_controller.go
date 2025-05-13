@@ -56,7 +56,7 @@ const (
 )
 
 // Define a map that translates user-friendly names to actual image references.
-var imageMap = llamav1alpha1.ImageMap
+var imageMap = llamav1alpha1.GetAvailableDistributions()
 
 // LlamaStackDistributionReconciler reconciles a LlamaStack object.
 type LlamaStackDistributionReconciler struct {
@@ -141,10 +141,10 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 	var resolvedImage string
 	switch {
 	case instance.Spec.Server.Distribution.Name != "":
-		resolvedImage = imageMap[instance.Spec.Server.Distribution.Name]
-		if resolvedImage == "" {
+		if !llamav1alpha1.ValidateDistribution(instance.Spec.Server.Distribution.Name) {
 			return fmt.Errorf("failed to validate distribution name: %s", instance.Spec.Server.Distribution.Name)
 		}
+		resolvedImage = llamav1alpha1.GetDistributionImage(instance.Spec.Server.Distribution.Name)
 	case instance.Spec.Server.Distribution.Image != "":
 		resolvedImage = instance.Spec.Server.Distribution.Image
 	default:
@@ -313,6 +313,14 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 	// Check if deployment is ready
 	expectedReplicas := instance.Spec.Replicas
 	deploymentReady := err == nil && deployment.Status.ReadyReplicas == expectedReplicas
+
+	// Update available distributions and active distribution
+	instance.Status.DistributionConfig.AvailableDistributions = llamav1alpha1.GetAvailableDistributions()
+	if instance.Spec.Server.Distribution.Name != "" {
+		instance.Status.DistributionConfig.ActiveDistribution = instance.Spec.Server.Distribution.Name
+	} else if instance.Spec.Server.Distribution.Image != "" {
+		instance.Status.DistributionConfig.ActiveDistribution = "custom"
+	}
 
 	// Only check health and providers if deployment is ready
 	if deploymentReady {
@@ -524,10 +532,13 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 		}
 	}
 
-	return &LlamaStackDistributionReconciler{
+	// Create reconciler
+	reconciler := &LlamaStackDistributionReconciler{
 		Client:              client,
 		Scheme:              scheme,
 		Log:                 log,
 		EnableNetworkPolicy: enableNetworkPolicy,
-	}, nil
+	}
+
+	return reconciler, nil
 }

@@ -16,15 +16,47 @@ limitations under the License.
 
 package v1alpha1
 
-import "os"
-
-const (
-	Ollamadistribution = "ollama"
-	Vllmdistribution   = "vllm"
+import (
+	"os"
+	"strings"
 )
 
-// ImageMap translates user-friendly names to actual image references.
-var ImageMap = map[string]string{
-	Ollamadistribution: os.Getenv("OLLAMA_IMAGE"),
-	Vllmdistribution:   os.Getenv("VLLM_IMAGE"),
+// GetDistributionImage returns the image for a given distribution name
+func GetDistributionImage(distributionName string) string {
+	// Convert distribution name to environment variable format
+	// e.g., "vllm-gpu" -> "VLLM_GPU_IMAGE"
+	envVar := strings.ToUpper(strings.ReplaceAll(distributionName, "-", "_")) + "_IMAGE"
+	return os.Getenv(envVar)
+}
+
+// GetAvailableDistributions returns a map of all available distributions and their images
+func GetAvailableDistributions() map[string]string {
+	distributions := make(map[string]string)
+
+	// Read all environment variables
+	for _, env := range os.Environ() {
+		pair := strings.SplitN(env, "=", 2)
+		if len(pair) != 2 {
+			continue
+		}
+
+		key, value := pair[0], pair[1]
+
+		// Check if this is a distribution image environment variable
+		if strings.HasSuffix(key, "_IMAGE") {
+			// Convert environment variable name to distribution name
+			// e.g., "VLLM_GPU_IMAGE" -> "vllm-gpu"
+			distName := strings.ToLower(strings.TrimSuffix(key, "_IMAGE"))
+			distName = strings.ReplaceAll(distName, "_", "-")
+			distributions[distName] = value
+		}
+	}
+
+	return distributions
+}
+
+// ValidateDistribution checks if a distribution name is valid
+func ValidateDistribution(name string) bool {
+	_, exists := GetAvailableDistributions()[name]
+	return exists
 }
