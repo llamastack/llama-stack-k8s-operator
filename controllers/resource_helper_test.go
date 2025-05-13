@@ -21,6 +21,7 @@ import (
 
 	llamav1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -265,4 +266,108 @@ func findVolumeMountByNameAndPath(mounts []corev1.VolumeMount, name, path string
 		}
 	}
 	return false
+}
+
+func TestValidateDistribution(t *testing.T) {
+	testCases := []struct {
+		name        string
+		instance    *llamav1alpha1.LlamaStackDistribution
+		expectError bool
+	}{
+		{
+			name:        "valid with name only",
+			instance:    createLSD("llama2", ""),
+			expectError: false,
+		},
+		{
+			name:        "valid with image only",
+			instance:    createLSD("", "test-image:latest"),
+			expectError: false,
+		},
+		{
+			name:        "invalid with both name and image",
+			instance:    createLSD("llama2", "test-image:latest"),
+			expectError: true,
+		},
+		{
+			name:        "invalid with neither name nor image",
+			instance:    createLSD("", ""),
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &LlamaStackDistributionReconciler{}
+			err := r.validateDistribution(tc.instance)
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// createLSD creates a LlamaStackDistribution instance with optional name and image.
+func createLSD(name, image string) *llamav1alpha1.LlamaStackDistribution {
+	return &llamav1alpha1.LlamaStackDistribution{
+		Spec: llamav1alpha1.LlamaStackDistributionSpec{
+			Server: llamav1alpha1.ServerSpec{
+				Distribution: llamav1alpha1.DistributionType{
+					Name:  name,
+					Image: image,
+				},
+			},
+		},
+	}
+}
+
+func TestResolveImage(t *testing.T) {
+	oldImageMap := imageMap
+	defer func() { imageMap = oldImageMap }()
+
+	imageMap = map[string]string{
+		"ollama": "ollama-image:latest",
+	}
+
+	testCases := []struct {
+		name          string
+		instance      *llamav1alpha1.LlamaStackDistribution
+		expectedImage string
+		expectError   bool
+	}{
+		{
+			name:          "resolve from name",
+			instance:      createLSD("ollama", ""),
+			expectedImage: imageMap["ollama"],
+			expectError:   false,
+		},
+		{
+			name:          "resolve from image",
+			instance:      createLSD("", "test-image:latest"),
+			expectedImage: "test-image:latest",
+			expectError:   false,
+		},
+		{
+			name:          "invalid distribution name",
+			instance:      createLSD("invalid-name", ""),
+			expectedImage: "",
+			expectError:   true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &LlamaStackDistributionReconciler{}
+			image, err := r.resolveImage(tc.instance)
+			if tc.expectError {
+				require.Error(t, err)
+				assert.Empty(t, image)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expectedImage, image)
+			}
+		})
+	}
 }

@@ -17,9 +17,15 @@ limitations under the License.
 package controllers
 
 import (
+	"errors"
+	"fmt"
+
 	llamav1alpha1 "github.com/meta-llama/llama-stack-k8s-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 )
+
+// Define a map that translates user-friendly names to actual image references.
+var imageMap = llamav1alpha1.ImageMap
 
 // buildContainerSpec creates the container specification.
 func buildContainerSpec(instance *llamav1alpha1.LlamaStackDistribution, image string) corev1.Container {
@@ -90,4 +96,30 @@ func configurePodStorage(instance *llamav1alpha1.LlamaStackDistribution, contain
 	}
 
 	return podSpec
+}
+
+// validateDistribution validates the distribution configuration.
+func (r *LlamaStackDistributionReconciler) validateDistribution(instance *llamav1alpha1.LlamaStackDistribution) error {
+	if instance.Spec.Server.Distribution.Name != "" && instance.Spec.Server.Distribution.Image != "" {
+		return errors.New("only one of distribution.name or distribution.image can be set")
+	}
+
+	if instance.Spec.Server.Distribution.Name == "" && instance.Spec.Server.Distribution.Image == "" {
+		return errors.New("failed to validate distribution: either distribution.name or distribution.image must be set")
+	}
+
+	return nil
+}
+
+// resolveImage resolves the container image from either name or direct reference.
+func (r *LlamaStackDistributionReconciler) resolveImage(instance *llamav1alpha1.LlamaStackDistribution) (string, error) {
+	if instance.Spec.Server.Distribution.Name != "" {
+		resolvedImage := imageMap[instance.Spec.Server.Distribution.Name]
+		if resolvedImage == "" {
+			return "", fmt.Errorf("failed to validate distribution name: %s", instance.Spec.Server.Distribution.Name)
+		}
+		return resolvedImage, nil
+	}
+
+	return instance.Spec.Server.Distribution.Image, nil
 }

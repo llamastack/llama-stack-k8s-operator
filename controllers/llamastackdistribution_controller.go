@@ -19,7 +19,6 @@ package controllers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,9 +45,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
-
-// Define a map that translates user-friendly names to actual image references.
-var imageMap = llamav1alpha1.ImageMap
 
 // LlamaStackDistributionReconciler reconciles a LlamaStack object.
 type LlamaStackDistributionReconciler struct {
@@ -237,32 +233,6 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 	}
 
 	return deploy.ApplyDeployment(ctx, r.Client, r.Scheme, instance, deployment, logger)
-}
-
-// validateDistribution validates the distribution configuration.
-func (r *LlamaStackDistributionReconciler) validateDistribution(instance *llamav1alpha1.LlamaStackDistribution) error {
-	if instance.Spec.Server.Distribution.Name != "" && instance.Spec.Server.Distribution.Image != "" {
-		return errors.New("only one of distribution.name or distribution.image can be set")
-	}
-
-	if instance.Spec.Server.Distribution.Name == "" && instance.Spec.Server.Distribution.Image == "" {
-		return errors.New("failed to validate distribution: either distribution.name or distribution.image must be set")
-	}
-
-	return nil
-}
-
-// resolveImage resolves the container image from either name or direct reference.
-func (r *LlamaStackDistributionReconciler) resolveImage(instance *llamav1alpha1.LlamaStackDistribution) (string, error) {
-	if instance.Spec.Server.Distribution.Name != "" {
-		resolvedImage := imageMap[instance.Spec.Server.Distribution.Name]
-		if resolvedImage == "" {
-			return "", fmt.Errorf("failed to validate distribution name: %s", instance.Spec.Server.Distribution.Name)
-		}
-		return resolvedImage, nil
-	}
-
-	return instance.Spec.Server.Distribution.Image, nil
 }
 
 // reconcileService manages the Service if ports are defined.
