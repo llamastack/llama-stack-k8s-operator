@@ -46,6 +46,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+const (
+	defaultContainerName   = "llama-stack"
+	defaultPort            = 8321 // Matches the QuickStart guide
+	defaultServicePortName = "http"
+	defaultLabelKey        = "app"
+	defaultLabelValue      = "llama-stack"
+)
+
+// Define a map that translates user-friendly names to actual image references.
+var imageMap = llamav1alpha1.GetAvailableDistributions()
+
 // LlamaStackDistributionReconciler reconciles a LlamaStack object.
 type LlamaStackDistributionReconciler struct {
 	client.Client
@@ -200,10 +211,18 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 		return err
 	}
 
-	// Resolve the container image
-	resolvedImage, err := r.resolveImage(instance)
-	if err != nil {
-		return err
+	// Get the image either from the map or direct reference
+	var resolvedImage string
+	switch {
+	case instance.Spec.Server.Distribution.Name != "":
+		if !llamav1alpha1.ValidateDistribution(instance.Spec.Server.Distribution.Name) {
+			return fmt.Errorf("failed to validate distribution name: %s", instance.Spec.Server.Distribution.Name)
+		}
+		resolvedImage = llamav1alpha1.GetDistributionImage(instance.Spec.Server.Distribution.Name)
+	case instance.Spec.Server.Distribution.Image != "":
+		resolvedImage = instance.Spec.Server.Distribution.Image
+	default:
+		return errors.New("failed to validate distribution: either distribution.name or distribution.image must be set")
 	}
 
 	// Build container spec
@@ -350,6 +369,14 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 	// Check if deployment is ready
 	expectedReplicas := instance.Spec.Replicas
 	deploymentReady := err == nil && deployment.Status.ReadyReplicas == expectedReplicas
+
+	// Update available distributions and active distribution
+	instance.Status.DistributionConfig.AvailableDistributions = llamav1alpha1.GetAvailableDistributions()
+	if instance.Spec.Server.Distribution.Name != "" {
+		instance.Status.DistributionConfig.ActiveDistribution = instance.Spec.Server.Distribution.Name
+	} else if instance.Spec.Server.Distribution.Image != "" {
+		instance.Status.DistributionConfig.ActiveDistribution = "custom"
+	}
 
 	// Only check health and providers if deployment is ready
 	if deploymentReady {
@@ -561,10 +588,13 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 		}
 	}
 
-	return &LlamaStackDistributionReconciler{
+	// Create reconciler
+	reconciler := &LlamaStackDistributionReconciler{
 		Client:              client,
 		Scheme:              scheme,
 		Log:                 log,
 		EnableNetworkPolicy: enableNetworkPolicy,
-	}, nil
+	}
+
+	return reconciler, nil
 }
