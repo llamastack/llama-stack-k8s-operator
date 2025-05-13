@@ -12,58 +12,33 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
 
 ## Table of Contents
 
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
 - [Quick Start](#quick-start)
+    - [Installation](#installation)
+    - [Deploying Llama Stack Server](#deploying-the-llama-stack-server)
 - [Developer Guide](#developer-guide)
+    - [Prerequisites](#prerequisites)
     - [Building the Operator](#building-the-operator)
     - [Deployment](#deployment)
-- [Deploying Llama Stack Server](#deploying-the-llama-stack-server)
 - [Running E2E Tests](#running-e2e-tests)
 
 
-## Prerequisites
+## Quick Start
 
-- Kubernetes cluster (v1.20 or later)
-- Go version **go1.23**
-- operator-sdk **v1.39.2** (v4 layout) or newer
-- kubectl configured to access your cluster
-- A running inference server:
-  - For local development, you can use the provided script: `/hack/deploy-ollama.sh`
+### Installation
 
-#### Build Image
+You can install the operator directly from a released version or the latest main branch using `kubectl apply -f`.
 
-- Custom operator image can be built using your local repository
+To install the latest version from the main branch:
 
-  ```commandline
-  make image IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
-  ```
+```bash
+kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/main/release/operator.yaml
+```
 
-  The default image used is `quay.io/opendatahub/llama-stack-k8s-operator:latest` when not supply argument for `make image`
+To install a specific released version (e.g., v1.0.0), replace `main` with the desired tag:
 
-
-- Once the image is created, the operator can be deployed either directly, or through OLM. For each deployment method a
-  kubeconfig should be exported
-
-  ```commandline
-  export KUBECONFIG=<path to kubeconfig>
-  ```
-
-#### Deployment
-
-**Deploying operator locally**
-
-- Deploy the created image in your cluster using following command:
-
-  ```commandline
-  make deploy IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
-  ```
-
-- To remove resources created during installation use:
-
-  ```commandline
-  make undeploy
-  ```
+```bash
+kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/v1.0.0/release/operator.yaml
+```
 
 ### Deploying the Llama Stack Server
 
@@ -97,7 +72,51 @@ spec:
 ```
 3. Verify the server pod is running in the user define namespace.
 
-### Running E2E Tests
+## Developer Guide
+
+### Prerequisites
+
+- Kubernetes cluster (v1.20 or later)
+- Go version **go1.23**
+- operator-sdk **v1.39.2** (v4 layout) or newer
+- kubectl configured to access your cluster
+- A running inference server:
+  - For local development, you can use the provided script: `/hack/deploy-ollama.sh`
+
+### Building the Operator
+
+- Custom operator image can be built using your local repository
+
+  ```commandline
+  make image IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
+  ```
+
+  The default image used is `quay.io/llamastack/llama-stack-k8s-operator:latest` when not supply argument for `make image`
+
+- Once the image is created, the operator can be deployed directly. For each deployment method a
+  kubeconfig should be exported
+
+  ```commandline
+  export KUBECONFIG=<path to kubeconfig>
+  ```
+
+### Deployment
+
+**Deploying operator locally**
+
+- Deploy the created image in your cluster using following command:
+
+  ```commandline
+  make deploy IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
+  ```
+
+- To remove resources created during installation use:
+
+  ```commandline
+  make undeploy
+  ```
+
+## Running E2E Tests
 
 The operator includes end-to-end (E2E) tests to verify the complete functionality of the operator. To run the E2E tests:
 
@@ -105,29 +124,11 @@ The operator includes end-to-end (E2E) tests to verify the complete functionalit
 2. Run the E2E tests using one of the following commands:
    - If you want to deploy the operator and run tests:
      ```commandline
-     make deploy e2e-tests
+     make deploy test-e2e
      ```
    - If the operator is already deployed:
      ```commandline
-     make e2e-tests
+     make test-e2e
      ```
 
 The make target will handle prerequisites including deploying ollama server.
-
-## Installation
-
-You can install the operator directly from a released version or the latest main branch using `kubectl apply -f`.
-
-To install the latest version from the main branch:
-
-```bash
-kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/main/release/operator.yaml
-```
-
-To install a specific released version (e.g., v1.0.0), replace `main` with the desired tag:
-
-```bash
-kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/v1.0.0/release/operator.yaml
-```
-
-## Quick Start
