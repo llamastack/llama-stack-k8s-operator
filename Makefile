@@ -297,14 +297,16 @@ endif
 
 .PHONY: api-docs
 API_DOCS_PATH = ./docs/api-overview.md
-
 api-docs: crd-ref-docs ## Creates API docs using https://github.com/elastic/crd-ref-docs
 	mkdir -p docs
 	$(CRD_REF_DOCS) --source-path ./ --output-path $(API_DOCS_PATH) --renderer markdown --config ./crd-ref-docs.config.yaml
-	@# Remove unwanted .io links and clean up blank lines
+	@# Combined command to remove .io links, ensure a trailing newline, and collapse multiple blank lines.
 	@sed -i.bak -e '/\.io\/[^v][^1].*)/d' -e '/^$$/N;/^\n$$/D' $(API_DOCS_PATH)
+	@# BSD sed doesn't generate trailing newlines, so no need to remove them.
+	@if [ "$(shell uname)" != "Darwin" ]; then \
+		sed -i.bak -e '$${/^$$/d}' -e '$${N;/^\n$$/d}' $(API_DOCS_PATH); \
+	fi
 	rm -f $(API_DOCS_PATH).bak
-
 
 .PHONY: bundle
 bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata, then validate generated files.
