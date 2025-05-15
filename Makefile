@@ -222,6 +222,7 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
 YQ ?= $(LOCALBIN)/yq
+CRD_REF_DOCS ?= $(LOCALBIN)/crd-ref-docs
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.4.3
@@ -229,6 +230,7 @@ CONTROLLER_TOOLS_VERSION ?= v0.17.2
 ENVTEST_VERSION ?= release-0.19
 GOLANGCI_LINT_VERSION ?= v1.64.4
 YQ_VERSION ?= v4.45.3
+CRD_REF_DOCS_VERSION = v0.1.0
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -254,6 +256,11 @@ $(GOLANGCI_LINT): $(LOCALBIN)
 yq: $(YQ) ## Download yq locally if necessary.
 $(YQ): $(LOCALBIN)
 	$(call go-install-tool,$(YQ),github.com/mikefarah/yq/v4,$(YQ_VERSION))
+
+.PHONY: crd-ref-docs
+crd-ref-docs: $(CRD_REF_DOCS) ## Download crd-ref-docs locally if necessary.
+$(CRD_REF_DOCS): $(LOCALBIN)
+	$(call go-install-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs,$(CRD_REF_DOCS_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
@@ -287,6 +294,17 @@ else
 OPERATOR_SDK = $(shell which operator-sdk)
 endif
 endif
+
+.PHONY: api-docs
+API_DOCS_PATH = ./docs/api-overview.md
+
+api-docs: crd-ref-docs ## Creates API docs using https://github.com/elastic/crd-ref-docs
+	mkdir -p docs
+	$(CRD_REF_DOCS) --source-path ./ --output-path $(API_DOCS_PATH) --renderer markdown --config ./crd-ref-docs.config.yaml
+	@# Remove unwanted .io links and clean up blank lines
+	@sed -i.bak -e '/\.io\/[^v][^1].*)/d' -e '/^$$/N;/^\n$$/D' $(API_DOCS_PATH)
+	rm -f $(API_DOCS_PATH).bak
+
 
 .PHONY: bundle
 bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata, then validate generated files.

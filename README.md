@@ -20,7 +20,7 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
     - [Building the Operator](#building-the-operator)
     - [Deployment](#deployment)
 - [Running E2E Tests](#running-e2e-tests)
-
+- [API Overview](#api-overview)
 
 ## Quick Start
 
@@ -132,3 +132,7 @@ The operator includes end-to-end (E2E) tests to verify the complete functionalit
      ```
 
 The make target will handle prerequisites including deploying ollama server.
+
+## API Overview
+
+Please refer to [api documentation](docs/api-overview.md)

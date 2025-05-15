@@ -43,3 +43,12 @@ repos:
         language: system
         pass_filenames: false
         require_serial: true
+
+-   repo: local
+    hooks:
+      - id: generate-api-docs
+        name: Generate API Docs
+        entry: make api-docs
+        language: system
+        pass_filenames: false
+        require_serial: true
