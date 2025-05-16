@@ -62,13 +62,9 @@ spec:
         value: "meta-llama/Llama-3.2-3B-Instruct"
       - name: OLLAMA_URL
         value: "http://ollama-server-service.default.svc.cluster.local:11434"
-    podOverrides:
-      volumes:
-      - name: llama-storage
-        emptyDir: {}
-      volumeMounts:
-      - name: llama-storage
-        mountPath: "/root/.llama"
+    storage:
+      size: "20Gi"
+      mountPath: "/home/lls/.lls"
 ```
 3. Verify the server pod is running in the user define namespace.
 

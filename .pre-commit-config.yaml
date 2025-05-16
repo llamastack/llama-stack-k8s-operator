@@ -46,6 +46,15 @@ repos:
 
 -   repo: local
     hooks:
+      - id: build-installer
+        name: Update Install Script
+        entry: make build-installer
+        language: system
+        pass_filenames: false
+        require_serial: true
+
+-   repo: local
+    hooks:
       - id: generate-api-docs
         name: Generate API Docs
         entry: make api-docs
