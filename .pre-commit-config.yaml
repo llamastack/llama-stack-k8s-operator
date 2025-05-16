@@ -39,7 +39,7 @@ repos:
     hooks:
       - id: generate-manifests
         name: Generate Manifests
-        entry: make generate manifests
+        entry: make generate manifests build-installer
         language: system
         pass_filenames: false
         require_serial: true

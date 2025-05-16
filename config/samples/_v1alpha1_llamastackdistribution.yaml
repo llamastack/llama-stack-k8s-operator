@@ -1,4 +1,4 @@
-apiVersion: llama.x-k8s.io/v1alpha1
+apiVersion: llamastack.io/v1alpha1
 kind: LlamaStackDistribution
 metadata:
   name: llamastackdistribution-sample
