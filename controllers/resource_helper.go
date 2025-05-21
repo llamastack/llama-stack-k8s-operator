@@ -30,10 +30,11 @@ var imageMap = llamav1alpha1.ImageMap
 // buildContainerSpec creates the container specification.
 func buildContainerSpec(instance *llamav1alpha1.LlamaStackDistribution, image string) corev1.Container {
 	container := corev1.Container{
-		Name:      llamav1alpha1.DefaultContainerName,
-		Image:     image,
-		Resources: instance.Spec.Server.ContainerSpec.Resources,
-		Env:       instance.Spec.Server.ContainerSpec.Env,
+		Name:            llamav1alpha1.DefaultContainerName,
+		Image:           image,
+		Resources:       instance.Spec.Server.ContainerSpec.Resources,
+		Env:             instance.Spec.Server.ContainerSpec.Env,
+		ImagePullPolicy: corev1.PullAlways,
 	}
 
 	if instance.Spec.Server.ContainerSpec.Name != "" {
