@@ -1,0 +1,9 @@
+{
+  "coverage": {
+    "global": {
+      "statements": 10,
+      "lines": 10,
+      "branches": 10
+    }
+  }
+}
