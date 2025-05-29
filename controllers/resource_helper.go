@@ -21,7 +21,12 @@ import (
 	"fmt"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 )
 
 // Define a map that translates user-friendly names to actual image references.
@@ -123,4 +128,158 @@ func (r *LlamaStackDistributionReconciler) resolveImage(instance *llamav1alpha1.
 	}
 
 	return instance.Spec.Server.Distribution.Image, nil
+}
+
+func BuildDeployment(instance *llamav1alpha1.LlamaStackDistribution, podSpec corev1.PodSpec) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      instance.Name,
+			Namespace: instance.Namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &instance.Spec.Replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
+				},
+				Spec: podSpec,
+			},
+		},
+	}
+}
+
+func BuildPVC(instance *llamav1alpha1.LlamaStackDistribution) *corev1.PersistentVolumeClaim {
+	// Use default size if none specified
+	size := instance.Spec.Server.Storage.Size
+	if size == nil {
+		size = &llamav1alpha1.DefaultStorageSize
+	}
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      instance.Name + "-pvc",
+			Namespace: instance.Namespace,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: *size,
+				},
+			},
+		},
+	}
+
+	return pvc
+}
+
+func BuildService(instance *llamav1alpha1.LlamaStackDistribution) *corev1.Service {
+	// Use the container's port (defaulted to 8321 if unset)
+	port := instance.Spec.Server.ContainerSpec.Port
+	if port == 0 {
+		port = llamav1alpha1.DefaultServerPort
+	}
+
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      instance.Name + "-service",
+			Namespace: instance.Namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
+			Ports: []corev1.ServicePort{{
+				Name: llamav1alpha1.DefaultServicePortName,
+				Port: port,
+				TargetPort: intstr.IntOrString{
+					IntVal: port,
+				},
+			}},
+			Type: corev1.ServiceTypeClusterIP,
+		},
+	}
+}
+
+func BuildNetworkPolicy(instance *llamav1alpha1.LlamaStackDistribution, operatorNamespace string) *networkingv1.NetworkPolicy {
+	// Use the container's port (defaulted to 8321 if unset)
+	port := instance.Spec.Server.ContainerSpec.Port
+	if port == 0 {
+		port = llamav1alpha1.DefaultServerPort
+	}
+
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      instance.Name + "-network-policy",
+			Namespace: instance.Namespace,
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
+				},
+			},
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeIngress,
+			},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"app.kubernetes.io/part-of": llamav1alpha1.DefaultContainerName,
+								},
+							},
+							NamespaceSelector: &metav1.LabelSelector{}, // Empty namespaceSelector to match all namespaces
+						},
+					},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{
+							Protocol: (*corev1.Protocol)(ptr.To("TCP")),
+							Port: &intstr.IntOrString{
+								IntVal: port,
+							},
+						},
+					},
+				},
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{}, // Empty podSelector to match all pods
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": operatorNamespace,
+								},
+							},
+						},
+					},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{
+							Protocol: (*corev1.Protocol)(ptr.To("TCP")),
+							Port: &intstr.IntOrString{
+								IntVal: port,
+							},
+						},
+					},
+				},
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{}, // Empty podSelector to match all pods
+						},
+					},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{
+							Protocol: (*corev1.Protocol)(ptr.To("TCP")),
+							Port: &intstr.IntOrString{
+								IntVal: port,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
 }
