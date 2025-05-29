@@ -428,7 +428,13 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 	return nil
 }
 
-func BuildNetworkPolicy(instance *llamav1alpha1.LlamaStackDistribution, port int32, operatorNamespace string) *networkingv1.NetworkPolicy {
+func BuildNetworkPolicy(instance *llamav1alpha1.LlamaStackDistribution, operatorNamespace string) *networkingv1.NetworkPolicy {
+	// Use the container's port (defaulted to 8321 if unset)
+	port := instance.Spec.Server.ContainerSpec.Port
+	if port == 0 {
+		port = llamav1alpha1.DefaultServerPort
+	}
+
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name + "-network-policy",
@@ -506,24 +512,18 @@ func BuildNetworkPolicy(instance *llamav1alpha1.LlamaStackDistribution, port int
 
 // reconcileNetworkPolicy manages the NetworkPolicy for the LlamaStack server.
 func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	// Use the container's port (defaulted to 8321 if unset)
-	port := instance.Spec.Server.ContainerSpec.Port
-	if port == 0 {
-		port = llamav1alpha1.DefaultServerPort
-	}
-
 	// get operator namespace
 	operatorNamespace, err := deploy.GetOperatorNamespace()
 	if err != nil {
 		return fmt.Errorf("failed to get operator namespace: %w", err)
 	}
 
+	networkPolicy := BuildNetworkPolicy(instance, operatorNamespace)
+
 	// If feature is disabled, delete the NetworkPolicy if it exists
 	if !r.EnableNetworkPolicy {
 		return deploy.HandleDisabledNetworkPolicy(ctx, r.Client, networkPolicy, r.Log)
 	}
-
-	networkPolicy := BuildNetworkPolicy(instance, port, operatorNamespace)
 
 	return deploy.ApplyNetworkPolicy(ctx, r.Client, r.Scheme, instance, networkPolicy, r.Log)
 }
