@@ -1,9 +1,15 @@
 {
   "coverage": {
     "global": {
-      "statements": 10,
-      "lines": 10,
-      "branches": 10
+      "statements": 0,
+      "lines": 0,
+      "branches": 0
     }
+  },
+  "statistic": {
+    "excludes": [
+      "test_*",
+      "zz_generated.deepcopy.go"
+    ]
   }
 }

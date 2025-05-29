@@ -17,20 +17,22 @@ jobs:
         with:
           go-version: '1.21'
 
+      - name: Set up limgo
+        uses: GoTestTools/limgo-action@v1.0.2
+        with:
+          version: "v1.0.0"
+          install-only: true
+
       - name: Run tests
         run: |
           make test
-
-      - name: Run test coverage check
-        uses: GoTestTools/limgo-action@v1.0.0
-        with:
-          version: "v1.0.0"
-          args: "-coverfile=cover.out -outfile=covcheck.tmp -config=.limgo.json -v=3"
+          limgo -coverfile=cover.out -outfmt=md -outfile=/tmp/covcheck.md -v=4 -config=.limgo.json
+          cat /tmp/covcheck.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload test coverage results
         uses: actions/upload-artifact@v4
         if: success() || failure()
         with:
           name: test-coverage-results
-          path: covcheck.tmp
+          path: /tmp/covcheck.md
           if-no-files-found: error
