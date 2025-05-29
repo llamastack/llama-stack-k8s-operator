@@ -130,6 +130,7 @@ func (r *LlamaStackDistributionReconciler) resolveImage(instance *llamav1alpha1.
 	return instance.Spec.Server.Distribution.Image, nil
 }
 
+// BuildDeployment constructs a Deployment for the given LlamaStackDistribution instance.
 func BuildDeployment(instance *llamav1alpha1.LlamaStackDistribution, podSpec corev1.PodSpec) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -151,6 +152,7 @@ func BuildDeployment(instance *llamav1alpha1.LlamaStackDistribution, podSpec cor
 	}
 }
 
+// BuildPVC constructs a PersistentVolumeClaim for the given LlamaStackDistribution.
 func BuildPVC(instance *llamav1alpha1.LlamaStackDistribution) *corev1.PersistentVolumeClaim {
 	// Use default size if none specified
 	size := instance.Spec.Server.Storage.Size
@@ -176,6 +178,7 @@ func BuildPVC(instance *llamav1alpha1.LlamaStackDistribution) *corev1.Persistent
 	return pvc
 }
 
+// BuildService constructs a ClusterIP Service for the given LlamaStackDistribution.
 func BuildService(instance *llamav1alpha1.LlamaStackDistribution) *corev1.Service {
 	// Use the container's port (defaulted to 8321 if unset)
 	port := instance.Spec.Server.ContainerSpec.Port
@@ -202,6 +205,9 @@ func BuildService(instance *llamav1alpha1.LlamaStackDistribution) *corev1.Servic
 	}
 }
 
+// BaseNetworkPolicy returns a NetworkPolicy object with only metadata populated:
+// name "<instance.Name>-network-policy" and the instance’s namespace.
+// Its Spec is left nil so it can be used for deletion or as the base for BuildNetworkPolicy.
 func BaseNetworkPolicy(instance *llamav1alpha1.LlamaStackDistribution) *networkingv1.NetworkPolicy {
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -211,6 +217,10 @@ func BaseNetworkPolicy(instance *llamav1alpha1.LlamaStackDistribution) *networki
 	}
 }
 
+// BuildNetworkPolicy constructs a full NetworkPolicy for the given LlamaStackDistribution.
+// It populates Spec to allow ingress on the instance’s port (or DefaultServerPort),
+// from (1) pods labeled with DefaultContainerName, (2) any pod in operatorNamespace,
+// and (3) any pod in any namespace.
 func BuildNetworkPolicy(instance *llamav1alpha1.LlamaStackDistribution, operatorNamespace string) *networkingv1.NetworkPolicy {
 	// Use the container's port (defaulted to 8321 if unset)
 	port := instance.Spec.Server.ContainerSpec.Port
