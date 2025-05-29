@@ -357,6 +357,13 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 
 // reconcileNetworkPolicy manages the NetworkPolicy for the LlamaStack server.
 func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	dummyPolicy := BaseNetworkPolicy(instance)
+
+	// If feature is disabled, delete the NetworkPolicy if it exists
+	if !r.EnableNetworkPolicy {
+		return deploy.HandleDisabledNetworkPolicy(ctx, r.Client, dummyPolicy, r.Log)
+	}
+
 	// get operator namespace
 	operatorNamespace, err := deploy.GetOperatorNamespace()
 	if err != nil {
@@ -364,11 +371,6 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 	}
 
 	networkPolicy := BuildNetworkPolicy(instance, operatorNamespace)
-
-	// If feature is disabled, delete the NetworkPolicy if it exists
-	if !r.EnableNetworkPolicy {
-		return deploy.HandleDisabledNetworkPolicy(ctx, r.Client, networkPolicy, r.Log)
-	}
 
 	return deploy.ApplyNetworkPolicy(ctx, r.Client, r.Scheme, instance, networkPolicy, r.Log)
 }

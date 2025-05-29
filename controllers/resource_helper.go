@@ -202,84 +202,89 @@ func BuildService(instance *llamav1alpha1.LlamaStackDistribution) *corev1.Servic
 	}
 }
 
+func BaseNetworkPolicy(instance *llamav1alpha1.LlamaStackDistribution) *networkingv1.NetworkPolicy {
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      instance.Name + "-network-policy",
+			Namespace: instance.Namespace,
+		},
+	}
+}
+
 func BuildNetworkPolicy(instance *llamav1alpha1.LlamaStackDistribution, operatorNamespace string) *networkingv1.NetworkPolicy {
 	// Use the container's port (defaulted to 8321 if unset)
 	port := instance.Spec.Server.ContainerSpec.Port
 	if port == 0 {
 		port = llamav1alpha1.DefaultServerPort
 	}
-
-	return &networkingv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      instance.Name + "-network-policy",
-			Namespace: instance.Namespace,
+	np := BaseNetworkPolicy(instance)
+	np.Spec = networkingv1.NetworkPolicySpec{
+		PodSelector: metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
+			},
 		},
-		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
-				},
-			},
-			PolicyTypes: []networkingv1.PolicyType{
-				networkingv1.PolicyTypeIngress,
-			},
-			Ingress: []networkingv1.NetworkPolicyIngressRule{
-				{
-					From: []networkingv1.NetworkPolicyPeer{
-						{
-							PodSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"app.kubernetes.io/part-of": llamav1alpha1.DefaultContainerName,
-								},
+		PolicyTypes: []networkingv1.PolicyType{
+			networkingv1.PolicyTypeIngress,
+		},
+		Ingress: []networkingv1.NetworkPolicyIngressRule{
+			{
+				From: []networkingv1.NetworkPolicyPeer{
+					{
+						PodSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"app.kubernetes.io/part-of": llamav1alpha1.DefaultContainerName,
 							},
-							NamespaceSelector: &metav1.LabelSelector{}, // Empty namespaceSelector to match all namespaces
 						},
+						NamespaceSelector: &metav1.LabelSelector{}, // Empty namespaceSelector to match all namespaces
 					},
-					Ports: []networkingv1.NetworkPolicyPort{
-						{
-							Protocol: (*corev1.Protocol)(ptr.To("TCP")),
-							Port: &intstr.IntOrString{
-								IntVal: port,
-							},
+				},
+				Ports: []networkingv1.NetworkPolicyPort{
+					{
+						Protocol: (*corev1.Protocol)(ptr.To("TCP")),
+						Port: &intstr.IntOrString{
+							IntVal: port,
 						},
 					},
 				},
-				{
-					From: []networkingv1.NetworkPolicyPeer{
-						{
-							PodSelector: &metav1.LabelSelector{}, // Empty podSelector to match all pods
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"kubernetes.io/metadata.name": operatorNamespace,
-								},
+			},
+			{
+				From: []networkingv1.NetworkPolicyPeer{
+					{
+						PodSelector: &metav1.LabelSelector{}, // Empty podSelector to match all pods
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"kubernetes.io/metadata.name": operatorNamespace,
 							},
 						},
 					},
-					Ports: []networkingv1.NetworkPolicyPort{
-						{
-							Protocol: (*corev1.Protocol)(ptr.To("TCP")),
-							Port: &intstr.IntOrString{
-								IntVal: port,
-							},
+				},
+				Ports: []networkingv1.NetworkPolicyPort{
+					{
+						Protocol: (*corev1.Protocol)(ptr.To("TCP")),
+						Port: &intstr.IntOrString{
+							IntVal: port,
 						},
 					},
 				},
-				{
-					From: []networkingv1.NetworkPolicyPeer{
-						{
-							PodSelector: &metav1.LabelSelector{}, // Empty podSelector to match all pods
-						},
+			},
+			{
+				From: []networkingv1.NetworkPolicyPeer{
+					{
+						PodSelector: &metav1.LabelSelector{}, // Empty podSelector to match all pods
 					},
-					Ports: []networkingv1.NetworkPolicyPort{
-						{
-							Protocol: (*corev1.Protocol)(ptr.To("TCP")),
-							Port: &intstr.IntOrString{
-								IntVal: port,
-							},
+				},
+				Ports: []networkingv1.NetworkPolicyPort{
+					{
+						Protocol: (*corev1.Protocol)(ptr.To("TCP")),
+						Port: &intstr.IntOrString{
+							IntVal: port,
 						},
 					},
 				},
 			},
 		},
 	}
+
+	return np
 }
