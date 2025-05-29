@@ -149,7 +149,7 @@ func (r *LlamaStackDistributionReconciler) SetupWithManager(mgr ctrl.Manager) er
 		Complete(r)
 }
 
-func (r *LlamaStackDistributionReconciler) BuildPVC(instance *llamav1alpha1.LlamaStackDistribution) (*corev1.PersistentVolumeClaim, error) {
+func BuildPVC(instance *llamav1alpha1.LlamaStackDistribution) *corev1.PersistentVolumeClaim {
 	// Use default size if none specified
 	size := instance.Spec.Server.Storage.Size
 	if size == nil {
@@ -170,25 +170,21 @@ func (r *LlamaStackDistributionReconciler) BuildPVC(instance *llamav1alpha1.Llam
 			},
 		},
 	}
-
-	if err := ctrl.SetControllerReference(instance, pvc, r.Scheme); err != nil {
-		return nil, fmt.Errorf("failed to set controller reference: %w", err)
-	}
-
-	return pvc, nil
+	return pvc
 }
 
 // reconcilePVC creates or updates the PVC for the LlamaStack server.
 func (r *LlamaStackDistributionReconciler) reconcilePVC(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
 	logger := log.FromContext(ctx)
 
-	pvc, err := r.BuildPVC(instance)
-	if err != nil {
-		return err
+	pvc := BuildPVC(instance)
+
+	if err := ctrl.SetControllerReference(instance, pvc, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set controller reference: %w", err)
 	}
 
 	found := &corev1.PersistentVolumeClaim{}
-	err = r.Get(ctx, types.NamespacedName{Name: pvc.Name, Namespace: pvc.Namespace}, found)
+	err := r.Get(ctx, types.NamespacedName{Name: pvc.Name, Namespace: pvc.Namespace}, found)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			logger.Info("Creating PVC", "pvc", pvc.Name)
