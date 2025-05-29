@@ -196,8 +196,25 @@ func (r *LlamaStackDistributionReconciler) reconcilePVC(ctx context.Context, ins
 	return nil
 }
 
-func BuildDeployment(instance *llamav1alpha1.LlamaStackDistribution) *appsv1.Deployment {
-
+func BuildDeployment(instance *llamav1alpha1.LlamaStackDistribution, podSpec corev1.PodSpec) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      instance.Name,
+			Namespace: instance.Namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &instance.Spec.Replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
+				},
+				Spec: podSpec,
+			},
+		},
+	}
 }
 
 // reconcileDeployment manages the Deployment for the LlamaStack server.
@@ -222,37 +239,19 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 	podSpec := configurePodStorage(instance, container)
 
 	// Create deployment object
-	deployment := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      instance.Name,
-			Namespace: instance.Namespace,
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: &instance.Spec.Replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
-				},
-				Spec: podSpec,
-			},
-		},
-	}
+	deployment := BuildDeployment(instance, podSpec)
 
 	return deploy.ApplyDeployment(ctx, r.Client, r.Scheme, instance, deployment, logger)
 }
 
-// reconcileService manages the Service if ports are defined.
-func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+func BuildService(instance *llamav1alpha1.LlamaStackDistribution) *corev1.Service {
 	// Use the container's port (defaulted to 8321 if unset)
 	port := instance.Spec.Server.ContainerSpec.Port
 	if port == 0 {
 		port = llamav1alpha1.DefaultServerPort
 	}
 
-	service := &corev1.Service{
+	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name + "-service",
 			Namespace: instance.Namespace,
@@ -269,7 +268,11 @@ func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context,
 			Type: corev1.ServiceTypeClusterIP,
 		},
 	}
+}
 
+// reconcileService manages the Service if ports are defined.
+func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	service := BuildService(instance)
 	return deploy.ApplyService(ctx, r.Client, r.Scheme, instance, service, r.Log)
 }
 
@@ -425,20 +428,84 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 	return nil
 }
 
-// reconcileNetworkPolicy manages the NetworkPolicy for the LlamaStack server.
-func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	networkPolicy := &networkingv1.NetworkPolicy{
+func BuildNetworkPolicy(instance *llamav1alpha1.LlamaStackDistribution, port int32, operatorNamespace string) *networkingv1.NetworkPolicy {
+	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name + "-network-policy",
 			Namespace: instance.Namespace,
 		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
+				},
+			},
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeIngress,
+			},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"app.kubernetes.io/part-of": llamav1alpha1.DefaultContainerName,
+								},
+							},
+							NamespaceSelector: &metav1.LabelSelector{}, // Empty namespaceSelector to match all namespaces
+						},
+					},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{
+							Protocol: (*corev1.Protocol)(ptr.To("TCP")),
+							Port: &intstr.IntOrString{
+								IntVal: port,
+							},
+						},
+					},
+				},
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{}, // Empty podSelector to match all pods
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": operatorNamespace,
+								},
+							},
+						},
+					},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{
+							Protocol: (*corev1.Protocol)(ptr.To("TCP")),
+							Port: &intstr.IntOrString{
+								IntVal: port,
+							},
+						},
+					},
+				},
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{}, // Empty podSelector to match all pods
+						},
+					},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{
+							Protocol: (*corev1.Protocol)(ptr.To("TCP")),
+							Port: &intstr.IntOrString{
+								IntVal: port,
+							},
+						},
+					},
+				},
+			},
+		},
 	}
+}
 
-	// If feature is disabled, delete the NetworkPolicy if it exists
-	if !r.EnableNetworkPolicy {
-		return deploy.HandleDisabledNetworkPolicy(ctx, r.Client, networkPolicy, r.Log)
-	}
-
+// reconcileNetworkPolicy manages the NetworkPolicy for the LlamaStack server.
+func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
 	// Use the container's port (defaulted to 8321 if unset)
 	port := instance.Spec.Server.ContainerSpec.Port
 	if port == 0 {
@@ -451,73 +518,12 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 		return fmt.Errorf("failed to get operator namespace: %w", err)
 	}
 
-	networkPolicy.Spec = networkingv1.NetworkPolicySpec{
-		PodSelector: metav1.LabelSelector{
-			MatchLabels: map[string]string{
-				llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
-			},
-		},
-		PolicyTypes: []networkingv1.PolicyType{
-			networkingv1.PolicyTypeIngress,
-		},
-		Ingress: []networkingv1.NetworkPolicyIngressRule{
-			{
-				From: []networkingv1.NetworkPolicyPeer{
-					{
-						PodSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"app.kubernetes.io/part-of": llamav1alpha1.DefaultContainerName,
-							},
-						},
-						NamespaceSelector: &metav1.LabelSelector{}, // Empty namespaceSelector to match all namespaces
-					},
-				},
-				Ports: []networkingv1.NetworkPolicyPort{
-					{
-						Protocol: (*corev1.Protocol)(ptr.To("TCP")),
-						Port: &intstr.IntOrString{
-							IntVal: port,
-						},
-					},
-				},
-			},
-			{
-				From: []networkingv1.NetworkPolicyPeer{
-					{
-						PodSelector: &metav1.LabelSelector{}, // Empty podSelector to match all pods
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"kubernetes.io/metadata.name": operatorNamespace,
-							},
-						},
-					},
-				},
-				Ports: []networkingv1.NetworkPolicyPort{
-					{
-						Protocol: (*corev1.Protocol)(ptr.To("TCP")),
-						Port: &intstr.IntOrString{
-							IntVal: port,
-						},
-					},
-				},
-			},
-			{
-				From: []networkingv1.NetworkPolicyPeer{
-					{
-						PodSelector: &metav1.LabelSelector{}, // Empty podSelector to match all pods
-					},
-				},
-				Ports: []networkingv1.NetworkPolicyPort{
-					{
-						Protocol: (*corev1.Protocol)(ptr.To("TCP")),
-						Port: &intstr.IntOrString{
-							IntVal: port,
-						},
-					},
-				},
-			},
-		},
+	// If feature is disabled, delete the NetworkPolicy if it exists
+	if !r.EnableNetworkPolicy {
+		return deploy.HandleDisabledNetworkPolicy(ctx, r.Client, networkPolicy, r.Log)
 	}
+
+	networkPolicy := BuildNetworkPolicy(instance, port, operatorNamespace)
 
 	return deploy.ApplyNetworkPolicy(ctx, r.Client, r.Scheme, instance, networkPolicy, r.Log)
 }
