@@ -196,6 +196,10 @@ func (r *LlamaStackDistributionReconciler) reconcilePVC(ctx context.Context, ins
 	return nil
 }
 
+func BuildDeployment(instance *llamav1alpha1.LlamaStackDistribution) *appsv1.Deployment {
+
+}
+
 // reconcileDeployment manages the Deployment for the LlamaStack server.
 func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
 	logger := log.FromContext(ctx)
