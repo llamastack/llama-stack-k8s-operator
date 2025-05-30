@@ -26,7 +26,7 @@ jobs:
       - name: Run tests
         run: |
           make test
-          limgo -coverfile=cover.out -outfmt=md -outfile=/tmp/covcheck.md -v=4 -config=.limgo.json
+          limgo -coverfile=cover.out -outfmt=md -outfile=/tmp/covcheck.md -v=3 -config=.limgo.json
           cat /tmp/covcheck.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload test coverage results
