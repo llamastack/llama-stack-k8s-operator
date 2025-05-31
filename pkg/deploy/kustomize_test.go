@@ -1,6 +1,7 @@
 package deploy_test
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -17,7 +18,7 @@ func TestRenderKustomize(t *testing.T) {
 	// files on disk.
 	memFs := filesys.MakeFsInMemory()
 
-	// Set up a minimal Kustomize base manifest
+	// --- Set up a minimal Kustomize base manifest ---
 	baseDir := "manifests/base"
 	require.NoError(t, memFs.MkdirAll(baseDir))
 	require.NoError(t, memFs.WriteFile(
@@ -26,40 +27,46 @@ func TestRenderKustomize(t *testing.T) {
 - deployment.yaml
 `),
 	))
+
+	expKind := "Deployment"
+	expName := "foo"
 	require.NoError(t, memFs.WriteFile(
 		filepath.Join(baseDir, "deployment.yaml"),
-		[]byte(`apiVersion: apps/v1
-kind: Deployment
+		fmt.Appendf(nil, `apiVersion: apps/v1
+kind: %s
 metadata:
-  name: foo
+  name: %s
 spec:
   replicas: 1
-`),
+`, expKind, expName),
 	))
 
-	// Define an overlay that patches the base
+	// --- Define an overlay that patches the base ---
 	overlayDir := "manifests/overlay"
 	require.NoError(t, memFs.MkdirAll(overlayDir))
+
 	require.NoError(t, memFs.WriteFile(
 		filepath.Join(overlayDir, "kustomization.yaml"),
-		[]byte(`resources:
+		fmt.Appendf(nil, `resources:
 - ../base
 patches:
 - path: replica-patch.yaml
   target:
-    kind: Deployment
-    name: foo
-`),
+    kind: %s
+    name: %s
+`, expKind, expName),
 	))
+
+	expReplicas := 3
 	require.NoError(t, memFs.WriteFile(
 		filepath.Join(overlayDir, "replica-patch.yaml"),
-		[]byte(`apiVersion: apps/v1
-kind: Deployment
+		fmt.Appendf(nil, `apiVersion: apps/v1
+kind: %s
 metadata:
-  name: foo
+  name: %s
 spec:
-  replicas: 3
-`),
+  replicas: %d
+`, expKind, expName, expReplicas),
 	))
 
 	// --- Build and render the kubernetes api objects ---
@@ -73,12 +80,12 @@ spec:
 
 	// validate deployment
 	u := objs[0]
-	require.Equal(t, "Deployment", u.GetKind())
-	require.Equal(t, "foo", u.GetName())
+	require.Equal(t, expKind, u.GetKind())
+	require.Equal(t, expName, u.GetName())
 
-	// confirm that the patch changed replicas to 3
+	// confirm the patch changed replicas to our expected replicas
 	rep, found, err := unstructured.NestedInt64(u.Object, "spec", "replicas")
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, int64(3), rep)
+	require.Equal(t, int64(expReplicas), rep)
 }
