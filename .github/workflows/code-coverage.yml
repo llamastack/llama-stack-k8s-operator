@@ -26,6 +26,9 @@ jobs:
       - name: Run tests
         run: |
           make test
+
+      - name: Gather and calculate test coverage
+        run: |
           limgo -coverfile=cover.out -outfmt=md -outfile=/tmp/covcheck.md -v=3 -config=.limgo.json
           cat /tmp/covcheck.md >> $GITHUB_STEP_SUMMARY
 
