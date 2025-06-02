@@ -1,4 +1,4 @@
-name: Unit and Functional Test Code Coverage
+name: Tests Code Coverage
 
 on:
   pull_request:
@@ -29,7 +29,7 @@ jobs:
 
       - name: Gather and calculate test coverage
         run: |
-          limgo -coverfile=cover.out -outfmt=md -outfile=/tmp/covcheck.md -v=3 -config=.limgo.json
+          limgo -coverfile=cover.out -outfmt=md -outfile=/tmp/covcheck.md -v=4 -config=.limgo.json
           cat /tmp/covcheck.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload test coverage results
