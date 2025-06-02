@@ -49,7 +49,6 @@ var DefaultStorageSize = resource.MustParse("10Gi")
 type DistributionType struct {
 	// Name is the distribution name that maps to supported distributions.
 	// +optional
-	// +kubebuilder:validation:Enum=bedrock;cerebras;ci-tests;dev;dell;experimental-post-training;fireworks;groq;hf-endpoint;hf-serverless;meta-reference-gpu;nvidia;ollama;open-benchmark;passthrough;remote-vllm;sambanova;tgi;together;verification;vllm-gpu;watsonx
 	Name string `json:"name,omitempty"`
 	// Image is the direct container image reference to use
 	// +optional
@@ -105,9 +104,9 @@ type ProviderInfo struct {
 
 // DistributionConfig represents the configuration information from the providers endpoint.
 type DistributionConfig struct {
-		// ActiveDistribution shows which distribution is currently being used
-	ActiveDistribution string `json:"activeDistribution,omitempty"`
-	Providers []ProviderInfo `json:"providers,omitempty"`
+	// ActiveDistribution shows which distribution is currently being used
+	ActiveDistribution string         `json:"activeDistribution,omitempty"`
+	Providers          []ProviderInfo `json:"providers,omitempty"`
 	// AvailableDistributions lists all available distributions and their images
 	AvailableDistributions map[string]string `json:"availableDistributions,omitempty"`
 }

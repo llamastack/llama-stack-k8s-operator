@@ -29,6 +29,7 @@ import (
 
 	"github.com/go-logr/logr"
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/featureflags"
 	"gopkg.in/yaml.v3"
@@ -46,17 +47,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-const (
-	defaultContainerName   = "llama-stack"
-	defaultPort            = 8321 // Matches the QuickStart guide
-	defaultServicePortName = "http"
-	defaultLabelKey        = "app"
-	defaultLabelValue      = "llama-stack"
-)
-
-// Define a map that translates user-friendly names to actual image references.
-var imageMap = llamav1alpha1.GetAvailableDistributions()
-
 // LlamaStackDistributionReconciler reconciles a LlamaStack object.
 type LlamaStackDistributionReconciler struct {
 	client.Client
@@ -64,6 +54,8 @@ type LlamaStackDistributionReconciler struct {
 	Log    logr.Logger
 	// Feature flags
 	EnableNetworkPolicy bool
+	// Cluster info
+	ClusterInfo *cluster.ClusterInfo
 }
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -212,17 +204,9 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 	}
 
 	// Get the image either from the map or direct reference
-	var resolvedImage string
-	switch {
-	case instance.Spec.Server.Distribution.Name != "":
-		if !llamav1alpha1.ValidateDistribution(instance.Spec.Server.Distribution.Name) {
-			return fmt.Errorf("failed to validate distribution name: %s", instance.Spec.Server.Distribution.Name)
-		}
-		resolvedImage = llamav1alpha1.GetDistributionImage(instance.Spec.Server.Distribution.Name)
-	case instance.Spec.Server.Distribution.Image != "":
-		resolvedImage = instance.Spec.Server.Distribution.Image
-	default:
-		return errors.New("failed to validate distribution: either distribution.name or distribution.image must be set")
+	resolvedImage, err := r.resolveImage(instance.Spec.Server.Distribution)
+	if err != nil {
+		return err
 	}
 
 	// Build container spec
@@ -371,7 +355,7 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 	deploymentReady := err == nil && deployment.Status.ReadyReplicas == expectedReplicas
 
 	// Update available distributions and active distribution
-	instance.Status.DistributionConfig.AvailableDistributions = llamav1alpha1.GetAvailableDistributions()
+	instance.Status.DistributionConfig.AvailableDistributions = r.ClusterInfo.DistributionImages
 	if instance.Spec.Server.Distribution.Name != "" {
 		instance.Status.DistributionConfig.ActiveDistribution = instance.Spec.Server.Distribution.Name
 	} else if instance.Spec.Server.Distribution.Image != "" {
@@ -541,7 +525,8 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 }
 
 // NewLlamaStackDistributionReconciler creates a new reconciler with default image mappings.
-func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Client, scheme *runtime.Scheme) (*LlamaStackDistributionReconciler, error) {
+func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Client, scheme *runtime.Scheme,
+	clusterInfo *cluster.ClusterInfo) (*LlamaStackDistributionReconciler, error) {
 	log := log.FromContext(ctx).WithName("controller")
 	// get operator namespace
 	operatorNamespace, err := deploy.GetOperatorNamespace()
@@ -587,14 +572,11 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 			enableNetworkPolicy = strings.ToLower(flags.EnableNetworkPolicy) == "true"
 		}
 	}
-
-	// Create reconciler
-	reconciler := &LlamaStackDistributionReconciler{
+	return &LlamaStackDistributionReconciler{
 		Client:              client,
 		Scheme:              scheme,
 		Log:                 log,
 		EnableNetworkPolicy: enableNetworkPolicy,
-	}
-
-	return reconciler, nil
+		ClusterInfo:         clusterInfo,
+	}, nil
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -21,8 +22,6 @@ import (
 
 // baseInstance returns a minimal valid LlamaStackDistribution instance.
 func baseInstance() *llamav1alpha1.LlamaStackDistribution {
-	// Set the environment variable for the test
-	llamav1alpha1.ImageMap["ollama"] = "lls/lls-ollama:1.0"
 	return &llamav1alpha1.LlamaStackDistribution{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test",
@@ -43,7 +42,42 @@ func baseInstance() *llamav1alpha1.LlamaStackDistribution {
 	}
 }
 
+// setupTestReconciler creates a test reconciler with the given instance.
+func setupTestReconciler(instance *llamav1alpha1.LlamaStackDistribution) (client.Client, *LlamaStackDistributionReconciler) {
+	scheme := runtime.NewScheme()
+	_ = llamav1alpha1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	_ = networkingv1.AddToScheme(scheme)
+
+	// Create a fake client with the instance and enable status subresource.
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(instance).
+		WithStatusSubresource(&llamav1alpha1.LlamaStackDistribution{}).
+		Build()
+
+	clusterInfo :=
+		&cluster.ClusterInfo{
+			OperatorNamespace: "default",
+			DistributionImages: map[string]string{
+				"ollama": "lls/lls-ollama:1.0",
+			},
+		}
+
+	// Create the reconciler
+	reconciler := &LlamaStackDistributionReconciler{
+		Client:      fakeClient,
+		Scheme:      scheme,
+		Log:         ctrl.Log.WithName("controllers").WithName("LlamaStackDistribution"),
+		ClusterInfo: clusterInfo,
+	}
+	return fakeClient, reconciler
+}
+
 func TestStorageConfiguration(t *testing.T) {
+	// Setup test cluster info
+
 	tests := []struct {
 		name           string
 		storage        *llamav1alpha1.StorageSpec
@@ -142,29 +176,6 @@ func TestStorageConfiguration(t *testing.T) {
 }
 
 // Helper functions for testing the LlamaStackDistribution controller.
-func setupTestReconciler(instance *llamav1alpha1.LlamaStackDistribution) (client.Client, *LlamaStackDistributionReconciler) {
-	scheme := runtime.NewScheme()
-	_ = llamav1alpha1.AddToScheme(scheme)
-	_ = appsv1.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-	_ = networkingv1.AddToScheme(scheme)
-
-	// Create a fake client with the instance and enable status subresource
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(instance).
-		WithStatusSubresource(&llamav1alpha1.LlamaStackDistribution{}).
-		Build()
-
-	// Create the reconciler
-	reconciler := &LlamaStackDistributionReconciler{
-		Client: fakeClient,
-		Scheme: scheme,
-		Log:    ctrl.Log.WithName("controllers").WithName("LlamaStackDistribution"),
-	}
-	return fakeClient, reconciler
-}
-
 func verifyVolume(t *testing.T, volumes []corev1.Volume, expectedVolume corev1.Volume) {
 	t.Helper()
 	var foundVolume *corev1.Volume

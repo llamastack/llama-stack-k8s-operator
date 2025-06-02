@@ -23,45 +23,30 @@ func TestCreationSuite(t *testing.T) {
 		t.Skip("Skipping creation test suite")
 	}
 
-	var distribution *v1alpha1.LlamaStackDistribution
+	var llsdistributionCR *v1alpha1.LlamaStackDistribution
 
 	t.Run("should create LlamaStackDistribution", func(t *testing.T) {
-		distribution = testCreateDistribution(t)
+		llsdistributionCR = testCreateDistribution(t)
 	})
 
 	t.Run("should create PVC if storage is configured", func(t *testing.T) {
-		t.Helper()
-		pvcName := distribution.Name + "-pvc"
-		pvc := &corev1.PersistentVolumeClaim{}
-		err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
-			Namespace: distribution.Namespace,
-			Name:      pvcName,
-		}, pvc)
-		if distribution.Spec.Server.Storage == nil {
-			require.Error(t, err, "PVC should not exist when storage is not configured")
-			require.True(t, k8serrors.IsNotFound(err), "Expected not found error for PVC when storage is not configured")
-		} else {
-			require.NoError(t, err, "PVC should be created when storage is configured")
-			// Check storage size
-			expectedSize := v1alpha1.DefaultStorageSize
-			if distribution.Spec.Server.Storage.Size != nil {
-				expectedSize = *distribution.Spec.Server.Storage.Size
-			}
-			actualSize := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
-			require.Equal(t, expectedSize.String(), actualSize.String(), "PVC storage size should match CR")
-		}
+		testPVCConfiguration(t, llsdistributionCR)
 	})
 
 	t.Run("should handle direct deployment updates", func(t *testing.T) {
-		testDirectDeploymentUpdates(t, distribution)
+		testDirectDeploymentUpdates(t, llsdistributionCR)
 	})
 
 	t.Run("should check health status", func(t *testing.T) {
-		testHealthStatus(t, distribution)
+		testHealthStatus(t, llsdistributionCR)
 	})
 
 	t.Run("should update deployment through CR", func(t *testing.T) {
-		testCRDeploymentUpdate(t, distribution)
+		testCRDeploymentUpdate(t, llsdistributionCR)
+	})
+
+	t.Run("should update distribution status", func(t *testing.T) {
+		testDistributionStatus(t, llsdistributionCR)
 	})
 }
 
@@ -79,10 +64,10 @@ func testCreateDistribution(t *testing.T) *v1alpha1.LlamaStackDistribution {
 	}
 
 	// Get sample CR
-	distribution := GetSampleCR(t)
-	distribution.Namespace = ns.Name
+	llsdistributionCR := GetSampleCR(t)
+	llsdistributionCR.Namespace = ns.Name
 
-	err = TestEnv.Client.Create(TestEnv.Ctx, distribution)
+	err = TestEnv.Client.Create(TestEnv.Ctx, llsdistributionCR)
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		require.NoError(t, err)
 	}
@@ -92,7 +77,7 @@ func testCreateDistribution(t *testing.T) *v1alpha1.LlamaStackDistribution {
 		Group:   "apps",
 		Version: "v1",
 		Kind:    "Deployment",
-	}, distribution.Name, ns.Name, ResourceReadyTimeout, isDeploymentReady)
+	}, llsdistributionCR.Name, ns.Name, ResourceReadyTimeout, isDeploymentReady)
 	require.NoError(t, err)
 
 	// Verify service is created
@@ -100,7 +85,7 @@ func testCreateDistribution(t *testing.T) *v1alpha1.LlamaStackDistribution {
 		Group:   "",
 		Version: "v1",
 		Kind:    "Service",
-	}, distribution.Name+"-service", ns.Name, ResourceReadyTimeout, func(u *unstructured.Unstructured) bool {
+	}, llsdistributionCR.Name+"-service", ns.Name, ResourceReadyTimeout, func(u *unstructured.Unstructured) bool {
 		// Check if the service has a valid spec and status
 		spec, specFound, _ := unstructured.NestedMap(u.Object, "spec")
 		status, statusFound, _ := unstructured.NestedMap(u.Object, "status")
@@ -108,7 +93,7 @@ func testCreateDistribution(t *testing.T) *v1alpha1.LlamaStackDistribution {
 	})
 	require.NoError(t, err)
 
-	return distribution
+	return llsdistributionCR
 }
 
 func testDirectDeploymentUpdates(t *testing.T, distribution *v1alpha1.LlamaStackDistribution) {
@@ -192,6 +177,72 @@ func testHealthStatus(t *testing.T, distribution *v1alpha1.LlamaStackDistributio
 		return updatedDistribution.Status.Ready, nil
 	})
 	require.NoError(t, err, "Failed to wait for distribution status update")
+}
+
+func testDistributionStatus(t *testing.T, llsdistributionCR *v1alpha1.LlamaStackDistribution) {
+	t.Helper()
+	// Wait for status to be updated with distribution info
+	err := wait.PollUntilContextTimeout(TestEnv.Ctx, 1*time.Minute, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
+		updatedDistribution := &v1alpha1.LlamaStackDistribution{}
+		err := TestEnv.Client.Get(ctx, client.ObjectKey{
+			Namespace: llsdistributionCR.Namespace,
+			Name:      llsdistributionCR.Name,
+		}, updatedDistribution)
+		if err != nil {
+			return false, err
+		}
+
+		// Check that distribution config is populated
+		if len(updatedDistribution.Status.DistributionConfig.AvailableDistributions) == 0 {
+			return false, nil
+		}
+
+		// Verify that the active distribution is set
+		if updatedDistribution.Status.DistributionConfig.ActiveDistribution == "" {
+			return false, nil
+		}
+
+		return true, nil
+	})
+	require.NoError(t, err, "Failed to wait for distribution status update")
+
+	// Get final state and verify
+	updatedDistribution := &v1alpha1.LlamaStackDistribution{}
+	err = TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
+		Namespace: llsdistributionCR.Namespace,
+		Name:      llsdistributionCR.Name,
+	}, updatedDistribution)
+	require.NoError(t, err)
+
+	// Verify distribution config
+	require.NotEmpty(t, updatedDistribution.Status.DistributionConfig.AvailableDistributions,
+		"Available distributions should be populated")
+	require.Equal(t, updatedDistribution.Spec.Server.Distribution.Name,
+		updatedDistribution.Status.DistributionConfig.ActiveDistribution,
+		"Active distribution should match the spec")
+}
+
+func testPVCConfiguration(t *testing.T, distribution *v1alpha1.LlamaStackDistribution) {
+	t.Helper()
+	pvcName := distribution.Name + "-pvc"
+	pvc := &corev1.PersistentVolumeClaim{}
+	err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
+		Namespace: distribution.Namespace,
+		Name:      pvcName,
+	}, pvc)
+	if distribution.Spec.Server.Storage == nil {
+		require.Error(t, err, "PVC should not exist when storage is not configured")
+		require.True(t, k8serrors.IsNotFound(err), "Expected not found error for PVC when storage is not configured")
+	} else {
+		require.NoError(t, err, "PVC should be created when storage is configured")
+		// Check storage size
+		expectedSize := v1alpha1.DefaultStorageSize
+		if distribution.Spec.Server.Storage.Size != nil {
+			expectedSize = *distribution.Spec.Server.Storage.Size
+		}
+		actualSize := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+		require.Equal(t, expectedSize.String(), actualSize.String(), "PVC storage size should match CR")
+	}
 }
 
 func isDeploymentReady(u *unstructured.Unstructured) bool {

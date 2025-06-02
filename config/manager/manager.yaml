@@ -39,38 +39,6 @@ spec:
         args:
         - --leader-elect
         image: controller:latest
-        env:
-          # Env vars are prioritized over --config
-          - name: OLLAMA_IMAGE
-            value: $(OLLAMA_IMAGE)
-          - name: HF_ENDPOINT_IMAGE
-            value: $(HF_ENDPOINT_IMAGE)
-          - name: HF_SERVERLESS_IMAGE
-            value: $(HF_SERVERLESS_IMAGE)
-          - name: BEDROCK_IMAGE
-            value: $(BEDROCK_IMAGE)
-          - name: CEREBRAS_IMAGE
-            value: $(CEREBRAS_IMAGE)
-          - name: NVIDIA_IMAGE
-            value: $(NVIDIA_IMAGE)
-          - name: OPEN_BENCHMARK_IMAGE
-            value: $(OPEN_BENCHMARK_IMAGE)
-          - name: PASSTHROUGH_IMAGE
-            value: $(PASSTHROUGH_IMAGE)
-          - name: REMOTE_VLLM_IMAGE
-            value: $(REMOTE_VLLM_IMAGE)
-          - name: SAMBANOVA_IMAGE
-            value: $(SAMBANOVA_IMAGE)
-          - name: TGI_IMAGE
-            value: $(TGI_IMAGE)
-          - name: TOGETHER_IMAGE
-            value: $(TOGETHER_IMAGE)
-          - name: VERIFICATION_IMAGE
-            value: $(VERIFICATION_IMAGE)
-          - name: VLLM_GPU_IMAGE
-            value: $(VLLM_GPU_IMAGE)
-          - name: WATSONX_IMAGE
-            value: $(WATSONX_IMAGE)
         name: manager
         securityContext:
           allowPrivilegeEscalation: false
