@@ -34,7 +34,7 @@ jobs:
 
       - name: Upload test coverage results
         uses: actions/upload-artifact@v4
-        if: success() || failure()
+        if: ${{ always() }}
         with:
           name: test-coverage-results
           path: /tmp/covcheck.md
