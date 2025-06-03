@@ -40,7 +40,7 @@ func ApplyKustomizeManifests(
 	// manages field ownership and merging of concurrent updates.
 	for _, u := range objs {
 		if err := cli.Patch(ctx, u, client.Apply, client.FieldOwner(fieldOwner)); err != nil {
-			return fmt.Errorf("patching %s/%s: %w", u.GetKind(), u.GetName(), err)
+			return fmt.Errorf("failed to patch %s/%s: %w", u.GetKind(), u.GetName(), err)
 		}
 	}
 	return nil
@@ -59,21 +59,21 @@ func RenderKustomize(
 	// Produce the composed set of resources from base and overlays.
 	resMap, err := k.Run(fs, manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("running kustomize on %q: %w", manifestPath, err)
+		return nil, fmt.Errorf("failed to run kustomize on %q: %w", manifestPath, err)
 	}
 
 	// Serialize to YAML because Kustomize's ResMap does not implement runtime.Object;
 	// YAML is a universal interchange format for the Kubernetes decoder.
 	yamlDocs, err := resMap.AsYaml()
 	if err != nil {
-		return nil, fmt.Errorf("serializing kustomize output: %w", err)
+		return nil, fmt.Errorf("failed to serialize kustomize output: %w", err)
 	}
 
 	// Convert the YAML documents into Unstructured types so the controller-runtime
 	// client can apply them generically without requiring typed structs.
 	objs, err := DecodeToUnstructured(yamlDocs)
 	if err != nil {
-		return nil, fmt.Errorf("decoding resources: %w", err)
+		return nil, fmt.Errorf("failed to decode resources: %w", err)
 	}
 	return objs, nil
 }
@@ -95,13 +95,13 @@ func DecodeToUnstructured(yamlDocs []byte) ([]*unstructured.Unstructured, error)
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return nil, fmt.Errorf("decoding YAML to Unstructured: %w", err)
+			return nil, fmt.Errorf("failed to decode YAML to Unstructured: %w", err)
 		}
 
 		// Parse apiVersion into Group and Version for setting GVK.
 		gv, err := schema.ParseGroupVersion(u.GetAPIVersion())
 		if err != nil {
-			return nil, fmt.Errorf("parsing apiVersion %q: %w", u.GetAPIVersion(), err)
+			return nil, fmt.Errorf("failed to parse apiVersion %q: %w", u.GetAPIVersion(), err)
 		}
 		u.SetGroupVersionKind(schema.GroupVersionKind{
 			Group:   gv.Group,
