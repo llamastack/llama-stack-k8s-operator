@@ -71,7 +71,7 @@ func RenderKustomize(
 
 	// Convert the YAML documents into Unstructured types so the controller-runtime
 	// client can apply them generically without requiring typed structs.
-	objs, err := DecodeToUnstructured(yamlDocs)
+	objs, err := decodeToUnstructured(yamlDocs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode resources: %w", err)
 	}
@@ -83,7 +83,7 @@ func RenderKustomize(
 // controller-runtime client. We use a streaming decoder to avoid buffering large
 // manifests in memory, and explicitly set each object's GroupVersionKind
 // for correct routing of dynamic client operations.
-func DecodeToUnstructured(yamlDocs []byte) ([]*unstructured.Unstructured, error) {
+func decodeToUnstructured(yamlDocs []byte) ([]*unstructured.Unstructured, error) {
 	reader := bytes.NewReader(yamlDocs)
 	// Streaming decoder allows incremental parsing of each document.
 	dec := yaml.NewYAMLOrJSONDecoder(reader, yamlBufferSize)
