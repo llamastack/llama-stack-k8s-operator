@@ -1,3 +1,6 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
 # Adds namespace to all resources.
 namespace: llama-stack-k8s-operator-system
 
@@ -9,14 +12,7 @@ namespace: llama-stack-k8s-operator-system
 namePrefix: llama-stack-k8s-operator-
 
 # Labels to add to all resources and selectors.
-commonLabels:
-  app.kubernetes.io/component: controller-manager
-  app.kubernetes.io/name: llama-stack-k8s-operator
 
-bases:
-- ../crd
-- ../rbac
-- ../manager
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in
 # crd/kustomization.yaml
 # - ../webhook
@@ -26,11 +22,10 @@ bases:
 #- ../prometheus
 
 configMapGenerator:
-  - name: lls-parameters
-    envs:
-      - params.env
+- envs:
+  - params.env
+  name: lls-parameters
 
-patchesStrategicMerge:
 # Use the combined patch instead of separate patches
 # - manager_combined_patch.yaml
 
@@ -45,22 +40,7 @@ patchesStrategicMerge:
 #- webhookcainjection_patch.yaml
 
 # the following config is for teaching kustomize how to do var substitution
-vars:
   # Images
-  - name: OLLAMA_IMAGE
-    objref:
-      kind: ConfigMap
-      name: lls-parameters
-      apiVersion: v1
-    fieldref:
-      fieldpath: data.OLLAMA_IMAGE
-  - name: VLLM_IMAGE
-    objref:
-      kind: ConfigMap
-      name: lls-parameters
-      apiVersion: v1
-    fieldref:
-      fieldpath: data.VLLM_IMAGE
 # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER' prefix.
 #- name: CERTIFICATE_NAMESPACE # namespace of the certificate CR
 #  objref:
@@ -90,4 +70,42 @@ vars:
 #    name: webhook-service
 
 configurations:
-  - params.yaml
+- params.yaml
+resources:
+- ../crd
+- ../rbac
+- ../manager
+labels:
+- includeSelectors: true
+  pairs:
+    app.kubernetes.io/component: controller-manager
+    app.kubernetes.io/name: llama-stack-k8s-operator
+replacements:
+- source:
+    fieldPath: data.OLLAMA_IMAGE
+    kind: ConfigMap
+    name: lls-parameters
+    version: v1
+  targets:
+  - fieldPaths:
+    - spec.template.spec.containers.0.env.0.value
+    select:
+      group: apps
+      kind: Deployment
+      name: controller-manager
+      namespace: system
+      version: v1
+- source:
+    fieldPath: data.VLLM_IMAGE
+    kind: ConfigMap
+    name: lls-parameters
+    version: v1
+  targets:
+  - fieldPaths:
+    - spec.template.spec.containers.0.env.1.value
+    select:
+      group: apps
+      kind: Deployment
+      name: controller-manager
+      namespace: system
+      version: v1
