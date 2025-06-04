@@ -73,7 +73,7 @@ spec:
 ### Prerequisites
 
 - Kubernetes cluster (v1.20 or later)
-- Go version **go1.24**
+- Go version **go1.23**
 - operator-sdk **v1.39.2** (v4 layout) or newer
 - kubectl configured to access your cluster
 - A running inference server:

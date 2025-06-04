@@ -24,3 +24,9 @@ testbin/*
 *.swo
 *~
 .golangci.mktmp.yml
+
+# Operator SDK bundle artifacts
+bundle/
+bundle.Dockerfile
+.openshift
+catalog-item

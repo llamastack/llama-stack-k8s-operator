@@ -1,4 +1,4 @@
 ## Append samples you want in your CSV to this file as resources ##
 resources:
-- _v1alpha1_llamastack.yaml
+- _v1alpha1_llamastackdistribution.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples
