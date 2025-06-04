@@ -15,9 +15,9 @@ metadata:
   labels:
     app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
-  name: llamastackdistributions.llama.x-k8s.io
+  name: llamastackdistributions.llamastack.io
 spec:
-  group: llama.x-k8s.io
+  group: llamastack.io
   names:
     kind: LlamaStackDistribution
     listKind: LlamaStackDistributionList
@@ -1976,6 +1976,22 @@ spec:
                           type: object
                         type: array
                     type: object
+                  storage:
+                    description: Storage defines the persistent storage configuration
+                    properties:
+                      mountPath:
+                        description: MountPath is the path where the storage will
+                          be mounted in the container
+                        type: string
+                      size:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: Size is the size of the persistent volume claim
+                          created for holding persistent data of the llama-stack server
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    type: object
                 required:
                 - containerSpec
                 - distribution
@@ -2121,7 +2137,7 @@ rules:
   verbs:
   - '*'
 - apiGroups:
-  - llama.x-k8s.io
+  - llamastack.io
   resources:
   - llamastackdistributions
   verbs:
@@ -2133,13 +2149,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - llama.x-k8s.io
+  - llamastack.io
   resources:
   - llamastackdistributions/finalizers
   verbs:
   - update
 - apiGroups:
-  - llama.x-k8s.io
+  - llamastack.io
   resources:
   - llamastackdistributions/status
   verbs:
@@ -2261,7 +2277,7 @@ data:
       port: 9443
     leaderElection:
       leaderElect: true
-      resourceName: 54e06e98.llama.x-k8s.io
+      resourceName: 54e06e98.llamastack.io
     # leaderElectionReleaseOnCancel defines if the leader should step down volume
     # when the Manager ends. This requires the binary to immediately end when the
     # Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
