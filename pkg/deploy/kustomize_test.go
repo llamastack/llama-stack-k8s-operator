@@ -8,7 +8,6 @@ import (
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
@@ -69,12 +68,8 @@ spec:
 `, expKind, expName, expReplicas),
 	))
 
-	// --- Build and render the kubernetes api objects ---
-	// create a Kustomizer to execute the overlay
-	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
-
 	// render all resources in the manifest
-	objs, err := deploy.RenderKustomize(memFs, k, overlayDir)
+	objs, err := deploy.RenderKustomize(memFs, overlayDir)
 	require.NoError(t, err)
 	require.Len(t, objs, 1, "should render exactly one object")
 

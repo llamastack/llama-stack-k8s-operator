@@ -26,12 +26,11 @@ func ApplyKustomizeManifests(
 	cli client.Client,
 	scheme *runtime.Scheme,
 	fs filesys.FileSystem,
-	k *krusty.Kustomizer,
 	manifestPath string,
 	fieldOwner string,
 ) error {
 	// Render all manifests to Unstructured objects.
-	objs, err := RenderKustomize(fs, k, manifestPath)
+	objs, err := RenderKustomize(fs, manifestPath)
 	if err != nil {
 		return err
 	}
@@ -53,9 +52,12 @@ func ApplyKustomizeManifests(
 // of manifest composition without involving the cluster client.
 func RenderKustomize(
 	fs filesys.FileSystem,
-	k *krusty.Kustomizer,
 	manifestPath string,
 ) ([]*unstructured.Unstructured, error) {
+	// --- Build and render the kubernetes api objects ---
+	// create a Kustomizer to execute the overlay
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+
 	// Produce the composed set of resources from base and overlays.
 	resMap, err := k.Run(fs, manifestPath)
 	if err != nil {
