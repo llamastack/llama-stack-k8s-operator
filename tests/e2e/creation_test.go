@@ -181,7 +181,7 @@ func testHealthStatus(t *testing.T, distribution *v1alpha1.LlamaStackDistributio
 		if err != nil {
 			return false, err
 		}
-		return updatedDistribution.Status.Ready, nil
+		return updatedDistribution.Status.Phase == v1alpha1.LlamaStackDistributionPhaseReady, nil
 	})
 	require.NoError(t, err, "Failed to wait for distribution status update")
 }

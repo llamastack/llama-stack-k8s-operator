@@ -126,17 +126,54 @@ type DistributionConfig struct {
 	AvailableDistributions map[string]string `json:"availableDistributions,omitempty"`
 }
 
+// LlamaStackDistributionPhase represents the current phase of the LlamaStackDistribution
+// +kubebuilder:validation:Enum=Pending;Initializing;Ready;Failed;Terminating
+type DistributionPhase string
+
+const (
+	// LlamaStackDistributionPhasePending indicates that the distribution is pending initialization
+	LlamaStackDistributionPhasePending DistributionPhase = "Pending"
+	// LlamaStackDistributionPhaseInitializing indicates that the distribution is being initialized
+	LlamaStackDistributionPhaseInitializing DistributionPhase = "Initializing"
+	// LlamaStackDistributionPhaseReady indicates that the distribution is ready to use
+	LlamaStackDistributionPhaseReady DistributionPhase = "Ready"
+	// LlamaStackDistributionPhaseFailed indicates that the distribution has failed
+	LlamaStackDistributionPhaseFailed DistributionPhase = "Failed"
+	// LlamaStackDistributionPhaseTerminating indicates that the distribution is being terminated
+	LlamaStackDistributionPhaseTerminating DistributionPhase = "Terminating"
+)
+
+// VersionInfo contains version-related information
+type VersionInfo struct {
+	// OperatorVersion is the version of the operator managing this distribution
+	OperatorVersion string `json:"operatorVersion,omitempty"`
+	// DeploymentVersion is the version of the LlamaStack deployment
+	LlamaStackVersion string `json:"llamaStackServerVersion,omitempty"`
+	// LastUpdated represents when the version information was last updated
+	LastUpdated metav1.Time `json:"lastUpdated,omitempty"`
+}
+
 // LlamaStackDistributionStatus defines the observed state of LlamaStackDistribution.
 type LlamaStackDistributionStatus struct {
-	Version            string             `json:"version,omitempty"`
+	// Phase represents the current phase of the distribution
+	Phase DistributionPhase `json:"phase,omitempty"`
+	// Version contains version information for both operator and deployment
+	Version VersionInfo `json:"version,omitempty"`
+	// DistributionConfig contains the configuration information from the providers endpoint
 	DistributionConfig DistributionConfig `json:"distributionConfig,omitempty"`
-	Ready              bool               `json:"ready"`
+	// Conditions represent the latest available observations of the distribution's current state
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// AvailableReplicas is the number of available replicas
+	AvailableReplicas int32 `json:"availableReplicas,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="Version",type="string",JSONPath=".status.version"
-//+kubebuilder:printcolumn:name="Ready",type="boolean",JSONPath=".status.ready"
+//+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+//+kubebuilder:printcolumn:name="Operator Version",type="string",JSONPath=".status.version.operatorVersion"
+//+kubebuilder:printcolumn:name="Server Version",type="string",JSONPath=".status.version.llamaStackServerVersion"
+//+kubebuilder:printcolumn:name="Available",type="integer",JSONPath=".status.availableReplicas"
+//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // LlamaStackDistribution is the Schema for the llamastackdistributions API
 
 type LlamaStackDistribution struct {
