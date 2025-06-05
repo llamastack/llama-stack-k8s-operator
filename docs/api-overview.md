@@ -38,6 +38,26 @@ _Appears in:_
 | `providers` _[ProviderInfo](#providerinfo) array_ |  |  |  |
 | `availableDistributions` _object (keys:string, values:string)_ | AvailableDistributions lists all available distributions and their images |  |  |
 
+#### DistributionPhase
+
+_Underlying type:_ _string_
+
+LlamaStackDistributionPhase represents the current phase of the LlamaStackDistribution
+
+_Validation:_
+- Enum: [Pending Initializing Ready Failed Terminating]
+
+_Appears in:_
+- [LlamaStackDistributionStatus](#llamastackdistributionstatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` | LlamaStackDistributionPhasePending indicates that the distribution is pending initialization<br /> |
+| `Initializing` | LlamaStackDistributionPhaseInitializing indicates that the distribution is being initialized<br /> |
+| `Ready` | LlamaStackDistributionPhaseReady indicates that the distribution is ready to use<br /> |
+| `Failed` | LlamaStackDistributionPhaseFailed indicates that the distribution has failed<br /> |
+| `Terminating` | LlamaStackDistributionPhaseTerminating indicates that the distribution is being terminated<br /> |
+
 #### DistributionType
 
 DistributionType defines the distribution configuration for llama-stack.
@@ -99,9 +119,10 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `version` _string_ |  |  |  |
-| `distributionConfig` _[DistributionConfig](#distributionconfig)_ |  |  |  |
-| `ready` _boolean_ |  |  |  |
+| `phase` _[DistributionPhase](#distributionphase)_ | Phase represents the current phase of the distribution |  | Enum: [Pending Initializing Ready Failed Terminating] <br /> |
+| `version` _[VersionInfo](#versioninfo)_ | Version contains version information for both operator and deployment |  |  |
+| `distributionConfig` _[DistributionConfig](#distributionconfig)_ | DistributionConfig contains the configuration information from the providers endpoint |  |  |
+| `availableReplicas` _integer_ | AvailableReplicas is the number of available replicas |  |  |
 
 #### PodOverrides
 
@@ -167,3 +188,15 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `size` _[Quantity](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#quantity-resource-api)_ | Size is the size of the persistent volume claim created for holding persistent data of the llama-stack server |  |  |
 | `mountPath` _string_ | MountPath is the path where the storage will be mounted in the container |  |  |
+
+#### VersionInfo
+
+VersionInfo contains version-related information
+
+_Appears in:_
+- [LlamaStackDistributionStatus](#llamastackdistributionstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `operatorVersion` _string_ | OperatorVersion is the version of the operator managing this distribution |  |  |
+| `llamaStackServerVersion` _string_ | DeploymentVersion is the version of the LlamaStack deployment |  |  |
