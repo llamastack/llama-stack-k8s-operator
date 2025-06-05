@@ -2,26 +2,39 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	kubernetesscheme "k8s.io/client-go/kubernetes/scheme" // Alias to avoid conflict
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
+
+const (
+	eventuallyTimeout  = 5 * time.Second
+	eventuallyInterval = 100 * time.Millisecond
+)
+
+// testenvNamespaceCounter is used to generate unique namespace names for test isolation.
+var testenvNamespaceCounter int = 0
 
 // baseInstance returns a minimal valid LlamaStackDistribution instance.
 func baseInstance() *llamav1alpha1.LlamaStackDistribution {
-	// Set the environment variable for the test
 	llamav1alpha1.ImageMap["ollama"] = "lls/lls-ollama:1.0"
 	return &llamav1alpha1.LlamaStackDistribution{
 		ObjectMeta: metav1.ObjectMeta{
@@ -44,6 +57,35 @@ func baseInstance() *llamav1alpha1.LlamaStackDistribution {
 }
 
 func TestStorageConfiguration(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	testEnv := &envtest.Environment{
+		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases")},
+		ErrorIfCRDPathMissing: true,
+		// BinaryAssetsDirectory tells envtest where to find etcd and kube-apiserver binaries.
+		// It's set from KUBEBUILDER_ASSETS, typically managed by 'make test' in Operator SDK projects,
+		// which uses setup-envtest to download project-specific Kubernetes binaries.
+		BinaryAssetsDirectory: os.Getenv("KUBEBUILDER_ASSETS"),
+	}
+
+	cfg, err := testEnv.Start()
+	require.NoError(t, err)
+	defer func() { require.NoError(t, testEnv.Stop()) }()
+
+	// The Scheme is a registry of Go types for Kubernetes API objects. We must
+	// add all the types that the controller runtime client will interact with
+	// to this scheme so the client knows how to handle them
+	// (e.g., for Get, Create, and other operations).
+	k8sScheme := runtime.NewScheme()
+	require.NoError(t, kubernetesscheme.AddToScheme(k8sScheme))
+	require.NoError(t, llamav1alpha1.AddToScheme(k8sScheme))
+	require.NoError(t, corev1.AddToScheme(k8sScheme))
+	require.NoError(t, appsv1.AddToScheme(k8sScheme))
+
+	ctrlRuntimeClient, err := client.New(cfg, client.Options{Scheme: k8sScheme})
+	require.NoError(t, err)
+	require.NotNil(t, ctrlRuntimeClient)
+
 	tests := []struct {
 		name           string
 		storage        *llamav1alpha1.StorageSpec
@@ -103,66 +145,73 @@ func TestStorageConfiguration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create instance with test-specific storage configuration
+			// envtest does not fully support namespace deletion and cleanup between test cases.
+			// To ensure test isolation, a unique namespace is created for each test run.
+			testenvNamespaceCounter++
+			nsName := fmt.Sprintf("test-storage-%d", testenvNamespaceCounter)
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: nsName}}
+			require.NoError(t, ctrlRuntimeClient.Create(context.Background(), ns))
+
+			// Attempt to delete the namespace after the test. While envtest might not fully reclaim it,
+			// this is good practice.
+			defer func() {
+				if err := ctrlRuntimeClient.Delete(context.Background(), ns); err != nil && !apierrors.IsNotFound(err) {
+					t.Logf("Failed to delete test namespace %s: %v", nsName, err)
+				}
+			}()
+
 			instance := baseInstance()
+			instance.Namespace = nsName
 			instance.Spec.Server.Storage = tt.storage
+			require.NoError(t, ctrlRuntimeClient.Create(context.Background(), instance))
 
-			// Create a fake client and the reconciler with the instance
-			client, reconciler := setupTestReconciler(instance)
+			// Attempt to delete the LlamaStackDistribution instance after the test.
+			defer func() {
+				if err := ctrlRuntimeClient.Delete(context.Background(), instance); err != nil && !apierrors.IsNotFound(err) {
+					t.Logf("Failed to delete LlamaStackDistribution instance %s/%s: %v", instance.Namespace, instance.Name, err)
+				}
+			}()
 
-			// Reconcile
-			_, err := reconciler.Reconcile(context.Background(), ctrl.Request{
+			// setupTestReconciler creates a reconciler instance with the real Kubernetes client and scheme provided by envtest.
+			reconciler := setupTestReconciler(ctrlRuntimeClient, k8sScheme)
+
+			_, reconcileErr := reconciler.Reconcile(context.Background(), ctrl.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      instance.Name,
 					Namespace: instance.Namespace,
 				},
 			})
-			require.NoError(t, err, "reconcile should not fail")
+			require.NoError(t, reconcileErr, "reconcile should not fail")
 
 			deployment := &appsv1.Deployment{}
-			err = client.Get(context.Background(), types.NamespacedName{
-				Name:      instance.Name,
-				Namespace: instance.Namespace,
-			}, deployment)
-			require.NoError(t, err, "should be able to get deployment")
+			deploymentKey := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
+			// envtest interacts with a real API server, which is eventually consistent.
+			// We use require.Eventually to poll until the Deployment becomes available.
+			require.Eventually(t, func() bool {
+				err := ctrlRuntimeClient.Get(context.Background(), deploymentKey, deployment)
+				return err == nil
+			}, eventuallyTimeout, eventuallyInterval, "timed out waiting for deployment %s to be available", deploymentKey)
 
 			verifyVolume(t, deployment.Spec.Template.Spec.Volumes, tt.expectedVolume)
 			verifyVolumeMount(t, deployment.Spec.Template.Spec.Containers, tt.expectedMount)
 
-			// If storage is configured, verify PVC
 			if tt.storage != nil {
 				expectedSize := tt.storage.Size
 				if expectedSize == nil {
 					expectedSize = &llamav1alpha1.DefaultStorageSize
 				}
-				verifyPVC(t, client, instance, expectedSize)
+				verifyPVC(t, ctrlRuntimeClient, instance, expectedSize)
 			}
 		})
 	}
 }
 
-// Helper functions for testing the LlamaStackDistribution controller.
-func setupTestReconciler(instance *llamav1alpha1.LlamaStackDistribution) (client.Client, *LlamaStackDistributionReconciler) {
-	scheme := runtime.NewScheme()
-	_ = llamav1alpha1.AddToScheme(scheme)
-	_ = appsv1.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-	_ = networkingv1.AddToScheme(scheme)
-
-	// Create a fake client with the instance and enable status subresource
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(instance).
-		WithStatusSubresource(&llamav1alpha1.LlamaStackDistribution{}).
-		Build()
-
-	// Create the reconciler
-	reconciler := &LlamaStackDistributionReconciler{
-		Client: fakeClient,
-		Scheme: scheme,
+func setupTestReconciler(k8sClient client.Client, currentScheme *runtime.Scheme) *LlamaStackDistributionReconciler {
+	return &LlamaStackDistributionReconciler{
+		Client: k8sClient,
+		Scheme: currentScheme,
 		Log:    ctrl.Log.WithName("controllers").WithName("LlamaStackDistribution"),
 	}
-	return fakeClient, reconciler
 }
 
 func verifyVolume(t *testing.T, volumes []corev1.Volume, expectedVolume corev1.Volume) {
@@ -203,14 +252,20 @@ func verifyVolumeMount(t *testing.T, containers []corev1.Container, expectedMoun
 	assert.Equal(t, expectedMount.MountPath, foundMount.MountPath, "mount path should match")
 }
 
-func verifyPVC(t *testing.T, client client.Client, instance *llamav1alpha1.LlamaStackDistribution, expectedSize *resource.Quantity) {
+func verifyPVC(t *testing.T, currentK8sClient client.Client, instance *llamav1alpha1.LlamaStackDistribution, expectedSize *resource.Quantity) {
 	t.Helper()
 	pvc := &corev1.PersistentVolumeClaim{}
-	err := client.Get(context.Background(), types.NamespacedName{
-		Name:      instance.Name + "-pvc",
-		Namespace: instance.Namespace,
-	}, pvc)
-	require.NoError(t, err, "should be able to get PVC")
-	assert.Equal(t, expectedSize.String(), pvc.Spec.Resources.Requests.Storage().String(),
+	pvcKey := types.NamespacedName{Name: instance.Name + "-pvc", Namespace: instance.Namespace}
+
+	// envtest interacts with a real API server, which is eventually consistent.
+	// We use require.Eventually to poll until the PVC becomes available after reconciliation.
+	require.Eventually(t, func() bool {
+		err := currentK8sClient.Get(context.Background(), pvcKey, pvc)
+		return err == nil
+	}, eventuallyTimeout, eventuallyInterval, "timed out waiting for PVC %s to be available", pvcKey)
+
+	storageRequest, ok := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+	require.True(t, ok, "PVC does not have storage request")
+	assert.Equal(t, expectedSize.String(), storageRequest.String(),
 		"PVC size should match")
 }
