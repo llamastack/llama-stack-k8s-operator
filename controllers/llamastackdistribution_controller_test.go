@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +36,7 @@ const (
 var testenvNamespaceCounter int = 0
 
 // baseInstance returns a minimal valid LlamaStackDistribution instance.
+// Namespace will be set to "default" and should be overridden by the caller if needed for specific test contexts.
 func baseInstance() *llamav1alpha1.LlamaStackDistribution {
 	return &llamav1alpha1.LlamaStackDistribution{
 		ObjectMeta: metav1.ObjectMeta{
@@ -56,37 +58,20 @@ func baseInstance() *llamav1alpha1.LlamaStackDistribution {
 	}
 }
 
-// setupTestReconciler creates a test reconciler with the given instance.
-func setupTestReconciler(instance *llamav1alpha1.LlamaStackDistribution) (client.Client, *LlamaStackDistributionReconciler) {
-	scheme := runtime.NewScheme()
-	_ = llamav1alpha1.AddToScheme(scheme)
-	_ = appsv1.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-	_ = networkingv1.AddToScheme(scheme)
-
-	// Create a fake client with the instance and enable status subresource.
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(instance).
-		WithStatusSubresource(&llamav1alpha1.LlamaStackDistribution{}).
-		Build()
-
-	clusterInfo :=
-		&cluster.ClusterInfo{
-			OperatorNamespace: "default",
-			DistributionImages: map[string]string{
-				"ollama": "lls/lls-ollama:1.0",
-			},
-		}
-
-	// Create the reconciler
-	reconciler := &LlamaStackDistributionReconciler{
-		Client:      fakeClient,
-		Scheme:      scheme,
+func setupTestReconciler(ctrlRuntimeClient client.Client, currentScheme *runtime.Scheme) *LlamaStackDistributionReconciler {
+	// ClusterInfo is required by the reconciler. We provide static test data for it.
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace: "default",
+		DistributionImages: map[string]string{
+			"ollama": "lls/lls-ollama:1.0",
+		},
+	}
+	return &LlamaStackDistributionReconciler{
+		Client:      ctrlRuntimeClient,
+		Scheme:      currentScheme,
 		Log:         ctrl.Log.WithName("controllers").WithName("LlamaStackDistribution"),
 		ClusterInfo: clusterInfo,
 	}
-	return fakeClient, reconciler
 }
 
 func TestStorageConfiguration(t *testing.T) {
@@ -105,20 +90,19 @@ func TestStorageConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, testEnv.Stop()) }()
 
-	// The Scheme is a registry of Go types for Kubernetes API objects. We must
-	// add all the types that the controller runtime client will interact with
-	// to this scheme so the client knows how to handle them
-	// (e.g., for Get, Create, and other operations).
+	// The Scheme is a registry of Go types for Kubernetes API objects. We must add all the
+	// types that ctrlRuntimeClient will interact with to this scheme so the client knows how to
+	// handle them (e.g., for Get, Create, and other operations).
 	k8sScheme := runtime.NewScheme()
 	require.NoError(t, kubernetesscheme.AddToScheme(k8sScheme))
 	require.NoError(t, llamav1alpha1.AddToScheme(k8sScheme))
 	require.NoError(t, corev1.AddToScheme(k8sScheme))
 	require.NoError(t, appsv1.AddToScheme(k8sScheme))
+	require.NoError(t, networkingv1.AddToScheme(k8sScheme))
 
 	ctrlRuntimeClient, err := client.New(cfg, client.Options{Scheme: k8sScheme})
 	require.NoError(t, err)
 	require.NotNil(t, ctrlRuntimeClient)
-	// Setup test cluster info
 
 	tests := []struct {
 		name           string
@@ -180,20 +164,22 @@ func TestStorageConfiguration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// envtest does not fully support namespace deletion and cleanup between test cases.
-			// To ensure test isolation, a unique namespace is created for each test run.
+			// To ensure test isolation and avoid interference, a unique namespace is created for each test run.
 			testenvNamespaceCounter++
 			nsName := fmt.Sprintf("test-storage-%d", testenvNamespaceCounter)
 			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: nsName}}
 			require.NoError(t, ctrlRuntimeClient.Create(context.Background(), ns))
 
 			// Attempt to delete the namespace after the test. While envtest might not fully reclaim it,
-			// this is good practice.
+			// this is good practice and helps keep the test environment cleaner.
 			defer func() {
 				if err := ctrlRuntimeClient.Delete(context.Background(), ns); err != nil && !apierrors.IsNotFound(err) {
 					t.Logf("Failed to delete test namespace %s: %v", nsName, err)
 				}
 			}()
 
+			// baseInstance creates a generic LlamaStackDistribution object.
+			// The namespace is then overridden here to use the unique namespace for this test case.
 			instance := baseInstance()
 			instance.Namespace = nsName
 			instance.Spec.Server.Storage = tt.storage
@@ -240,14 +226,6 @@ func TestStorageConfiguration(t *testing.T) {
 	}
 }
 
-func setupTestReconciler(k8sClient client.Client, currentScheme *runtime.Scheme) *LlamaStackDistributionReconciler {
-	return &LlamaStackDistributionReconciler{
-		Client: k8sClient,
-		Scheme: currentScheme,
-		Log:    ctrl.Log.WithName("controllers").WithName("LlamaStackDistribution"),
-	}
-}
-
 func verifyVolume(t *testing.T, volumes []corev1.Volume, expectedVolume corev1.Volume) {
 	t.Helper()
 	var foundVolume *corev1.Volume
@@ -286,7 +264,7 @@ func verifyVolumeMount(t *testing.T, containers []corev1.Container, expectedMoun
 	assert.Equal(t, expectedMount.MountPath, foundMount.MountPath, "mount path should match")
 }
 
-func verifyPVC(t *testing.T, currentK8sClient client.Client, instance *llamav1alpha1.LlamaStackDistribution, expectedSize *resource.Quantity) {
+func verifyPVC(t *testing.T, ctrlRuntimeClient client.Client, instance *llamav1alpha1.LlamaStackDistribution, expectedSize *resource.Quantity) {
 	t.Helper()
 	pvc := &corev1.PersistentVolumeClaim{}
 	pvcKey := types.NamespacedName{Name: instance.Name + "-pvc", Namespace: instance.Namespace}
@@ -294,7 +272,7 @@ func verifyPVC(t *testing.T, currentK8sClient client.Client, instance *llamav1al
 	// envtest interacts with a real API server, which is eventually consistent.
 	// We use require.Eventually to poll until the PVC becomes available after reconciliation.
 	require.Eventually(t, func() bool {
-		err := currentK8sClient.Get(context.Background(), pvcKey, pvc)
+		err := ctrlRuntimeClient.Get(context.Background(), pvcKey, pvc)
 		return err == nil
 	}, eventuallyTimeout, eventuallyInterval, "timed out waiting for PVC %s to be available", pvcKey)
 
