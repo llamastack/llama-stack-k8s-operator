@@ -53,7 +53,7 @@ func ApplyService(ctx context.Context, cli client.Client, scheme *runtime.Scheme
 		logger.Info("Creating Service", "service", service.Name)
 		return cli.Create(ctx, service)
 	} else if err != nil {
-		return fmt.Errorf(" failed to fetch Service: %w", err)
+		return fmt.Errorf("failed to fetch Service: %w", err)
 	}
 
 	if !reflect.DeepEqual(found.Spec.Selector, service.Spec.Selector) || !reflect.DeepEqual(found.Spec.Ports, service.Spec.Ports) {
