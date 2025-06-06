@@ -36,7 +36,7 @@ def check_file(filepath: str) -> list[str]:
                     error_message = match.group(1)
                     if not error_message.startswith(REQUIRED_WORDING):
                         invalid_lines.append(f"{i}:{line.strip()}")
-    
+
     except FileNotFoundError:
         print(f"Error: File not found: {filepath}", file=sys.stderr)
         return [f"0:File not found: {filepath}"]
@@ -69,4 +69,4 @@ def main():
     sys.exit(exit_code)
 
 if __name__ == "__main__":
-    main() 
+    main()
