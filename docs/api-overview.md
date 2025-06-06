@@ -32,7 +32,9 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `activeDistribution` _string_ | ActiveDistribution shows which distribution is currently being used |  |  |
 | `providers` _[ProviderInfo](#providerinfo) array_ |  |  |  |
+| `availableDistributions` _object (keys:string, values:string)_ | AvailableDistributions lists all available distributions and their images |  |  |
 
 #### DistributionType
 
@@ -43,7 +45,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `name` _string_ | Name is the distribution name that maps to supported distributions. Currently supported distributions are ollama and vllm. |  | Enum: [ollama vllm] <br /> |
+| `name` _string_ | Name is the distribution name that maps to supported distributions. |  |  |
 | `image` _string_ | Image is the direct container image reference to use |  |  |
 
 #### LlamaStackDistribution

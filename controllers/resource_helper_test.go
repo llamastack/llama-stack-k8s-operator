@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -268,47 +269,6 @@ func findVolumeMountByNameAndPath(mounts []corev1.VolumeMount, name, path string
 	return false
 }
 
-func TestValidateDistribution(t *testing.T) {
-	testCases := []struct {
-		name        string
-		instance    *llamav1alpha1.LlamaStackDistribution
-		expectError bool
-	}{
-		{
-			name:        "valid with name only",
-			instance:    createLSD("llama2", ""),
-			expectError: false,
-		},
-		{
-			name:        "valid with image only",
-			instance:    createLSD("", "test-image:latest"),
-			expectError: false,
-		},
-		{
-			name:        "invalid with both name and image",
-			instance:    createLSD("llama2", "test-image:latest"),
-			expectError: true,
-		},
-		{
-			name:        "invalid with neither name nor image",
-			instance:    createLSD("", ""),
-			expectError: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := &LlamaStackDistributionReconciler{}
-			err := r.validateDistribution(tc.instance)
-			if tc.expectError {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
 // createLSD creates a LlamaStackDistribution instance with optional name and image.
 func createLSD(name, image string) *llamav1alpha1.LlamaStackDistribution {
 	return &llamav1alpha1.LlamaStackDistribution{
@@ -323,13 +283,25 @@ func createLSD(name, image string) *llamav1alpha1.LlamaStackDistribution {
 	}
 }
 
-func TestResolveImage(t *testing.T) {
-	oldImageMap := imageMap
-	defer func() { imageMap = oldImageMap }()
-
-	imageMap = map[string]string{
-		"ollama": "ollama-image:latest",
+// setupTestClusterInfo creates a ClusterInfo instance for testing with the specified distribution images.
+// If no images are provided, it defaults to having "ollama" with "ollama-image:latest".
+func setupTestClusterInfo(images map[string]string) *cluster.ClusterInfo {
+	if images == nil {
+		images = map[string]string{
+			"ollama": "ollama-image:latest",
+		}
 	}
+	return &cluster.ClusterInfo{
+		OperatorNamespace:  "default",
+		DistributionImages: images,
+	}
+}
+
+func TestResolveImage(t *testing.T) {
+	// Setup test cluster info
+	clusterInfo := setupTestClusterInfo(map[string]string{
+		"ollama": "ollama-image:latest",
+	})
 
 	testCases := []struct {
 		name          string
@@ -340,7 +312,7 @@ func TestResolveImage(t *testing.T) {
 		{
 			name:          "resolve from name",
 			instance:      createLSD("ollama", ""),
-			expectedImage: imageMap["ollama"],
+			expectedImage: clusterInfo.DistributionImages["ollama"],
 			expectError:   false,
 		},
 		{
@@ -359,8 +331,8 @@ func TestResolveImage(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := &LlamaStackDistributionReconciler{}
-			image, err := r.resolveImage(tc.instance)
+			r := &LlamaStackDistributionReconciler{ClusterInfo: clusterInfo}
+			image, err := r.resolveImage(tc.instance.Spec.Server.Distribution)
 			if tc.expectError {
 				require.Error(t, err)
 				assert.Empty(t, image)
@@ -370,4 +342,54 @@ func TestResolveImage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDistributionValidation(t *testing.T) {
+	// Setup test cluster info
+	clusterInfo := setupTestClusterInfo(map[string]string{
+		"ollama": "lls/lls-ollama:1.0",
+	})
+
+	testCases := []struct {
+		name        string
+		instance    *llamav1alpha1.LlamaStackDistribution
+		expectError bool
+	}{
+		{
+			name:        "valid distribution name",
+			instance:    createLSD("ollama", ""),
+			expectError: false,
+		},
+		{
+			name:        "valid direct image",
+			instance:    createLSD("", "test-image:latest"),
+			expectError: false,
+		},
+		{
+			name:        "invalid distribution name",
+			instance:    createLSD("invalid-name", ""),
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &LlamaStackDistributionReconciler{ClusterInfo: clusterInfo}
+			err := r.validateDistribution(tc.instance)
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestDistributionWithoutClusterInfo(t *testing.T) {
+	// Clear cluster info
+	instance := createLSD("ollama", "")
+	r := &LlamaStackDistributionReconciler{ClusterInfo: nil}
+	err := r.validateDistribution(instance)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cluster info not initialized")
 }

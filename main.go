@@ -17,11 +17,14 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"os"
 
 	llamaxk8siov1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/llamastack/llama-stack-k8s-operator/controllers"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -48,6 +51,27 @@ func init() { //nolint:gochecknoinits
 
 	utilruntime.Must(llamaxk8siov1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
+}
+
+func setupReconciler(ctx context.Context, cli client.Client, mgr ctrl.Manager, clusterInfo *cluster.ClusterInfo) error {
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(ctx, cli, scheme, clusterInfo)
+	if err != nil {
+		return fmt.Errorf("failed to create reconciler: %w", err)
+	}
+	if err = reconciler.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("failed to create controller: %w", err)
+	}
+	return nil
+}
+
+func setupHealthChecks(mgr ctrl.Manager) error {
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		return fmt.Errorf("failed to set up health check: %w", err)
+	}
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		return fmt.Errorf("failed to set up ready check: %w", err)
+	}
+	return nil
 }
 
 func main() {
@@ -92,45 +116,41 @@ func main() {
 		// LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error(err, "failed to start manager")
 		os.Exit(1)
 	}
+
 	cfg, err := config.GetConfig()
 	if err != nil {
-		setupLog.Error(err, "error getting config for setup")
+		setupLog.Error(err, "failed to get config for setup")
 		os.Exit(1)
 	}
 
-	cli, err := client.New(cfg, client.Options{Scheme: scheme})
+	setupClient, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
-		setupLog.Error(err, "error getting client for setup")
+		setupLog.Error(err, "failed to set up clients")
 		os.Exit(1)
 	}
 
-	reconciler, err := controllers.NewLlamaStackDistributionReconciler(ctx, cli, scheme)
+	clusterInfo, err := cluster.NewClusterInfo(ctx, setupClient)
 	if err != nil {
-		setupLog.Error(err, "failed to create reconciler")
-		os.Exit(1)
-	}
-	if err = reconciler.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "LlamaStackDistribution")
+		setupLog.Error(err, "failed to initialize cluster config")
 		os.Exit(1)
 	}
 
-	//+kubebuilder:scaffold:builder
-
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
+	if err := setupReconciler(ctx, setupClient, mgr, clusterInfo); err != nil {
+		setupLog.Error(err, "failed to set up reconciler")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
+
+	if err := setupHealthChecks(mgr); err != nil {
+		setupLog.Error(err, "failed to set up health checks")
 		os.Exit(1)
 	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctx); err != nil {
-		setupLog.Error(err, "problem running manager")
+		setupLog.Error(err, "failed to run manager")
 		os.Exit(1)
 	}
 }

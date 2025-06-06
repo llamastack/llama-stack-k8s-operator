@@ -238,11 +238,7 @@ spec:
                         type: string
                       name:
                         description: Name is the distribution name that maps to supported
-                          distributions. Currently supported distributions are ollama
-                          and vllm.
-                        enum:
-                        - ollama
-                        - vllm
+                          distributions.
                         type: string
                     type: object
                     x-kubernetes-validations:
@@ -1996,6 +1992,16 @@ spec:
                 description: DistributionConfig represents the configuration information
                   from the providers endpoint.
                 properties:
+                  activeDistribution:
+                    description: ActiveDistribution shows which distribution is currently
+                      being used
+                    type: string
+                  availableDistributions:
+                    additionalProperties:
+                      type: string
+                    description: AvailableDistributions lists all available distributions
+                      and their images
+                    type: object
                   providers:
                     items:
                       description: ProviderInfo represents a single provider from

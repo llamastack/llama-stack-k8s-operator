@@ -47,9 +47,8 @@ var DefaultStorageSize = resource.MustParse("10Gi")
 // DistributionType defines the distribution configuration for llama-stack.
 // +kubebuilder:validation:XValidation:rule="has(self.name) != has(self.image)",message="Only one of name or image can be specified"
 type DistributionType struct {
-	// Name is the distribution name that maps to supported distributions. Currently supported distributions are ollama and vllm.
+	// Name is the distribution name that maps to supported distributions.
 	// +optional
-	// +kubebuilder:validation:Enum=ollama;vllm
 	Name string `json:"name,omitempty"`
 	// Image is the direct container image reference to use
 	// +optional
@@ -105,7 +104,11 @@ type ProviderInfo struct {
 
 // DistributionConfig represents the configuration information from the providers endpoint.
 type DistributionConfig struct {
-	Providers []ProviderInfo `json:"providers,omitempty"`
+	// ActiveDistribution shows which distribution is currently being used
+	ActiveDistribution string         `json:"activeDistribution,omitempty"`
+	Providers          []ProviderInfo `json:"providers,omitempty"`
+	// AvailableDistributions lists all available distributions and their images
+	AvailableDistributions map[string]string `json:"availableDistributions,omitempty"`
 }
 
 // LlamaStackDistributionStatus defines the observed state of LlamaStackDistribution.

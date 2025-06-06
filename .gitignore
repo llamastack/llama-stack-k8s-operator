@@ -30,3 +30,5 @@ bundle/
 bundle.Dockerfile
 .openshift
 catalog-item
+
+.DS_Store
