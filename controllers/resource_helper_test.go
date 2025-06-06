@@ -391,5 +391,5 @@ func TestDistributionWithoutClusterInfo(t *testing.T) {
 	r := &LlamaStackDistributionReconciler{ClusterInfo: nil}
 	err := r.validateDistribution(instance)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cluster info not initialized")
+	assert.Contains(t, err.Error(), "failed to initialize cluster info")
 }
