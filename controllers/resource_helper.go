@@ -24,9 +24,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// Define a map that translates user-friendly names to actual image references.
-var imageMap = llamav1alpha1.ImageMap
-
 // buildContainerSpec creates the container specification.
 func buildContainerSpec(instance *llamav1alpha1.LlamaStackDistribution, image string) corev1.Container {
 	container := corev1.Container{
@@ -101,26 +98,33 @@ func configurePodStorage(instance *llamav1alpha1.LlamaStackDistribution, contain
 
 // validateDistribution validates the distribution configuration.
 func (r *LlamaStackDistributionReconciler) validateDistribution(instance *llamav1alpha1.LlamaStackDistribution) error {
-	if instance.Spec.Server.Distribution.Name != "" && instance.Spec.Server.Distribution.Image != "" {
-		return errors.New("only one of distribution.name or distribution.image can be set")
-	}
-
-	if instance.Spec.Server.Distribution.Name == "" && instance.Spec.Server.Distribution.Image == "" {
-		return errors.New("failed to validate distribution: either distribution.name or distribution.image must be set")
+	// If using distribution name, validate it exists in clusterInfo
+	if instance.Spec.Server.Distribution.Name != "" {
+		clusterInfo := r.ClusterInfo
+		if clusterInfo == nil {
+			return errors.New("failed to initialize cluster info")
+		}
+		if _, exists := clusterInfo.DistributionImages[instance.Spec.Server.Distribution.Name]; !exists {
+			return fmt.Errorf("failed to validate distribution: %s. Distribution name not supported", instance.Spec.Server.Distribution.Name)
+		}
 	}
 
 	return nil
 }
 
-// resolveImage resolves the container image from either name or direct reference.
-func (r *LlamaStackDistributionReconciler) resolveImage(instance *llamav1alpha1.LlamaStackDistribution) (string, error) {
-	if instance.Spec.Server.Distribution.Name != "" {
-		resolvedImage := imageMap[instance.Spec.Server.Distribution.Name]
-		if resolvedImage == "" {
-			return "", fmt.Errorf("failed to validate distribution name: %s", instance.Spec.Server.Distribution.Name)
+// resolveImage determines the container image to use based on the distribution configuration.
+// It returns the resolved image and any error encountered.
+func (r *LlamaStackDistributionReconciler) resolveImage(distribution llamav1alpha1.DistributionType) (string, error) {
+	distributionMap := r.ClusterInfo.DistributionImages
+	switch {
+	case distribution.Name != "":
+		if _, exists := distributionMap[distribution.Name]; !exists {
+			return "", fmt.Errorf("failed to validate distribution name: %s", distribution.Name)
 		}
-		return resolvedImage, nil
+		return distributionMap[distribution.Name], nil
+	case distribution.Image != "":
+		return distribution.Image, nil
+	default:
+		return "", errors.New("failed to validate distribution: either distribution.name or distribution.image must be set")
 	}
-
-	return instance.Spec.Server.Distribution.Image, nil
 }

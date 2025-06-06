@@ -2,7 +2,6 @@ apiVersion: v1
 kind: Namespace
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
     control-plane: controller-manager
   name: llama-stack-k8s-operator-system
@@ -13,7 +12,6 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
   name: llamastackdistributions.llamastack.io
 spec:
@@ -249,11 +247,7 @@ spec:
                         type: string
                       name:
                         description: Name is the distribution name that maps to supported
-                          distributions. Currently supported distributions are ollama
-                          and vllm.
-                        enum:
-                        - ollama
-                        - vllm
+                          distributions.
                         type: string
                     type: object
                     x-kubernetes-validations:
@@ -2007,6 +2001,16 @@ spec:
                 description: DistributionConfig represents the configuration information
                   from the providers endpoint.
                 properties:
+                  activeDistribution:
+                    description: ActiveDistribution shows which distribution is currently
+                      being used
+                    type: string
+                  availableDistributions:
+                    additionalProperties:
+                      type: string
+                    description: AvailableDistributions lists all available distributions
+                      and their images
+                    type: object
                   providers:
                     items:
                       description: ProviderInfo represents a single provider from
@@ -2044,7 +2048,6 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
   name: llama-stack-k8s-operator-controller-manager
   namespace: llama-stack-k8s-operator-system
@@ -2053,7 +2056,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
   name: llama-stack-k8s-operator-leader-election-role
   namespace: llama-stack-k8s-operator-system
@@ -2094,7 +2096,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
   name: llama-stack-k8s-operator-manager-role
 rules:
@@ -2173,7 +2174,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
   name: llama-stack-k8s-operator-metrics-reader
 rules:
@@ -2186,7 +2186,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
   name: llama-stack-k8s-operator-proxy-role
 rules:
@@ -2207,7 +2206,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
   name: llama-stack-k8s-operator-leader-election-rolebinding
   namespace: llama-stack-k8s-operator-system
@@ -2224,7 +2222,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
   name: llama-stack-k8s-operator-manager-rolebinding
 roleRef:
@@ -2240,7 +2237,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
   name: llama-stack-k8s-operator-proxy-rolebinding
 roleRef:
@@ -2254,14 +2250,27 @@ subjects:
 ---
 apiVersion: v1
 data:
-  OLLAMA_IMAGE: docker.io/llamastack/distribution-ollama:latest
-  VLLM_IMAGE: docker.io/llamastack/distribution-remote-vllm:latest
+  bedrock: docker.io/llamastack/distribution-bedrock:latest
+  cerebras: docker.io/llamastack/distribution-cerebras:latest
+  fireworks: docker.io/llamastack/distribution-fireworks:latest
+  hf-endpoint: docker.io/llamastack/distribution-hf-endpoint:latest
+  hf-serverless: docker.io/llamastack/distribution-hf-serverless:latest
+  nvidia: docker.io/llamastack/distribution-nvidia:latest
+  ollama: docker.io/llamastack/distribution-ollama:latest
+  open-benchmark: docker.io/llamastack/distribution-open-benchmark:latest
+  passthrough: docker.io/llamastack/distribution-passthrough:latest
+  remote-vllm: docker.io/llamastack/distribution-remote-vllm:latest
+  sambanova: docker.io/llamastack/distribution-sambanova:latest
+  tgi: docker.io/llamastack/distribution-tgi:latest
+  together: docker.io/llamastack/distribution-together:latest
+  vllm-gpu: docker.io/llamastack/distribution-vllm-gpu:latest
+  watsonx: docker.io/llamastack/distribution-watsonx:latest
+immutable: true
 kind: ConfigMap
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
-  name: llama-stack-k8s-operator-lls-parameters-544mdk2b4h
+  name: llama-stack-k8s-operator-distribution-images
   namespace: llama-stack-k8s-operator-system
 ---
 apiVersion: v1
@@ -2291,7 +2300,6 @@ data:
 kind: ConfigMap
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
   name: llama-stack-k8s-operator-manager-config
   namespace: llama-stack-k8s-operator-system
@@ -2300,7 +2308,6 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
     control-plane: controller-manager
   name: llama-stack-k8s-operator-controller-manager-metrics-service
@@ -2312,7 +2319,6 @@ spec:
     protocol: TCP
     targetPort: https
   selector:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
     control-plane: controller-manager
 ---
@@ -2320,7 +2326,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app.kubernetes.io/component: controller-manager
     app.kubernetes.io/name: llama-stack-k8s-operator
     control-plane: controller-manager
   name: llama-stack-k8s-operator-controller-manager
@@ -2329,7 +2334,6 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/component: controller-manager
       app.kubernetes.io/name: llama-stack-k8s-operator
       control-plane: controller-manager
   template:
@@ -2337,7 +2341,6 @@ spec:
       annotations:
         kubectl.kubernetes.io/default-container: manager
       labels:
-        app.kubernetes.io/component: controller-manager
         app.kubernetes.io/name: llama-stack-k8s-operator
         control-plane: controller-manager
     spec:
@@ -2346,11 +2349,6 @@ spec:
         - --leader-elect
         command:
         - /manager
-        env:
-        - name: OLLAMA_IMAGE
-          value: docker.io/llamastack/distribution-ollama:latest
-        - name: VLLM_IMAGE
-          value: docker.io/llamastack/distribution-remote-vllm:latest
         image: quay.io/llamastack/llama-stack-k8s-operator:latest
         livenessProbe:
           httpGet:

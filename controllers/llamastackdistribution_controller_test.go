@@ -9,6 +9,7 @@ import (
 	"time"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -35,7 +36,6 @@ var testenvNamespaceCounter int = 0
 
 // baseInstance returns a minimal valid LlamaStackDistribution instance.
 func baseInstance() *llamav1alpha1.LlamaStackDistribution {
-	llamav1alpha1.ImageMap["ollama"] = "lls/lls-ollama:1.0"
 	return &llamav1alpha1.LlamaStackDistribution{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test",
@@ -54,6 +54,39 @@ func baseInstance() *llamav1alpha1.LlamaStackDistribution {
 			},
 		},
 	}
+}
+
+// setupTestReconciler creates a test reconciler with the given instance.
+func setupTestReconciler(instance *llamav1alpha1.LlamaStackDistribution) (client.Client, *LlamaStackDistributionReconciler) {
+	scheme := runtime.NewScheme()
+	_ = llamav1alpha1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	_ = networkingv1.AddToScheme(scheme)
+
+	// Create a fake client with the instance and enable status subresource.
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(instance).
+		WithStatusSubresource(&llamav1alpha1.LlamaStackDistribution{}).
+		Build()
+
+	clusterInfo :=
+		&cluster.ClusterInfo{
+			OperatorNamespace: "default",
+			DistributionImages: map[string]string{
+				"ollama": "lls/lls-ollama:1.0",
+			},
+		}
+
+	// Create the reconciler
+	reconciler := &LlamaStackDistributionReconciler{
+		Client:      fakeClient,
+		Scheme:      scheme,
+		Log:         ctrl.Log.WithName("controllers").WithName("LlamaStackDistribution"),
+		ClusterInfo: clusterInfo,
+	}
+	return fakeClient, reconciler
 }
 
 func TestStorageConfiguration(t *testing.T) {
@@ -85,6 +118,7 @@ func TestStorageConfiguration(t *testing.T) {
 	ctrlRuntimeClient, err := client.New(cfg, client.Options{Scheme: k8sScheme})
 	require.NoError(t, err)
 	require.NotNil(t, ctrlRuntimeClient)
+	// Setup test cluster info
 
 	tests := []struct {
 		name           string

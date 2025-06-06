@@ -39,12 +39,6 @@ spec:
         args:
         - --leader-elect
         image: controller:latest
-        env:
-          # Env vars are prioritized over --config
-          - name: OLLAMA_IMAGE
-            value: OLLAMA_IMAGE_PLACEHOLDER
-          - name: VLLM_IMAGE
-            value: VLLM_IMAGE_PLACEHOLDER
         name: manager
         securityContext:
           allowPrivilegeEscalation: false

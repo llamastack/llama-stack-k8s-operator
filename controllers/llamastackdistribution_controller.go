@@ -29,6 +29,7 @@ import (
 
 	"github.com/go-logr/logr"
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/featureflags"
 	"gopkg.in/yaml.v3"
@@ -53,6 +54,8 @@ type LlamaStackDistributionReconciler struct {
 	Log    logr.Logger
 	// Feature flags
 	EnableNetworkPolicy bool
+	// Cluster info
+	ClusterInfo *cluster.ClusterInfo
 }
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -200,8 +203,8 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 		return err
 	}
 
-	// Resolve the container image
-	resolvedImage, err := r.resolveImage(instance)
+	// Get the image either from the map or direct reference
+	resolvedImage, err := r.resolveImage(instance.Spec.Server.Distribution)
 	if err != nil {
 		return err
 	}
@@ -350,6 +353,14 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 	// Check if deployment is ready
 	expectedReplicas := instance.Spec.Replicas
 	deploymentReady := err == nil && deployment.Status.ReadyReplicas == expectedReplicas
+
+	// Update available distributions and active distribution
+	instance.Status.DistributionConfig.AvailableDistributions = r.ClusterInfo.DistributionImages
+	if instance.Spec.Server.Distribution.Name != "" {
+		instance.Status.DistributionConfig.ActiveDistribution = instance.Spec.Server.Distribution.Name
+	} else if instance.Spec.Server.Distribution.Image != "" {
+		instance.Status.DistributionConfig.ActiveDistribution = "custom"
+	}
 
 	// Only check health and providers if deployment is ready
 	if deploymentReady {
@@ -514,7 +525,8 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 }
 
 // NewLlamaStackDistributionReconciler creates a new reconciler with default image mappings.
-func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Client, scheme *runtime.Scheme) (*LlamaStackDistributionReconciler, error) {
+func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Client, scheme *runtime.Scheme,
+	clusterInfo *cluster.ClusterInfo) (*LlamaStackDistributionReconciler, error) {
 	log := log.FromContext(ctx).WithName("controller")
 	// get operator namespace
 	operatorNamespace, err := deploy.GetOperatorNamespace()
@@ -560,11 +572,11 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 			enableNetworkPolicy = strings.ToLower(flags.EnableNetworkPolicy) == "true"
 		}
 	}
-
 	return &LlamaStackDistributionReconciler{
 		Client:              client,
 		Scheme:              scheme,
 		Log:                 log,
 		EnableNetworkPolicy: enableNetworkPolicy,
+		ClusterInfo:         clusterInfo,
 	}, nil
 }
