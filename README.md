@@ -42,14 +42,16 @@ kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-op
 
 ### Deploying the Llama Stack Server
 
-1. Deploy Inference provider server (ollama, vllm etc)
-2. Create LlamaStackDistribution CR to get the server running. Example-
+1. Deploy the inference provider server (ollama, vllm etc). Example to deploy a new ollama server:
+```
+bash hack/deploy-ollama.sh
+```
+2. Create LlamaStackDistribution CR to get the server running. Example:
 ```
 apiVersion: llamastack.io/v1alpha1
 kind: LlamaStackDistribution
 metadata:
   name: llamastackdistribution-sample
-  namespace: <your-namespace>
 spec:
   replicas: 1
   server:
@@ -59,14 +61,14 @@ spec:
       port: 8321
       env:
       - name: INFERENCE_MODEL
-        value: "meta-llama/Llama-3.2-3B-Instruct"
+        value: "llama3.2:1b"
       - name: OLLAMA_URL
-        value: "http://ollama-server-service.default.svc.cluster.local:11434"
+        value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
     storage:
       size: "20Gi"
       mountPath: "/home/lls/.lls"
 ```
-3. Verify the server pod is running in the user define namespace.
+3. Verify the server pod is running in the user defined namespace.
 
 ## Developer Guide
 
