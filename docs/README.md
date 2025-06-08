@@ -65,7 +65,7 @@ docs/
 
 ### Prerequisites
 
-- **Go 1.21+** - For API documentation generation tools
+- **Go 1.24+** - For API documentation generation tools
 - **Python 3.8+** - For MkDocs and dependencies
 - **pip3** - Python package manager
 

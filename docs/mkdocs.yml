@@ -41,7 +41,16 @@ nav:
   - Getting Started:
     - Installation: getting-started/installation.md
     - Quick Start: getting-started/quick-start.md
+    - Understanding Distributions: getting-started/distributions.md
     - Configuration: getting-started/configuration.md
+  - Distributions:
+    - Starter: distributions/starter.md
+    - vLLM: distributions/vllm.md
+    - Ollama: distributions/ollama.md
+    - AWS Bedrock: distributions/bedrock.md
+    - Text Generation Inference: distributions/tgi.md
+    - Together AI: distributions/together.md
+    - Bring Your Own: distributions/bring-your-own.md
   - How-to Guides:
     - Deploy LlamaStack: how-to/deploy-llamastack.md
     - Configure Storage: how-to/configure-storage.md

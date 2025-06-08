@@ -31,7 +31,7 @@ Get started with the LlamaStack Operator in just a few steps:
      replicas: 1
      server:
        distribution:
-         name: "meta-reference"
+         name: "starter"
        containerSpec:
          port: 8321
          resources:

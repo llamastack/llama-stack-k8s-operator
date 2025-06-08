@@ -22,7 +22,7 @@ spec:
   replicas: 1
   server:
     distribution:
-      name: "meta-reference"
+      name: "starter"
     containerSpec:
       port: 8321
       resources:

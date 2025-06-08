@@ -6,7 +6,7 @@ Guide for contributing to the LlamaStack Kubernetes Operator.
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.24+
 - Docker
 - Kubernetes cluster (kind/minikube for local development)
 - kubectl

@@ -107,7 +107,6 @@ jobs:
           directory: docs/site
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           wranglerVersion: '3'
-        continue-on-error: true
 
   deploy-production:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -132,7 +131,6 @@ jobs:
           directory: docs/site
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           wranglerVersion: '3'
-        continue-on-error: true
 
       - name: Update legacy API docs (backward compatibility)
         run: |

@@ -51,11 +51,11 @@ spec:
 You can specify either a distribution name OR a direct image reference:
 
 ```yaml
-# Option 1: Use a named distribution
+# Option 1: Use a named distribution (recommended)
 spec:
   server:
     distribution:
-      name: "ollama"  # Maps to supported distributions
+      name: "starter"  # Maps to supported distributions
 
 # Option 2: Use a direct image
 spec:
@@ -66,18 +66,17 @@ spec:
 
 ### Supported Distribution Names
 
-The operator supports the following pre-configured distributions:
+The operator supports the following **7 pre-configured distributions**:
 
 | Distribution Name | Image | Description |
 |-------------------|-------|-------------|
+| `starter` | `docker.io/llamastack/distribution-starter:latest` | **Recommended default** - General purpose LlamaStack distribution |
 | `ollama` | `docker.io/llamastack/distribution-ollama:latest` | Ollama-based distribution for local inference |
-| `hf-endpoint` | `docker.io/llamastack/distribution-hf-endpoint:latest` | Hugging Face Endpoint distribution |
-| `hf-serverless` | `docker.io/llamastack/distribution-hf-serverless:latest` | Hugging Face Serverless distribution |
-| `bedrock` | `docker.io/llamastack/distribution-bedrock:latest` | AWS Bedrock distribution |
-| `cerebras` | `docker.io/llamastack/distribution-cerebras:latest` | Cerebras distribution |
-| `nvidia` | `docker.io/llamastack/distribution-nvidia:latest` | NVIDIA distribution |
-| `open-benchmark` | `docker.io/llamastack/distribution-open-benchmark:latest` | Open benchmark distribution |
-| `passthrough` | `docker.io/llamastack/distribution-passthrough:latest` | Passthrough distribution |
+| `bedrock` | `docker.io/llamastack/distribution-bedrock:latest` | AWS Bedrock distribution for cloud-based models |
+| `remote-vllm` | `docker.io/llamastack/distribution-remote-vllm:latest` | Remote vLLM server integration |
+| `tgi` | `docker.io/llamastack/distribution-tgi:latest` | Hugging Face Text Generation Inference |
+| `together` | `docker.io/llamastack/distribution-together:latest` | Together AI API integration |
+| `vllm-gpu` | `docker.io/llamastack/distribution-vllm-gpu:latest` | High-performance GPU inference with vLLM |
 | `remote-vllm` | `docker.io/llamastack/distribution-remote-vllm:latest` | Remote vLLM distribution |
 | `sambanova` | `docker.io/llamastack/distribution-sambanova:latest` | SambaNova distribution |
 | `tgi` | `docker.io/llamastack/distribution-tgi:latest` | Text Generation Inference distribution |
