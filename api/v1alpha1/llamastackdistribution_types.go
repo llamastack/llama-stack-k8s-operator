@@ -45,7 +45,7 @@ const (
 var DefaultStorageSize = resource.MustParse("10Gi")
 
 // DistributionType defines the distribution configuration for llama-stack.
-// +kubebuilder:validation:XValidation:rule="has(self.name) != has(self.image)",message="Only one of name or image can be specified"
+// +kubebuilder:validation:XValidation:rule="!(has(self.name) && has(self.image))",message="Only one of name or image can be specified"
 type DistributionType struct {
 	// Name is the distribution name that maps to supported distributions.
 	// +optional
@@ -65,7 +65,7 @@ type LlamaStackDistributionSpec struct {
 // ServerSpec defines the desired state of llama server.
 type ServerSpec struct {
 	Distribution  DistributionType `json:"distribution"`
-	ContainerSpec ContainerSpec    `json:"containerSpec"`
+	ContainerSpec ContainerSpec    `json:"containerSpec,omitempty"`
 	PodOverrides  *PodOverrides    `json:"podOverrides,omitempty"` // Optional pod-level overrides
 	// Storage defines the persistent storage configuration
 	// +optional
@@ -147,5 +147,5 @@ func init() { //nolint:gochecknoinits
 
 // HasPorts checks if the container spec defines a port.
 func (r *LlamaStackDistribution) HasPorts() bool {
-	return r.Spec.Server.ContainerSpec.Port != 0 || len(r.Spec.Server.ContainerSpec.Env) > 0 // Port or env implies service need
+	return r.Spec.Server.ContainerSpec.Port != 0 || len(r.Spec.Server.ContainerSpec.Env) > 0
 }

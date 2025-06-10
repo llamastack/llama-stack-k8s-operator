@@ -1,9 +1,14 @@
 package featureflags
 
+type FeatureFlag struct {
+	Enabled bool `yaml:"enabled"`
+}
+
 // FeatureFlags represents the configuration for feature flags in the operator.
+// Add more feature flags later.
 type FeatureFlags struct {
 	// EnableNetworkPolicy controls whether NetworkPolicy resources should be created.
-	EnableNetworkPolicy string `yaml:"enableNetworkPolicy"`
+	EnableNetworkPolicy FeatureFlag `yaml:"enableNetworkPolicy"`
 }
 
 const (

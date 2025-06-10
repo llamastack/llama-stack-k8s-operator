@@ -3,8 +3,8 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"os"
 
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -23,17 +23,17 @@ type ClusterInfo struct {
 func NewClusterInfo(ctx context.Context, client client.Client) (*ClusterInfo, error) {
 	clusterInfo := &ClusterInfo{}
 	var err error
-	clusterInfo.OperatorNamespace, err = getOperatorNamespace()
+
+	clusterInfo.OperatorNamespace, err = deploy.GetOperatorNamespace()
 	if err != nil {
 		return clusterInfo, fmt.Errorf("failed to find operator namespace: %w", err)
 	}
 
 	configMap := &corev1.ConfigMap{}
-	err = client.Get(ctx, types.NamespacedName{
+	if err = client.Get(ctx, types.NamespacedName{
 		Name:      distributionConfigMapName,
 		Namespace: clusterInfo.OperatorNamespace,
-	}, configMap)
-	if err != nil {
+	}, configMap); err != nil {
 		return clusterInfo, fmt.Errorf("failed to get distribution ConfigMap: %w", err)
 	}
 
@@ -43,13 +43,4 @@ func NewClusterInfo(ctx context.Context, client client.Client) (*ClusterInfo, er
 	}
 
 	return clusterInfo, nil
-}
-
-func getOperatorNamespace() (string, error) {
-	operatorNS, exist := os.LookupEnv("OPERATOR_NAMESPACE")
-	if exist && operatorNS != "" {
-		return operatorNS, nil
-	}
-	data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-	return string(data), err
 }

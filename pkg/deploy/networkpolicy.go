@@ -3,7 +3,6 @@ package deploy
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/go-logr/logr"
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
@@ -66,13 +65,4 @@ func HandleDisabledNetworkPolicy(ctx context.Context, c client.Client, networkPo
 	}
 	log.Info("Deleted NetworkPolicy", "name", networkPolicy.Name)
 	return nil
-}
-
-func GetOperatorNamespace() (string, error) {
-	operatorNS, exist := os.LookupEnv("OPERATOR_NAMESPACE")
-	if exist && operatorNS != "" {
-		return operatorNS, nil
-	}
-	data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-	return string(data), err
 }
