@@ -109,6 +109,18 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 
+#### ProviderHealthStatus
+
+HealthStatus represents the health status of a provider
+
+_Appears in:_
+- [ProviderInfo](#providerinfo)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `status` _string_ |  |  |  |
+| `message` _string_ |  |  |  |
+
 #### ProviderInfo
 
 ProviderInfo represents a single provider from the providers endpoint.
@@ -121,6 +133,7 @@ _Appears in:_
 | `api` _string_ |  |  |  |
 | `provider_id` _string_ |  |  |  |
 | `provider_type` _string_ |  |  |  |
+| `health` _[ProviderHealthStatus](#providerhealthstatus)_ |  |  |  |
 
 #### ServerSpec
 

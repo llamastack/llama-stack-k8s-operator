@@ -86,3 +86,21 @@ jobs:
       - name: Run e2e tests
         run: |
           make test-e2e
+
+      - name: Get logs
+        if: ${{ always() }}
+        run: |
+          kubectl -n llama-stack-test get all -o yaml > all.log
+          kubectl -n llama-stack-k8s-operator-system logs deployment.apps/llama-stack-k8s-operator-controller-manager > controller-manager.log
+          kubectl -n llama-stack-test describe all > all-describe.log
+          kubectl -n llama-stack-test describe events > events.log
+          kubectl get llamastackdistributions --all-namespaces -o yaml > llamastackdistributions.log
+
+      - name: Upload all logs to artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            *.log
+          retention-days: 1

@@ -10,9 +10,19 @@ func TestE2E(t *testing.T) {
 	// Run validation tests
 	t.Run("validation", TestValidationSuite)
 
-	// // Run creation tests
-	t.Run("creation", TestCreationSuite)
+	// Track if creation tests passed
+	creationFailed := false
 
-	// Run deletion tests if not skipped
-	t.Run("deletion", TestDeletionSuite)
+	// Run creation tests
+	t.Run("creation", func(t *testing.T) {
+		TestCreationSuite(t)
+		creationFailed = t.Failed()
+	})
+
+	// Run deletion tests only if creation passed
+	if !creationFailed {
+		t.Run("deletion", TestDeletionSuite)
+	} else {
+		t.Log("Skipping deletion tests due to creation test failures")
+	}
 }

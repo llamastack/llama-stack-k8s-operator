@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
 const (
@@ -53,6 +54,12 @@ type DistributionType struct {
 	// Image is the direct container image reference to use
 	// +optional
 	Image string `json:"image,omitempty"`
+}
+
+// HealthStatus represents the health status of a provider
+type ProviderHealthStatus struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
 }
 
 // LlamaStackDistributionSpec defines the desired state of LlamaStackDistribution.
@@ -97,9 +104,11 @@ type PodOverrides struct {
 
 // ProviderInfo represents a single provider from the providers endpoint.
 type ProviderInfo struct {
-	API          string `json:"api"`
-	ProviderID   string `json:"provider_id"`
-	ProviderType string `json:"provider_type"`
+	API          string                 `json:"api"`
+	ProviderID   string                 `json:"provider_id"`
+	ProviderType string                 `json:"provider_type"`
+	Config       apiextensionsv1.JSON   `json:"config"`
+	Health       ProviderHealthStatus   `json:"health"`
 }
 
 // DistributionConfig represents the configuration information from the providers endpoint.
