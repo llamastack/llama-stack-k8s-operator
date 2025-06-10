@@ -102,7 +102,7 @@ func (r *LlamaStackDistributionReconciler) fetchInstance(ctx context.Context, na
 			r.Log.Info("failed to find LlamaStackDistribution resource")
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to fetch LlamaStackDistribution: %w", err)
+		return nil, fmt.Errorf("failed fetching LlamaStackDistribution: %w", err)
 	}
 	return instance, nil
 }
