@@ -95,9 +95,17 @@ def main():
             print(f"::error file={path}::Error processing file: {e}")
 
     if total_errors > 0:
-        # For local execution, a simple summary is printed to standard output
-        # to inform the user of the outcome.
-        print(f"\nFound {total_errors} formatting error(s).")
+        # When running in GitHub Actions, a job summary provides a high-level
+        # overview of the linting results on the workflow run's summary page.
+        summary_file_path = os.getenv("GITHUB_STEP_SUMMARY")
+        if summary_file_path:
+            with open(summary_file_path, "a") as f:
+                f.write(f"### Go Error Message Linting\n\n")
+                f.write(f"Found {total_errors} formatting error(s).\n")
+        else:
+            # For local execution, a simple summary is printed to standard output
+            # to inform the user of the outcome.
+            print(f"\nFound {total_errors} formatting error(s).")
 
     sys.exit(exit_code)
 
