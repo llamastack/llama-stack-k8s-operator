@@ -25,7 +25,7 @@ def check_file(filepath: Path) -> list[dict]:
 
     Returns:
         A list of dictionaries, where each dictionary contains details of an error.
-    
+
     Raises:
         FileNotFoundError: If the file does not exist.
         Exception: For other file processing errors.
@@ -76,13 +76,13 @@ def main():
                     col_num = error['col_num']
                     end_col_num = error['end_col_num']
                     error_message = error['error_message']
-                    
+
                     # Format for GitHub Actions annotations:
                     # ::error title=<title>,file=<file>,line=<line>,col=<col>,endLine=<endLine>,endColumn=<endColumn>::<message>
                     title = "Incorrect error message format"
                     message = f'Error message must start with "{REQUIRED_WORDING}". Found: "{error_message}"'
                     print(f"::error title={title},file={path},line={line_num},col={col_num},endLine={line_num},endColumn={end_col_num}::{message}")
-        
+
         except FileNotFoundError:
             exit_code = 1
             total_errors += 1
