@@ -314,17 +314,17 @@ func (r *LlamaStackDistributionReconciler) getProviderInfo(ctx context.Context, 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create providers request: %w", err)
+		return nil, fmt.Errorf("failing to create providers request: %w", err)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make providers request: %w", err)
+		return nil, fmt.Errorf("failing to make providers request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to query providers endpoint: returned status code %d", resp.StatusCode)
+		return nil, fmt.Errorf("failing to query providers endpoint: returned status code %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
