@@ -33,7 +33,7 @@ const (
 )
 
 // testenvNamespaceCounter is used to generate unique namespace names for test isolation.
-var testenvNamespaceCounter int = 0
+var testenvNamespaceCounter int
 
 // baseInstance returns a minimal valid LlamaStackDistribution instance.
 // Namespace will be set to "default" and should be overridden by the caller if needed for specific test contexts.
