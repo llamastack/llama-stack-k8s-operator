@@ -68,7 +68,7 @@ All error messages in the codebase must follow a consistent format to improve re
 
 ### Rules for Error Messages
 
-1. All error messages must start with "failed to"
+1. All **wrapped** error messages must start with "failed to"
 2. Error messages should be descriptive and actionable
 
 ## Questions?
