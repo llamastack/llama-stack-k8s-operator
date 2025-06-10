@@ -324,7 +324,7 @@ func (r *LlamaStackDistributionReconciler) getProviderInfo(ctx context.Context, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("providers endpoint returned status code %d", resp.StatusCode)
+		return nil, fmt.Errorf("failed to query providers endpoint: returned status code %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
