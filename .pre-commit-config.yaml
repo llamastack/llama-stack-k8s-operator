@@ -54,6 +54,6 @@ repos:
         require_serial: true
       - id: check-go-error-messages
         name: Check Go Error Messages
-        entry: ./scripts/check_go_errors.py
+        entry: ./hack/check_go_errors.py
         language: python
         types: [go]

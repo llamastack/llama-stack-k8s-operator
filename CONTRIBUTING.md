@@ -64,6 +64,13 @@ git commit -m "Your commit message"
 
 Please follow the project's code style guidelines. The pre-commit hooks will help enforce many of these automatically.
 
+All error messages in the codebase must follow a consistent format to improve readability and maintainability. The pre-commit hook `check-go-error-messages` enforces these rules automatically.
+
+### Rules for Error Messages
+
+1. All error messages must start with "failed to"
+2. Error messages should be descriptive and actionable
+
 ## Questions?
 
 If you have any questions about contributing, please open an issue in the repository.
