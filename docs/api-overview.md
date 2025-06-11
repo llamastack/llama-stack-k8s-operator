@@ -132,17 +132,4 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `distribution` _[DistributionType](#distributiontype)_ |  |  |  |
-| `containerSpec` _[ContainerSpec](#containerspec)_ |  |  |  |
-| `podOverrides` _[PodOverrides](#podoverrides)_ |  |  |  |
-| `storage` _[StorageSpec](#storagespec)_ | Storage defines the persistent storage configuration |  |  |
-
-#### StorageSpec
-
-StorageSpec defines the persistent storage configuration
-
-_Appears in:_
-- [ServerSpec](#serverspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `mountPath` _string_ | MountPath is the path where the storage will be mounted in the container |  |  |
+| `containerSpec` _[ContainerSpec](#containerspec)_ | 
