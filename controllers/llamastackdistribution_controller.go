@@ -74,8 +74,12 @@ func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ct
 
 	// Fetch the LlamaStack instance
 	instance, err := r.fetchInstance(ctx, req.NamespacedName)
-	if err != nil || instance == nil { // If instance not found - skip reconciliation
+	if err != nil {
 		return ctrl.Result{}, err
+	}
+	if instance == nil {
+		r.Log.Info("LlamaStackDistribution resource not found, skipping reconciliation", "namespacedName", req.NamespacedName)
+		return ctrl.Result{}, nil
 	}
 
 	// Reconcile all resources
@@ -507,6 +511,47 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 	return deploy.ApplyNetworkPolicy(ctx, r.Client, r.Scheme, instance, networkPolicy, r.Log)
 }
 
+// createDefaultConfigMap creates a ConfigMap with default feature flag values.
+func createDefaultConfigMap(configMapName types.NamespacedName) (*corev1.ConfigMap, error) {
+	featureFlags := featureflags.FeatureFlags{
+		EnableNetworkPolicy: featureflags.FeatureFlag{
+			Enabled: featureflags.NetworkPolicyDefaultValue,
+		},
+	}
+
+	featureFlagsYAML, err := yaml.Marshal(featureFlags)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal default feature flags: %w", err)
+	}
+
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      configMapName.Name,
+			Namespace: configMapName.Namespace,
+		},
+		Data: map[string]string{
+			featureflags.FeatureFlagsKey: string(featureFlagsYAML),
+		},
+	}, nil
+}
+
+// parseFeatureFlags extracts and parses feature flags from ConfigMap data.
+func parseFeatureFlags(configMapData map[string]string) (bool, error) {
+	enableNetworkPolicy := featureflags.NetworkPolicyDefaultValue
+
+	featureFlagsYAML, exists := configMapData[featureflags.FeatureFlagsKey]
+	if !exists {
+		return enableNetworkPolicy, nil
+	}
+
+	var flags featureflags.FeatureFlags
+	if err := yaml.Unmarshal([]byte(featureFlagsYAML), &flags); err != nil {
+		return false, fmt.Errorf("failed to parse feature flags: %w", err)
+	}
+
+	return flags.EnableNetworkPolicy.Enabled, nil
+}
+
 // NewLlamaStackDistributionReconciler creates a new reconciler with default image mappings.
 func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Client, scheme *runtime.Scheme,
 	clusterInfo *cluster.ClusterInfo) (*LlamaStackDistributionReconciler, error) {
@@ -518,50 +563,34 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 	}
 
 	// Get the ConfigMap
-	// If the ConfigMap doesn't exist, create it with default feature flags false
-	// If the ConfigMap exists, parse the feature flags from configmpa
+	// If the ConfigMap doesn't exist, create it with default feature flags
+	// If the ConfigMap exists, parse the feature flags from the Configmap
 	configMap := &corev1.ConfigMap{}
 	configMapName := types.NamespacedName{
 		Name:      operatorConfigData,
 		Namespace: operatorNamespace,
 	}
-	if err = client.Get(ctx, configMapName, configMap); err != nil {
-		if k8serrors.IsNotFound(err) {
-			// Create the ConfigMap if it doesn't exist
-			featureFlags := featureflags.FeatureFlags{
-				EnableNetworkPolicy: featureflags.FeatureFlag{
-					Enabled: featureflags.NetworkPolicyDefaultValue,
-				},
-			}
-			featureFlagsYAML, e := yaml.Marshal(featureFlags)
-			if e != nil {
-				return nil, fmt.Errorf("failed to marshal default feature flags: %w", e)
-			}
 
-			configMap = &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      configMapName.Name,
-					Namespace: configMapName.Namespace,
-				},
-				Data: map[string]string{
-					featureflags.FeatureFlagsKey: string(featureFlagsYAML),
-				},
-			}
-			if err = client.Create(ctx, configMap); err != nil {
-				return nil, fmt.Errorf("failed to create ConfigMap: %w", err)
-			}
-		} else {
+	if err = client.Get(ctx, configMapName, configMap); err != nil {
+		if !k8serrors.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to get ConfigMap: %w", err)
+		}
+
+		// ConfigMap doesn't exist, create it with defaults
+		configMap, err = createDefaultConfigMap(configMapName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate default configMap: %w", err)
+		}
+
+		if err = client.Create(ctx, configMap); err != nil {
+			return nil, fmt.Errorf("failed to create ConfigMap: %w", err)
 		}
 	}
 
-	enableNetworkPolicy := featureflags.NetworkPolicyDefaultValue
-	if featureFlagsYAML, exists := configMap.Data[featureflags.FeatureFlagsKey]; exists {
-		var flags featureflags.FeatureFlags
-		if err := yaml.Unmarshal([]byte(featureFlagsYAML), &flags); err != nil {
-			return nil, fmt.Errorf("failed to parse feature flags: %w", err)
-		}
-		enableNetworkPolicy = flags.EnableNetworkPolicy.Enabled
+	// Parse feature flags from ConfigMap
+	enableNetworkPolicy, err := parseFeatureFlags(configMap.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse feature flags: %w", err)
 	}
 	return &LlamaStackDistributionReconciler{
 		Client:              client,

@@ -21,26 +21,26 @@ type ClusterInfo struct {
 
 // NewClusterInfo creates a new ClusterInfo object.
 func NewClusterInfo(ctx context.Context, client client.Client) (*ClusterInfo, error) {
-	clusterInfo := &ClusterInfo{}
-	var err error
-
-	clusterInfo.OperatorNamespace, err = deploy.GetOperatorNamespace()
+	operatorNamespace, err := deploy.GetOperatorNamespace()
 	if err != nil {
-		return clusterInfo, fmt.Errorf("failed to find operator namespace: %w", err)
+		return nil, fmt.Errorf("failed to find operator namespace: %w", err)
 	}
 
 	configMap := &corev1.ConfigMap{}
 	if err = client.Get(ctx, types.NamespacedName{
 		Name:      distributionConfigMapName,
-		Namespace: clusterInfo.OperatorNamespace,
+		Namespace: operatorNamespace,
 	}, configMap); err != nil {
-		return clusterInfo, fmt.Errorf("failed to get distribution ConfigMap: %w", err)
+		return nil, fmt.Errorf("failed to get distribution ConfigMap: %w", err)
 	}
 
-	clusterInfo.DistributionImages = make(map[string]string)
+	distributionImages := make(map[string]string)
 	for k, v := range configMap.Data {
-		clusterInfo.DistributionImages[k] = v
+		distributionImages[k] = v
 	}
 
-	return clusterInfo, nil
+	return &ClusterInfo{
+		OperatorNamespace:  operatorNamespace,
+		DistributionImages: distributionImages,
+	}, nil
 }
