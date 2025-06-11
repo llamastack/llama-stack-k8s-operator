@@ -252,7 +252,7 @@ spec:
                     type: object
                     x-kubernetes-validations:
                     - message: Only one of name or image can be specified
-                      rule: has(self.name) != has(self.image)
+                      rule: '!(has(self.name) && has(self.image))'
                   podOverrides:
                     description: PodOverrides allows advanced pod-level customization.
                     properties:
@@ -1987,7 +1987,6 @@ spec:
                         x-kubernetes-int-or-string: true
                     type: object
                 required:
-                - containerSpec
                 - distribution
                 type: object
             required:
