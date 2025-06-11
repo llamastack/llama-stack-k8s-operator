@@ -26,11 +26,13 @@ func NewClusterInfo(ctx context.Context, client client.Client) (*ClusterInfo, er
 		return nil, fmt.Errorf("failed to find operator namespace: %w", err)
 	}
 
-	configMap := &corev1.ConfigMap{}
-	if err = client.Get(ctx, types.NamespacedName{
+	configMapName := types.NamespacedName{
 		Name:      distributionConfigMapName,
 		Namespace: operatorNamespace,
-	}, configMap); err != nil {
+	}
+
+	configMap := &corev1.ConfigMap{}
+	if err = client.Get(ctx, configMapName, configMap); err != nil {
 		return nil, fmt.Errorf("failed to get distribution ConfigMap: %w", err)
 	}
 

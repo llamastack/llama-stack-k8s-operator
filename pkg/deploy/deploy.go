@@ -11,7 +11,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -24,7 +23,7 @@ func ApplyDeployment(ctx context.Context, cli client.Client, scheme *runtime.Sch
 	}
 
 	found := &appsv1.Deployment{}
-	err := cli.Get(ctx, types.NamespacedName{Name: deployment.Name, Namespace: deployment.Namespace}, found)
+	err := cli.Get(ctx, client.ObjectKeyFromObject(deployment), found)
 	if err != nil && errors.IsNotFound(err) {
 		logger.Info("Creating Deployment", "deployment", deployment.Name)
 		return cli.Create(ctx, deployment)
@@ -48,7 +47,7 @@ func ApplyService(ctx context.Context, cli client.Client, scheme *runtime.Scheme
 	}
 
 	found := &corev1.Service{}
-	err := cli.Get(ctx, types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, found)
+	err := cli.Get(ctx, client.ObjectKeyFromObject(service), found)
 	if err != nil && errors.IsNotFound(err) {
 		logger.Info("Creating Service", "service", service.Name)
 		return cli.Create(ctx, service)

@@ -184,7 +184,7 @@ func (r *LlamaStackDistributionReconciler) reconcilePVC(ctx context.Context, ins
 	}
 
 	found := &corev1.PersistentVolumeClaim{}
-	err := r.Get(ctx, types.NamespacedName{Name: pvc.Name, Namespace: pvc.Namespace}, found)
+	err := r.Get(ctx, client.ObjectKeyFromObject(pvc), found)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			logger.Info("Creating PVC", "pvc", pvc.Name)
