@@ -22,9 +22,9 @@ package v1alpha1
 //nolint:gci
 import (
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
 const (
@@ -104,11 +104,11 @@ type PodOverrides struct {
 
 // ProviderInfo represents a single provider from the providers endpoint.
 type ProviderInfo struct {
-	API          string                 `json:"api"`
-	ProviderID   string                 `json:"provider_id"`
-	ProviderType string                 `json:"provider_type"`
-	Config       apiextensionsv1.JSON   `json:"config"`
-	Health       ProviderHealthStatus   `json:"health"`
+	API          string               `json:"api"`
+	ProviderID   string               `json:"provider_id"`
+	ProviderType string               `json:"provider_type"`
+	Config       apiextensionsv1.JSON `json:"config"`
+	Health       ProviderHealthStatus `json:"health"`
 }
 
 // DistributionConfig represents the configuration information from the providers endpoint.

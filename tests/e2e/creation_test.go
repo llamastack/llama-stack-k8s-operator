@@ -246,7 +246,12 @@ func testDistributionStatus(t *testing.T, llsdistributionCR *v1alpha1.LlamaStack
 		require.NotEmpty(t, provider.ProviderID, "Provider should have ProviderID info")
 		require.NotEmpty(t, provider.ProviderType, "Provider should have ProviderType info")
 		require.NotNil(t, provider.Config, "Provider should have config info")
-		require.NotEmpty(t, provider.Health.Status, "Provider should have health info")
+		// If Ollama test it returns OK status
+		if provider.ProviderID == "ollama" {
+			require.Equal(t, "OK", provider.Health.Status, "Provider should have OK health status")
+		}
+		// Check that status is one of the allowed values
+		require.Contains(t, []string{"OK", "Error", "Not Implemented"}, provider.Health.Status, "Provider health status should be one of: OK, Error, Not Implemented")
 		// There is no message for OK status
 		if provider.Health.Status != "OK" {
 			require.NotEmpty(t, provider.Health.Message, "Provider should have health message")
