@@ -97,6 +97,32 @@ func TestBuildContainerSpec(t *testing.T) {
 					Name:      "lls-storage",
 					MountPath: "/custom/path",
 				}},
+				Command: nil,
+			},
+		},
+		{
+			name: "command and args overrides",
+			instance: &llamav1alpha1.LlamaStackDistribution{
+				Spec: llamav1alpha1.LlamaStackDistributionSpec{
+					Server: llamav1alpha1.ServerSpec{
+						ContainerSpec: llamav1alpha1.ContainerSpec{
+							Command: []string{"/custom/entrypoint.sh"},
+							Args:    []string{"--config", "/etc/config.yaml", "--debug"},
+						},
+					},
+				},
+			},
+			image: "test-image:latest",
+			expectedResult: corev1.Container{
+				Name:    llamav1alpha1.DefaultContainerName,
+				Image:   "test-image:latest",
+				Command: []string{"/custom/entrypoint.sh"},
+				Args:    []string{"--config", "/etc/config.yaml", "--debug"},
+				Ports:   []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
+				VolumeMounts: []corev1.VolumeMount{{
+					Name:      "lls-storage",
+					MountPath: llamav1alpha1.DefaultMountPath,
+				}},
 			},
 		},
 	}
@@ -110,6 +136,8 @@ func TestBuildContainerSpec(t *testing.T) {
 			assert.Equal(t, tc.expectedResult.Resources, result.Resources)
 			assert.Equal(t, tc.expectedResult.Env, result.Env)
 			assert.Equal(t, tc.expectedResult.VolumeMounts, result.VolumeMounts)
+			assert.Equal(t, tc.expectedResult.Command, result.Command)
+			assert.Equal(t, tc.expectedResult.Args, result.Args)
 		})
 	}
 }

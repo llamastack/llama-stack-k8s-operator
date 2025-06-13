@@ -24,6 +24,8 @@ _Appears in:_
 | `port` _integer_ |  |  |  |
 | `resources` _[ResourceRequirements](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#resourcerequirements-v1-core)_ |  |  |  |
 | `env` _[EnvVar](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#envvar-v1-core) array_ |  |  |  |
+| `command` _string array_ |  |  |  |
+| `args` _string array_ |  |  |  |
 
 #### DistributionConfig
 
