@@ -65,6 +65,14 @@ spec:
                     description: ContainerSpec defines the llama-stack server container
                       configuration.
                     properties:
+                      args:
+                        items:
+                          type: string
+                        type: array
+                      command:
+                        items:
+                          type: string
+                        type: array
                       env:
                         items:
                           description: EnvVar represents an environment variable present
