@@ -69,7 +69,6 @@ func setupTestReconciler(ctrlRuntimeClient client.Client, currentScheme *runtime
 	return &LlamaStackDistributionReconciler{
 		Client:      ctrlRuntimeClient,
 		Scheme:      currentScheme,
-		Log:         ctrl.Log.WithName("controllers").WithName("LlamaStackDistribution"),
 		ClusterInfo: clusterInfo,
 	}
 }
