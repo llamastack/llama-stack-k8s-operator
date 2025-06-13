@@ -3,11 +3,13 @@ package e2e
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v2"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -202,9 +204,22 @@ func testDistributionStatus(t *testing.T, llsdistributionCR *v1alpha1.LlamaStack
 			return false, nil
 		}
 
+		// Verify that providers have config and health info
+		if len(updatedDistribution.Status.DistributionConfig.Providers) == 0 {
+			return false, nil
+		}
+
 		return true, nil
 	})
-	require.NoError(t, err, "Failed to wait for distribution status update")
+	if err != nil {
+		// Get the final state to print on error
+		finalDistribution := &v1alpha1.LlamaStackDistribution{}
+		TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
+			Namespace: llsdistributionCR.Namespace,
+			Name:      llsdistributionCR.Name,
+		}, finalDistribution)
+		require.NoError(t, err, "Failed to wait for distribution status update", finalDistribution.Status)
+	}
 
 	// Get final state and verify
 	updatedDistribution := &v1alpha1.LlamaStackDistribution{}
@@ -220,6 +235,39 @@ func testDistributionStatus(t *testing.T, llsdistributionCR *v1alpha1.LlamaStack
 	require.Equal(t, updatedDistribution.Spec.Server.Distribution.Name,
 		updatedDistribution.Status.DistributionConfig.ActiveDistribution,
 		"Active distribution should match the spec")
+
+	// Verify provider config and health
+	require.NotEmpty(t, updatedDistribution.Status.DistributionConfig.Providers,
+		"Providers should be populated")
+
+	// Verify that each provider has config and health info
+	for _, provider := range updatedDistribution.Status.DistributionConfig.Providers {
+		require.NotEmpty(t, provider.API, "Provider should have API info")
+		require.NotEmpty(t, provider.ProviderID, "Provider should have ProviderID info")
+		require.NotEmpty(t, provider.ProviderType, "Provider should have ProviderType info")
+		require.NotNil(t, provider.Config, "Provider should have config info")
+		// If Ollama test it returns OK status
+		if provider.ProviderID == "ollama" {
+			require.Equal(t, "OK", provider.Health.Status, "Provider should have OK health status")
+		}
+		// Check that status is one of the allowed values
+		require.Contains(t, []string{"OK", "Error", "Not Implemented"}, provider.Health.Status, "Provider health status should be one of: OK, Error, Not Implemented")
+		// There is no message for OK status
+		if provider.Health.Status != "OK" {
+			require.NotEmpty(t, provider.Health.Message, "Provider should have health message")
+		}
+		require.NotEmpty(t, provider.Config, "Provider config should not be empty")
+	}
+
+	// Write the final distribution status to a file for CI to collect
+	yaml, err := yaml.Marshal(updatedDistribution)
+	if err != nil {
+		t.Fatalf("Failed to marshal distribution: %v", err)
+	}
+	// Weak - do this better to write to a temp file and then move it to the right place at the
+	// repo's root so the CI agent can collect it
+	err = os.WriteFile("../../distribution.log", yaml, 0644)
+	require.NoError(t, err)
 }
 
 func testPVCConfiguration(t *testing.T, distribution *v1alpha1.LlamaStackDistribution) {

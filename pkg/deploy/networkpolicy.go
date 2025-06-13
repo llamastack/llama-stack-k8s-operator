@@ -3,14 +3,12 @@ package deploy
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/go-logr/logr"
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	networkingv1 "k8s.io/api/networking/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -52,27 +50,19 @@ func ApplyNetworkPolicy(ctx context.Context, c client.Client, scheme *runtime.Sc
 func HandleDisabledNetworkPolicy(ctx context.Context, c client.Client, networkPolicy *networkingv1.NetworkPolicy, log logr.Logger) error {
 	log.Info("NetworkPolicy creation is disabled, checking if deletion is needed")
 	existingPolicy := &networkingv1.NetworkPolicy{}
-	err := c.Get(ctx, types.NamespacedName{Name: networkPolicy.Name, Namespace: networkPolicy.Namespace}, existingPolicy)
+	err := c.Get(ctx, client.ObjectKeyFromObject(networkPolicy), existingPolicy)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
+			log.Info("NetworkPolicy does not exist, nothing to delete", "name", networkPolicy.Name)
 			return nil // NetworkPolicy doesn't exist, nothing to do
 		}
 		return fmt.Errorf("failed to check NetworkPolicy existence: %w", err)
 	}
 
 	// NetworkPolicy exists, proceed with deletion
-	if err := c.Delete(ctx, networkPolicy); err != nil {
+	if err := c.Delete(ctx, existingPolicy); err != nil {
 		return fmt.Errorf("failed to delete NetworkPolicy: %w", err)
 	}
 	log.Info("Deleted NetworkPolicy", "name", networkPolicy.Name)
 	return nil
-}
-
-func GetOperatorNamespace() (string, error) {
-	operatorNS, exist := os.LookupEnv("OPERATOR_NAMESPACE")
-	if exist && operatorNS != "" {
-		return operatorNS, nil
-	}
-	data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-	return string(data), err
 }

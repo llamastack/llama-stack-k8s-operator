@@ -243,7 +243,7 @@ spec:
                     type: object
                     x-kubernetes-validations:
                     - message: Only one of name or image can be specified
-                      rule: has(self.name) != has(self.image)
+                      rule: '!(has(self.name) && has(self.image))'
                   podOverrides:
                     description: PodOverrides allows advanced pod-level customization.
                     properties:
@@ -1978,7 +1978,6 @@ spec:
                         x-kubernetes-int-or-string: true
                     type: object
                 required:
-                - containerSpec
                 - distribution
                 type: object
             required:
@@ -2009,12 +2008,28 @@ spec:
                       properties:
                         api:
                           type: string
+                        config:
+                          x-kubernetes-preserve-unknown-fields: true
+                        health:
+                          description: HealthStatus represents the health status of
+                            a provider
+                          properties:
+                            message:
+                              type: string
+                            status:
+                              type: string
+                          required:
+                          - message
+                          - status
+                          type: object
                         provider_id:
                           type: string
                         provider_type:
                           type: string
                       required:
                       - api
+                      - config
+                      - health
                       - provider_id
                       - provider_type
                       type: object

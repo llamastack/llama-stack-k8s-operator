@@ -12,6 +12,7 @@ pull_request_rules:
     - check-success=pre-commit
     - check-success=e2e-tests
     - check-success=DCO
+    - check-success=tests
     # - check-success=build-latest-image # TODO: uncomment this when the credentials are added to the repo
 
   actions:

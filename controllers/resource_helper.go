@@ -100,11 +100,10 @@ func configurePodStorage(instance *llamav1alpha1.LlamaStackDistribution, contain
 func (r *LlamaStackDistributionReconciler) validateDistribution(instance *llamav1alpha1.LlamaStackDistribution) error {
 	// If using distribution name, validate it exists in clusterInfo
 	if instance.Spec.Server.Distribution.Name != "" {
-		clusterInfo := r.ClusterInfo
-		if clusterInfo == nil {
+		if r.ClusterInfo == nil {
 			return errors.New("failed to initialize cluster info")
 		}
-		if _, exists := clusterInfo.DistributionImages[instance.Spec.Server.Distribution.Name]; !exists {
+		if _, exists := r.ClusterInfo.DistributionImages[instance.Spec.Server.Distribution.Name]; !exists {
 			return fmt.Errorf("failed to validate distribution: %s. Distribution name not supported", instance.Spec.Server.Distribution.Name)
 		}
 	}

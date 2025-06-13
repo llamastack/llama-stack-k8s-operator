@@ -22,6 +22,8 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `name` _string_ |  | llama-stack |  |
 | `port` _integer_ |  |  |  |
+| `resources` _[ResourceRequirements](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#resourcerequirements-v1-core)_ |  |  |  |
+| `env` _[EnvVar](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#envvar-v1-core) array_ |  |  |  |
 
 #### DistributionConfig
 
@@ -59,6 +61,7 @@ _Appears in:_
 | `kind` _string_ | `LlamaStackDistribution` | | |
 | `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  |  |
 | `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  |  |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[LlamaStackDistributionSpec](#llamastackdistributionspec)_ |  |  |  |
 | `status` _[LlamaStackDistributionStatus](#llamastackdistributionstatus)_ |  |  |  |
 
@@ -72,6 +75,7 @@ LlamaStackDistributionList contains a list of LlamaStackDistribution.
 | `kind` _string_ | `LlamaStackDistributionList` | | |
 | `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  |  |
 | `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  |  |
+| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `items` _[LlamaStackDistribution](#llamastackdistribution) array_ |  |  |  |
 
 #### LlamaStackDistributionSpec
@@ -108,6 +112,20 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `volumes` _[Volume](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volume-v1-core) array_ |  |  |  |
+| `volumeMounts` _[VolumeMount](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volumemount-v1-core) array_ |  |  |  |
+
+#### ProviderHealthStatus
+
+HealthStatus represents the health status of a provider
+
+_Appears in:_
+- [ProviderInfo](#providerinfo)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `status` _string_ |  |  |  |
+| `message` _string_ |  |  |  |
 
 #### ProviderInfo
 
@@ -121,6 +139,8 @@ _Appears in:_
 | `api` _string_ |  |  |  |
 | `provider_id` _string_ |  |  |  |
 | `provider_type` _string_ |  |  |  |
+| `config` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ |  |  |  |
+| `health` _[ProviderHealthStatus](#providerhealthstatus)_ |  |  |  |
 
 #### ServerSpec
 
@@ -145,4 +165,5 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `size` _[Quantity](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#quantity-resource-api)_ | Size is the size of the persistent volume claim created for holding persistent data of the llama-stack server |  |  |
 | `mountPath` _string_ | MountPath is the path where the storage will be mounted in the container |  |  |

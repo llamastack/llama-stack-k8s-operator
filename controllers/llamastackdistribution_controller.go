@@ -23,7 +23,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -47,11 +46,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+const (
+	operatorConfigData = "llama-stack-operator-config"
+)
+
 // LlamaStackDistributionReconciler reconciles a LlamaStack object.
 type LlamaStackDistributionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-	Log    logr.Logger
 	// Feature flags
 	EnableNetworkPolicy bool
 	// Cluster info
@@ -67,7 +69,13 @@ type LlamaStackDistributionReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.12.2/pkg/reconcile
 func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	r.Log = r.Log.WithValues("llamastack", req.NamespacedName)
+	// Create a logger with request-specific values and store it in the context.
+	// This ensures consistent logging across the reconciliation process and its sub-functions.
+	// The logger is retrieved from the context in each sub-function that needs it, maintaining
+	// the request-specific values throughout the call chain.
+	// Always ensure the name of the CR and the namespace are included in the logger.
+	log := log.FromContext(ctx).WithValues("namespace", req.Namespace, "name", req.Name)
+	ctx = logr.NewContext(ctx, log)
 
 	// Fetch the LlamaStack instance
 	instance, err := r.fetchInstance(ctx, req.NamespacedName)
@@ -75,8 +83,8 @@ func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ct
 		return ctrl.Result{}, err
 	}
 
-	// Instance not found - skip reconciliation
 	if instance == nil {
+		log.Info("LlamaStackDistribution resource not found, skipping reconciliation")
 		return ctrl.Result{}, nil
 	}
 
@@ -90,16 +98,17 @@ func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ct
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	r.Log.Info("Successfully reconciled LlamaStackDistribution")
+	log.Info("Successfully reconciled LlamaStackDistribution")
 	return ctrl.Result{}, nil
 }
 
 // fetchInstance retrieves the LlamaStackDistribution instance.
 func (r *LlamaStackDistributionReconciler) fetchInstance(ctx context.Context, namespacedName types.NamespacedName) (*llamav1alpha1.LlamaStackDistribution, error) {
+	log := log.FromContext(ctx)
 	instance := &llamav1alpha1.LlamaStackDistribution{}
 	if err := r.Get(ctx, namespacedName, instance); err != nil {
 		if k8serrors.IsNotFound(err) {
-			r.Log.Info("failed to find LlamaStackDistribution resource")
+			log.Info("failed to find LlamaStackDistribution resource")
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to fetch LlamaStackDistribution: %w", err)
@@ -182,7 +191,7 @@ func (r *LlamaStackDistributionReconciler) reconcilePVC(ctx context.Context, ins
 	}
 
 	found := &corev1.PersistentVolumeClaim{}
-	err := r.Get(ctx, types.NamespacedName{Name: pvc.Name, Namespace: pvc.Namespace}, found)
+	err := r.Get(ctx, client.ObjectKeyFromObject(pvc), found)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			logger.Info("Creating PVC", "pvc", pvc.Name)
@@ -224,11 +233,17 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &instance.Spec.Replicas,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
+				MatchLabels: map[string]string{
+					llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
+					"app.kubernetes.io/instance":  instance.Name,
+				},
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
+					Labels: map[string]string{
+						llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
+						"app.kubernetes.io/instance":  instance.Name,
+					},
 				},
 				Spec: podSpec,
 			},
@@ -240,19 +255,20 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 
 // reconcileService manages the Service if ports are defined.
 func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	log := log.FromContext(ctx)
 	// Use the container's port (defaulted to 8321 if unset)
-	port := instance.Spec.Server.ContainerSpec.Port
-	if port == 0 {
-		port = llamav1alpha1.DefaultServerPort
-	}
+	port := deploy.GetServicePort(instance)
 
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      instance.Name + "-service",
+			Name:      deploy.GetServiceName(instance),
 			Namespace: instance.Namespace,
 		},
 		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue},
+			Selector: map[string]string{
+				llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
+				"app.kubernetes.io/instance":  instance.Name,
+			},
 			Ports: []corev1.ServicePort{{
 				Name: llamav1alpha1.DefaultServicePortName,
 				Port: port,
@@ -264,16 +280,13 @@ func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context,
 		},
 	}
 
-	return deploy.ApplyService(ctx, r.Client, r.Scheme, instance, service, r.Log)
+	return deploy.ApplyService(ctx, r.Client, r.Scheme, instance, service, log)
 }
 
 // getServerURL returns the URL for the LlamaStack server.
 func (r *LlamaStackDistributionReconciler) getServerURL(instance *llamav1alpha1.LlamaStackDistribution, path string) *url.URL {
-	serviceName := fmt.Sprintf("%s-service", instance.Name)
-	port := instance.Spec.Server.ContainerSpec.Port
-	if port == 0 {
-		port = llamav1alpha1.DefaultServerPort
-	}
+	serviceName := deploy.GetServiceName(instance)
+	port := deploy.GetServicePort(instance)
 
 	return &url.URL{
 		Scheme: "http",
@@ -324,7 +337,7 @@ func (r *LlamaStackDistributionReconciler) getProviderInfo(ctx context.Context, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("providers endpoint returned status code %d", resp.StatusCode)
+		return nil, fmt.Errorf("failed to query providers endpoint: returned status code %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -342,8 +355,10 @@ func (r *LlamaStackDistributionReconciler) getProviderInfo(ctx context.Context, 
 	return response.Data, nil
 }
 
-// updateStatus refreshes the LlamaStack status.
+// updateStatus refreshes the LlamaStackDistribution status.
 func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	log := log.FromContext(ctx).WithValues("namespace", instance.Namespace, "name", instance.Name)
+
 	deployment := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, deployment)
 	if err != nil && !k8serrors.IsNotFound(err) {
@@ -404,7 +419,7 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 		// Process health check results by reading from the channel
 		healthResult := <-healthChan
 		if healthResult.err != nil {
-			r.Log.Error(healthResult.err, "failed to check health endpoint")
+			log.Error(healthResult.err, "failed to check health endpoint")
 		} else {
 			instance.Status.Ready = healthResult.healthy
 		}
@@ -412,7 +427,7 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 		// Process provider information results
 		providersResult := <-providersChan
 		if providersResult.err != nil {
-			r.Log.Error(providersResult.err, "failed to get provider information")
+			log.Error(providersResult.err, "failed to get provider information")
 		} else {
 			instance.Status.DistributionConfig.Providers = providersResult.providers
 		}
@@ -429,6 +444,7 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 
 // reconcileNetworkPolicy manages the NetworkPolicy for the LlamaStack server.
 func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	log := log.FromContext(ctx)
 	networkPolicy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name + "-network-policy",
@@ -438,14 +454,10 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 
 	// If feature is disabled, delete the NetworkPolicy if it exists
 	if !r.EnableNetworkPolicy {
-		return deploy.HandleDisabledNetworkPolicy(ctx, r.Client, networkPolicy, r.Log)
+		return deploy.HandleDisabledNetworkPolicy(ctx, r.Client, networkPolicy, log)
 	}
 
-	// Use the container's port (defaulted to 8321 if unset)
-	port := instance.Spec.Server.ContainerSpec.Port
-	if port == 0 {
-		port = llamav1alpha1.DefaultServerPort
-	}
+	port := deploy.GetServicePort(instance)
 
 	// get operator namespace
 	operatorNamespace, err := deploy.GetOperatorNamespace()
@@ -457,6 +469,7 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 		PodSelector: metav1.LabelSelector{
 			MatchLabels: map[string]string{
 				llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
+				"app.kubernetes.io/instance":  instance.Name,
 			},
 		},
 		PolicyTypes: []networkingv1.PolicyType{
@@ -465,7 +478,7 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 		Ingress: []networkingv1.NetworkPolicyIngressRule{
 			{
 				From: []networkingv1.NetworkPolicyPeer{
-					{
+					{ // to match all pods in all namespaces
 						PodSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"app.kubernetes.io/part-of": llamav1alpha1.DefaultContainerName,
@@ -485,8 +498,8 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 			},
 			{
 				From: []networkingv1.NetworkPolicyPeer{
-					{
-						PodSelector: &metav1.LabelSelector{}, // Empty podSelector to match all pods
+					{ // to match all pods in matched namespace
+						PodSelector: &metav1.LabelSelector{},
 						NamespaceSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"kubernetes.io/metadata.name": operatorNamespace,
@@ -503,79 +516,95 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 					},
 				},
 			},
-			{
-				From: []networkingv1.NetworkPolicyPeer{
-					{
-						PodSelector: &metav1.LabelSelector{}, // Empty podSelector to match all pods
-					},
-				},
-				Ports: []networkingv1.NetworkPolicyPort{
-					{
-						Protocol: (*corev1.Protocol)(ptr.To("TCP")),
-						Port: &intstr.IntOrString{
-							IntVal: port,
-						},
-					},
-				},
-			},
 		},
 	}
 
-	return deploy.ApplyNetworkPolicy(ctx, r.Client, r.Scheme, instance, networkPolicy, r.Log)
+	return deploy.ApplyNetworkPolicy(ctx, r.Client, r.Scheme, instance, networkPolicy, log)
+}
+
+// createDefaultConfigMap creates a ConfigMap with default feature flag values.
+func createDefaultConfigMap(configMapName types.NamespacedName) (*corev1.ConfigMap, error) {
+	featureFlags := featureflags.FeatureFlags{
+		EnableNetworkPolicy: featureflags.FeatureFlag{
+			Enabled: featureflags.NetworkPolicyDefaultValue,
+		},
+	}
+
+	featureFlagsYAML, err := yaml.Marshal(featureFlags)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal default feature flags: %w", err)
+	}
+
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      configMapName.Name,
+			Namespace: configMapName.Namespace,
+		},
+		Data: map[string]string{
+			featureflags.FeatureFlagsKey: string(featureFlagsYAML),
+		},
+	}, nil
+}
+
+// parseFeatureFlags extracts and parses feature flags from ConfigMap data.
+func parseFeatureFlags(configMapData map[string]string) (bool, error) {
+	enableNetworkPolicy := featureflags.NetworkPolicyDefaultValue
+
+	featureFlagsYAML, exists := configMapData[featureflags.FeatureFlagsKey]
+	if !exists {
+		return enableNetworkPolicy, nil
+	}
+
+	var flags featureflags.FeatureFlags
+	if err := yaml.Unmarshal([]byte(featureFlagsYAML), &flags); err != nil {
+		return false, fmt.Errorf("failed to parse feature flags: %w", err)
+	}
+
+	return flags.EnableNetworkPolicy.Enabled, nil
 }
 
 // NewLlamaStackDistributionReconciler creates a new reconciler with default image mappings.
 func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Client, scheme *runtime.Scheme,
 	clusterInfo *cluster.ClusterInfo) (*LlamaStackDistributionReconciler, error) {
-	log := log.FromContext(ctx).WithName("controller")
 	// get operator namespace
 	operatorNamespace, err := deploy.GetOperatorNamespace()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get operator namespace: %w", err)
 	}
 
-	// Read the ConfigMap
+	// Get the ConfigMap
+	// If the ConfigMap doesn't exist, create it with default feature flags
+	// If the ConfigMap exists, parse the feature flags from the Configmap
 	configMap := &corev1.ConfigMap{}
 	configMapName := types.NamespacedName{
-		Name:      "llama-stack-operator-config",
+		Name:      operatorConfigData,
 		Namespace: operatorNamespace,
 	}
-	err = client.Get(ctx, configMapName, configMap)
-	if err != nil {
-		if k8serrors.IsNotFound(err) {
-			// Create the ConfigMap if it doesn't exist
-			configMap = &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      configMapName.Name,
-					Namespace: configMapName.Namespace,
-				},
-				Data: map[string]string{
-					featureflags.FeatureFlagsKey: fmt.Sprintf("%s: %v",
-						featureflags.EnableNetworkPolicyKey, featureflags.NetworkPolicyDefaultValue),
-				},
-			}
-			if err = client.Create(ctx, configMap); err != nil {
-				return nil, fmt.Errorf("failed to create ConfigMap: %w", err)
-			}
-		} else {
-			return nil, fmt.Errorf("failed to read ConfigMap: %w", err)
+
+	if err = client.Get(ctx, configMapName, configMap); err != nil {
+		if !k8serrors.IsNotFound(err) {
+			return nil, fmt.Errorf("failed to get ConfigMap: %w", err)
+		}
+
+		// ConfigMap doesn't exist, create it with defaults
+		configMap, err = createDefaultConfigMap(configMapName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate default configMap: %w", err)
+		}
+
+		if err = client.Create(ctx, configMap); err != nil {
+			return nil, fmt.Errorf("failed to create ConfigMap: %w", err)
 		}
 	}
 
-	// Parse the feature flag
-	enableNetworkPolicy := featureflags.NetworkPolicyDefaultValue
-	if featureFlagsYAML, exists := configMap.Data[featureflags.FeatureFlagsKey]; exists {
-		var flags featureflags.FeatureFlags
-		if err := yaml.Unmarshal([]byte(featureFlagsYAML), &flags); err != nil {
-			log.Error(err, "failed to parse feature flags")
-		} else if flags.EnableNetworkPolicy != "" {
-			enableNetworkPolicy = strings.ToLower(flags.EnableNetworkPolicy) == "true"
-		}
+	// Parse feature flags from ConfigMap
+	enableNetworkPolicy, err := parseFeatureFlags(configMap.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse feature flags: %w", err)
 	}
 	return &LlamaStackDistributionReconciler{
 		Client:              client,
 		Scheme:              scheme,
-		Log:                 log,
 		EnableNetworkPolicy: enableNetworkPolicy,
 		ClusterInfo:         clusterInfo,
 	}, nil

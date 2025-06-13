@@ -22,6 +22,7 @@ package v1alpha1
 //nolint:gci
 import (
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -45,7 +46,7 @@ const (
 var DefaultStorageSize = resource.MustParse("10Gi")
 
 // DistributionType defines the distribution configuration for llama-stack.
-// +kubebuilder:validation:XValidation:rule="has(self.name) != has(self.image)",message="Only one of name or image can be specified"
+// +kubebuilder:validation:XValidation:rule="!(has(self.name) && has(self.image))",message="Only one of name or image can be specified"
 type DistributionType struct {
 	// Name is the distribution name that maps to supported distributions.
 	// +optional
@@ -53,6 +54,12 @@ type DistributionType struct {
 	// Image is the direct container image reference to use
 	// +optional
 	Image string `json:"image,omitempty"`
+}
+
+// HealthStatus represents the health status of a provider
+type ProviderHealthStatus struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
 }
 
 // LlamaStackDistributionSpec defines the desired state of LlamaStackDistribution.
@@ -65,7 +72,7 @@ type LlamaStackDistributionSpec struct {
 // ServerSpec defines the desired state of llama server.
 type ServerSpec struct {
 	Distribution  DistributionType `json:"distribution"`
-	ContainerSpec ContainerSpec    `json:"containerSpec"`
+	ContainerSpec ContainerSpec    `json:"containerSpec,omitempty"`
 	PodOverrides  *PodOverrides    `json:"podOverrides,omitempty"` // Optional pod-level overrides
 	// Storage defines the persistent storage configuration
 	// +optional
@@ -97,9 +104,11 @@ type PodOverrides struct {
 
 // ProviderInfo represents a single provider from the providers endpoint.
 type ProviderInfo struct {
-	API          string `json:"api"`
-	ProviderID   string `json:"provider_id"`
-	ProviderType string `json:"provider_type"`
+	API          string               `json:"api"`
+	ProviderID   string               `json:"provider_id"`
+	ProviderType string               `json:"provider_type"`
+	Config       apiextensionsv1.JSON `json:"config"`
+	Health       ProviderHealthStatus `json:"health"`
 }
 
 // DistributionConfig represents the configuration information from the providers endpoint.
@@ -147,5 +156,5 @@ func init() { //nolint:gochecknoinits
 
 // HasPorts checks if the container spec defines a port.
 func (r *LlamaStackDistribution) HasPorts() bool {
-	return r.Spec.Server.ContainerSpec.Port != 0 || len(r.Spec.Server.ContainerSpec.Env) > 0 // Port or env implies service need
+	return r.Spec.Server.ContainerSpec.Port != 0 || len(r.Spec.Server.ContainerSpec.Env) > 0
 }

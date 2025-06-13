@@ -301,7 +301,7 @@ api-docs: crd-ref-docs ## Creates API docs using https://github.com/elastic/crd-
 	mkdir -p docs
 	$(CRD_REF_DOCS) --source-path ./ --output-path $(API_DOCS_PATH) --renderer markdown --config ./crd-ref-docs.config.yaml
 	@# Combined command to remove .io links, ensure a trailing newline, and collapse multiple blank lines.
-	@sed -i.bak -e '/\.io\/[^v][^1].*)/d' -e '/^$$/N;/^\n$$/D' $(API_DOCS_PATH)
+	@sed -i.bak -e  '/^$$/N;/^\n$$/D' $(API_DOCS_PATH)
 	@# BSD sed doesn't generate trailing newlines, so no need to remove them.
 	@# BSD sed does not have a '--version' flag, so we need to check for it.
 	@if sed --version >/dev/null 2>&1; then \

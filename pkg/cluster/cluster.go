@@ -3,8 +3,8 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"os"
 
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -21,35 +21,28 @@ type ClusterInfo struct {
 
 // NewClusterInfo creates a new ClusterInfo object.
 func NewClusterInfo(ctx context.Context, client client.Client) (*ClusterInfo, error) {
-	clusterInfo := &ClusterInfo{}
-	var err error
-	clusterInfo.OperatorNamespace, err = getOperatorNamespace()
+	operatorNamespace, err := deploy.GetOperatorNamespace()
 	if err != nil {
-		return clusterInfo, fmt.Errorf("failed to find operator namespace: %w", err)
+		return nil, fmt.Errorf("failed to find operator namespace: %w", err)
+	}
+
+	configMapName := types.NamespacedName{
+		Name:      distributionConfigMapName,
+		Namespace: operatorNamespace,
 	}
 
 	configMap := &corev1.ConfigMap{}
-	err = client.Get(ctx, types.NamespacedName{
-		Name:      distributionConfigMapName,
-		Namespace: clusterInfo.OperatorNamespace,
-	}, configMap)
-	if err != nil {
-		return clusterInfo, fmt.Errorf("failed to get distribution ConfigMap: %w", err)
+	if err = client.Get(ctx, configMapName, configMap); err != nil {
+		return nil, fmt.Errorf("failed to get distribution ConfigMap: %w", err)
 	}
 
-	clusterInfo.DistributionImages = make(map[string]string)
+	distributionImages := make(map[string]string)
 	for k, v := range configMap.Data {
-		clusterInfo.DistributionImages[k] = v
+		distributionImages[k] = v
 	}
 
-	return clusterInfo, nil
-}
-
-func getOperatorNamespace() (string, error) {
-	operatorNS, exist := os.LookupEnv("OPERATOR_NAMESPACE")
-	if exist && operatorNS != "" {
-		return operatorNS, nil
-	}
-	data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-	return string(data), err
+	return &ClusterInfo{
+		OperatorNamespace:  operatorNamespace,
+		DistributionImages: distributionImages,
+	}, nil
 }
