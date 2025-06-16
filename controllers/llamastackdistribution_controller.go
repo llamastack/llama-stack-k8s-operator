@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/go-cmp/cmp"
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
@@ -42,8 +43,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
 const (
@@ -153,7 +157,36 @@ func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Contex
 // SetupWithManager sets up the controller with the Manager.
 func (r *LlamaStackDistributionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&llamav1alpha1.LlamaStackDistribution{}).
+		For(&llamav1alpha1.LlamaStackDistribution{}, builder.WithPredicates(predicate.Funcs{
+			UpdateFunc: func(e event.UpdateEvent) bool {
+				// Safely type assert old object
+				oldObj, ok := e.ObjectOld.(*llamav1alpha1.LlamaStackDistribution)
+				if !ok {
+					return false
+				}
+				oldObjCopy := oldObj.DeepCopy()
+
+				// Safely type assert new object
+				newObj, ok := e.ObjectNew.(*llamav1alpha1.LlamaStackDistribution)
+				if !ok {
+					return false
+				}
+				newObjCopy := newObj.DeepCopy()
+
+				// Compare only spec, ignoring metadata and status
+				if diff := cmp.Diff(oldObjCopy.Spec, newObjCopy.Spec); diff != "" {
+					logger := mgr.GetLogger().WithValues("namespace", newObjCopy.Namespace, "name", newObjCopy.Name)
+					logger.Info("LlamaStackDistribution CR spec changed")
+					// Note that both the logger and fmt.Printf could appear entangled in the output
+					// but there is no simple way to avoid this (forcing the logger to flush its output).
+					// When the logger is used to print the diff the output is hard to read,
+					// fmt.Printf is better for readability.
+					fmt.Printf("%s\n", diff)
+				}
+
+				return true
+			},
+		})).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&networkingv1.NetworkPolicy{}).
