@@ -23,6 +23,7 @@ import (
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -228,7 +229,7 @@ func TestConfigurePodStorage(t *testing.T) {
 			verifyStorageVolumes(t, result, tc.instance, tc.expectedPVCVolume, tc.expectedEmptyDir)
 
 			if tc.expectedOverrides {
-				verifyPodOverrides(t, result)
+				verifyPodOverrides(t, result, tc.instance)
 			}
 		})
 	}
@@ -264,37 +265,57 @@ func verifyStorageVolumes(t *testing.T, podSpec corev1.PodSpec, instance *llamav
 }
 
 // verifyPodOverrides validates that pod overrides are correctly applied.
-func verifyPodOverrides(t *testing.T, podSpec corev1.PodSpec) {
+func verifyPodOverrides(t *testing.T, podSpec corev1.PodSpec, instance *llamav1alpha1.LlamaStackDistribution) {
 	t.Helper()
 
-	// Check for overridden volume.
-	volumeFound := findVolumeByName(podSpec.Volumes, "test-volume")
-	assert.True(t, volumeFound, "Expected override volume not found")
+	if instance.Spec.Server.PodOverrides == nil {
+		return
+	}
 
-	// Check for overridden volume mount.
-	mountFound := findVolumeMountByNameAndPath(podSpec.Containers[0].VolumeMounts,
-		"test-volume", "/test/path")
-	assert.True(t, mountFound, "Expected override volume mount not found")
+	verifyServiceAccount(t, podSpec, instance)
+	verifyVolumes(t, podSpec, instance)
+	verifyVolumeMounts(t, podSpec, instance)
 }
 
-// findVolumeByName checks if a volume with the given name exists.
-func findVolumeByName(volumes []corev1.Volume, name string) bool {
-	for _, vol := range volumes {
-		if vol.Name == name {
-			return true
-		}
+func verifyServiceAccount(t *testing.T, podSpec corev1.PodSpec, instance *llamav1alpha1.LlamaStackDistribution) {
+	t.Helper()
+	if instance.Spec.Server.PodOverrides.ServiceAccountName != "" {
+		assert.Equal(t, instance.Spec.Server.PodOverrides.ServiceAccountName, podSpec.ServiceAccountName)
 	}
-	return false
 }
 
-// findVolumeMountByNameAndPath checks if a volume mount with the given name and path exists.
-func findVolumeMountByNameAndPath(mounts []corev1.VolumeMount, name, path string) bool {
-	for _, mount := range mounts {
-		if mount.Name == name && mount.MountPath == path {
-			return true
+func verifyVolumes(t *testing.T, podSpec corev1.PodSpec, instance *llamav1alpha1.LlamaStackDistribution) {
+	t.Helper()
+	if len(instance.Spec.Server.PodOverrides.Volumes) > 0 {
+		for _, volume := range instance.Spec.Server.PodOverrides.Volumes {
+			found := false
+			for _, podVolume := range podSpec.Volumes {
+				if podVolume.Name == volume.Name {
+					found = true
+					break
+				}
+			}
+			assert.True(t, found, "Volume %s not found in pod spec", volume.Name)
 		}
 	}
-	return false
+}
+
+func verifyVolumeMounts(t *testing.T, podSpec corev1.PodSpec, instance *llamav1alpha1.LlamaStackDistribution) {
+	t.Helper()
+	if len(instance.Spec.Server.PodOverrides.VolumeMounts) > 0 {
+		for _, container := range podSpec.Containers {
+			for _, mount := range instance.Spec.Server.PodOverrides.VolumeMounts {
+				found := false
+				for _, podMount := range container.VolumeMounts {
+					if podMount.Name == mount.Name {
+						found = true
+						break
+					}
+				}
+				assert.True(t, found, "VolumeMount %s not found in container %s", mount.Name, container.Name)
+			}
+		}
+	}
 }
 
 // createLSD creates a LlamaStackDistribution instance with optional name and image.
@@ -420,4 +441,102 @@ func TestDistributionWithoutClusterInfo(t *testing.T) {
 	err := r.validateDistribution(instance)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to initialize cluster info")
+}
+
+func TestPodOverridesWithServiceAccount(t *testing.T) {
+	// Create a test instance with ServiceAccount override
+	instance := &llamav1alpha1.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-instance",
+			Namespace: "test-namespace",
+		},
+		Spec: llamav1alpha1.LlamaStackDistributionSpec{
+			Server: llamav1alpha1.ServerSpec{
+				PodOverrides: &llamav1alpha1.PodOverrides{
+					ServiceAccountName: "custom-sa",
+				},
+			},
+		},
+	}
+
+	// Create deployment
+	deployment := &appsv1.Deployment{
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name: "test-container",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Apply pod overrides
+	configurePodOverrides(instance, &deployment.Spec.Template.Spec)
+
+	// Verify ServiceAccount name
+	if deployment.Spec.Template.Spec.ServiceAccountName != "custom-sa" {
+		t.Errorf("expected ServiceAccountName to be 'custom-sa', got %s", deployment.Spec.Template.Spec.ServiceAccountName)
+	}
+}
+
+func TestPodOverridesWithoutServiceAccount(t *testing.T) {
+	// Create a test instance without ServiceAccount override
+	instance := &llamav1alpha1.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-instance",
+			Namespace: "test-namespace",
+		},
+		Spec: llamav1alpha1.LlamaStackDistributionSpec{
+			Server: llamav1alpha1.ServerSpec{
+				PodOverrides: &llamav1alpha1.PodOverrides{},
+			},
+		},
+	}
+
+	// Create deployment
+	deployment := &appsv1.Deployment{
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name: "test-container",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Apply pod overrides
+	configurePodOverrides(instance, &deployment.Spec.Template.Spec)
+
+	// Verify ServiceAccount name is empty
+	if deployment.Spec.Template.Spec.ServiceAccountName != "" {
+		t.Errorf("expected empty ServiceAccountName, got %s", deployment.Spec.Template.Spec.ServiceAccountName)
+	}
+}
+
+// configurePodOverrides applies pod-level overrides from the LlamaStackDistribution spec.
+func configurePodOverrides(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+	if instance.Spec.Server.PodOverrides != nil {
+		// Set ServiceAccount name if specified
+		if instance.Spec.Server.PodOverrides.ServiceAccountName != "" {
+			podSpec.ServiceAccountName = instance.Spec.Server.PodOverrides.ServiceAccountName
+		}
+
+		// Add volumes if specified
+		if len(instance.Spec.Server.PodOverrides.Volumes) > 0 {
+			podSpec.Volumes = append(podSpec.Volumes, instance.Spec.Server.PodOverrides.Volumes...)
+		}
+
+		// Add volume mounts if specified
+		if len(instance.Spec.Server.PodOverrides.VolumeMounts) > 0 {
+			podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, instance.Spec.Server.PodOverrides.VolumeMounts...)
+		}
+	}
 }

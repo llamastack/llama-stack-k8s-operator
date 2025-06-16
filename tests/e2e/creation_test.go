@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
 	appsv1 "k8s.io/api/apps/v1"
@@ -49,6 +50,10 @@ func TestCreationSuite(t *testing.T) {
 
 	t.Run("should update distribution status", func(t *testing.T) {
 		testDistributionStatus(t, llsdistributionCR)
+	})
+
+	t.Run("should use custom ServiceAccount from PodOverrides", func(t *testing.T) {
+		testServiceAccountOverride(t, llsdistributionCR)
 	})
 }
 
@@ -291,6 +296,63 @@ func testPVCConfiguration(t *testing.T, distribution *v1alpha1.LlamaStackDistrib
 		actualSize := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
 		require.Equal(t, expectedSize.String(), actualSize.String(), "PVC storage size should match CR")
 	}
+}
+
+func testServiceAccountOverride(t *testing.T, distribution *v1alpha1.LlamaStackDistribution) {
+	t.Helper()
+
+	// Create a custom ServiceAccount
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "custom-sa",
+			Namespace: distribution.Namespace,
+		},
+	}
+	require.NoError(t, TestEnv.Client.Create(TestEnv.Ctx, sa))
+	defer TestEnv.Client.Delete(TestEnv.Ctx, sa)
+
+	// Update the CR to use the custom ServiceAccount with retry logic
+	err := wait.PollUntilContextTimeout(TestEnv.Ctx, time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+		// Get the latest version of the CR
+		latestDistribution := &v1alpha1.LlamaStackDistribution{}
+		if err := TestEnv.Client.Get(ctx, client.ObjectKey{
+			Namespace: distribution.Namespace,
+			Name:      distribution.Name,
+		}, latestDistribution); err != nil {
+			return false, err
+		}
+
+		// Update the ServiceAccount
+		latestDistribution.Spec.Server.PodOverrides = &v1alpha1.PodOverrides{
+			ServiceAccountName: "custom-sa",
+		}
+
+		// Try to update
+		if err := TestEnv.Client.Update(ctx, latestDistribution); err != nil {
+			if k8serrors.IsConflict(err) {
+				// If there's a conflict, return false to retry
+				return false, nil
+			}
+			return false, err
+		}
+		return true, nil
+	})
+	require.NoError(t, err, "Failed to update CR with ServiceAccount override")
+
+	// Wait for the deployment to be updated
+	time.Sleep(5 * time.Second)
+
+	// Get the deployment
+	deployment := &appsv1.Deployment{}
+	require.NoError(t, TestEnv.Client.Get(TestEnv.Ctx,
+		client.ObjectKey{
+			Name:      distribution.Name,
+			Namespace: distribution.Namespace,
+		},
+		deployment))
+
+	// Verify the ServiceAccount is set correctly
+	assert.Equal(t, "custom-sa", deployment.Spec.Template.Spec.ServiceAccountName)
 }
 
 func isDeploymentReady(u *unstructured.Unstructured) bool {

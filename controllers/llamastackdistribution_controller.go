@@ -257,6 +257,11 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 	// Configure storage
 	podSpec := configurePodStorage(instance, container)
 
+	// Set the service account name if specified in PodOverrides
+	if instance.Spec.Server.PodOverrides != nil && instance.Spec.Server.PodOverrides.ServiceAccountName != "" {
+		podSpec.ServiceAccountName = instance.Spec.Server.PodOverrides.ServiceAccountName
+	}
+
 	// Create deployment object
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{

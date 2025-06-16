@@ -264,6 +264,11 @@ spec:
                   podOverrides:
                     description: PodOverrides allows advanced pod-level customization.
                     properties:
+                      serviceAccountName:
+                        description: |-
+                          ServiceAccountName allows users to specify their own ServiceAccount
+                          If not specified, the operator will use the default ServiceAccount
+                        type: string
                       volumeMounts:
                         items:
                           description: VolumeMount describes a mounting of a Volume
