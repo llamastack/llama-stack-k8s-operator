@@ -58,7 +58,7 @@ An Operator Bundle is a directory containing the necessary manifests that descri
 make bundle
 ```
 
-After running `make bundle`, inspect the contents of the newly created `bundle/manifests` directory. Pay close attention to the `llama-stack-k8s-operator.clusterserviceversion.yaml` file. You may need to edit this file to:
+After running `make bundle`, inspect the contents of the newly created `bundle/manifests/bases` directory. Pay close attention to the `llama-stack-k8s-operator.clusterserviceversion.yaml` file. You may need to edit this file to:
 
   * **`spec.installModes`**: Should be se to `AllNamespaces`
   * **`spec.replaces`**: If you have previous versions of the operator, this field is crucial for OLM to manage upgrades.
