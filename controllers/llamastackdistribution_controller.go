@@ -390,7 +390,7 @@ func (r *LlamaStackDistributionReconciler) getProviderInfo(ctx context.Context, 
 
 // updateStatus refreshes the LlamaStackDistribution status.
 func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	log := log.FromContext(ctx).WithValues("namespace", instance.Namespace, "name", instance.Name)
+	log := log.FromContext(ctx)
 
 	deployment := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, deployment)
