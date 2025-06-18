@@ -31,10 +31,14 @@ func ApplyDeployment(ctx context.Context, cli client.Client, scheme *runtime.Sch
 		return fmt.Errorf("failed to fetch deployment: %w", err)
 	}
 
+	// For updates, use server-side apply to preserve annotations and labels
+	// that might have been added by other operators (like OpenTelemetry)
 	if !reflect.DeepEqual(found.Spec, deployment.Spec) {
-		found.Spec = deployment.Spec
 		logger.Info("Updating Deployment", "deployment", deployment.Name)
-		return cli.Update(ctx, found)
+		// Use server-side apply to merge changes properly
+		// Ensure the deployment has proper TypeMeta for server-side apply
+		deployment.SetGroupVersionKind(appsv1.SchemeGroupVersion.WithKind("Deployment"))
+		return cli.Patch(ctx, deployment, client.Apply, client.ForceOwnership, client.FieldOwner("llama-stack-operator"))
 	}
 	return nil
 }
