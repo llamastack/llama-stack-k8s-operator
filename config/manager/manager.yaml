@@ -40,9 +40,9 @@ spec:
         - --leader-elect
         env:
         - name: OPERATOR_VERSION
-          value: "latest"
+          value: "0.2.0"
         - name: LLAMA_STACK_VERSION
-          value: "latest"
+          value: "0.2.9"
         image: controller:latest
         name: manager
         securityContext:

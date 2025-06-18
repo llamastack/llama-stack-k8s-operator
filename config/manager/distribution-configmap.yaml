@@ -8,18 +8,18 @@ metadata:
 # The distribution images are immutable and should not be updated
 immutable: true
 data:
-  ollama: docker.io/llamastack/distribution-ollama:latest
-  hf-endpoint: docker.io/llamastack/distribution-hf-endpoint:latest
-  hf-serverless: docker.io/llamastack/distribution-hf-serverless:latest
-  bedrock: docker.io/llamastack/distribution-bedrock:latest
-  cerebras: docker.io/llamastack/distribution-cerebras:latest
-  nvidia: docker.io/llamastack/distribution-nvidia:latest
-  open-benchmark: docker.io/llamastack/distribution-open-benchmark:latest
-  passthrough: docker.io/llamastack/distribution-passthrough:latest
-  remote-vllm: docker.io/llamastack/distribution-remote-vllm:latest
-  sambanova: docker.io/llamastack/distribution-sambanova:latest
-  tgi: docker.io/llamastack/distribution-tgi:latest
-  together: docker.io/llamastack/distribution-together:latest
-  vllm-gpu: docker.io/llamastack/distribution-vllm-gpu:latest
-  watsonx: docker.io/llamastack/distribution-watsonx:latest
-  fireworks: docker.io/llamastack/distribution-fireworks:latest
+  ollama: docker.io/llamastack/distribution-ollama:0.2.9
+  hf-endpoint: docker.io/llamastack/distribution-hf-endpoint:0.2.9
+  hf-serverless: docker.io/llamastack/distribution-hf-serverless:0.2.9
+  bedrock: docker.io/llamastack/distribution-bedrock:0.2.9
+  cerebras: docker.io/llamastack/distribution-cerebras:0.2.9
+  nvidia: docker.io/llamastack/distribution-nvidia:0.2.9
+  open-benchmark: docker.io/llamastack/distribution-open-benchmark:0.2.9
+  passthrough: docker.io/llamastack/distribution-passthrough:0.2.9
+  remote-vllm: docker.io/llamastack/distribution-remote-vllm:0.2.9
+  sambanova: docker.io/llamastack/distribution-sambanova:0.2.9
+  tgi: docker.io/llamastack/distribution-tgi:0.2.9
+  together: docker.io/llamastack/distribution-together:0.2.9
+  vllm-gpu: docker.io/llamastack/distribution-vllm-gpu:0.2.9
+  watsonx: docker.io/llamastack/distribution-watsonx:0.2.9
+  fireworks: docker.io/llamastack/distribution-fireworks:0.2.9
