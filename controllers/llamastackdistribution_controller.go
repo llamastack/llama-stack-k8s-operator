@@ -78,8 +78,8 @@ func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ct
 	// The logger is retrieved from the context in each sub-function that needs it, maintaining
 	// the request-specific values throughout the call chain.
 	// Always ensure the name of the CR and the namespace are included in the logger.
-	log := log.FromContext(ctx).WithValues("namespace", req.Namespace, "name", req.Name)
-	ctx = logr.NewContext(ctx, log)
+	logger := log.FromContext(ctx).WithValues("namespace", req.Namespace, "name", req.Name)
+	ctx = logr.NewContext(ctx, logger)
 
 	// Fetch the LlamaStack instance
 	instance, err := r.fetchInstance(ctx, req.NamespacedName)
@@ -88,7 +88,7 @@ func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ct
 	}
 
 	if instance == nil {
-		log.Info("LlamaStackDistribution resource not found, skipping reconciliation")
+		logger.Info("LlamaStackDistribution resource not found, skipping reconciliation")
 		return ctrl.Result{}, nil
 	}
 
@@ -98,7 +98,7 @@ func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ct
 	// Update the status, passing in any reconciliation error.
 	if statusUpdateErr := r.updateStatus(ctx, instance, reconcileErr); statusUpdateErr != nil {
 		// Log the status update error, but prioritize the reconciliation error for return.
-		log.Error(statusUpdateErr, "failed to update status")
+		logger.Error(statusUpdateErr, "failed to update status")
 		if reconcileErr != nil {
 			return ctrl.Result{}, reconcileErr
 		}
@@ -115,17 +115,17 @@ func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ct
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	log.Info("Successfully reconciled LlamaStackDistribution")
+	logger.Info("Successfully reconciled LlamaStackDistribution")
 	return ctrl.Result{}, nil
 }
 
 // fetchInstance retrieves the LlamaStackDistribution instance.
 func (r *LlamaStackDistributionReconciler) fetchInstance(ctx context.Context, namespacedName types.NamespacedName) (*llamav1alpha1.LlamaStackDistribution, error) {
-	log := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 	instance := &llamav1alpha1.LlamaStackDistribution{}
 	if err := r.Get(ctx, namespacedName, instance); err != nil {
 		if k8serrors.IsNotFound(err) {
-			log.Info("failed to find LlamaStackDistribution resource")
+			logger.Info("failed to find LlamaStackDistribution resource")
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to fetch LlamaStackDistribution: %w", err)
@@ -300,7 +300,7 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 
 // reconcileService manages the Service if ports are defined.
 func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	log := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 	// Use the container's port (defaulted to 8321 if unset)
 	port := deploy.GetServicePort(instance)
 
@@ -325,7 +325,7 @@ func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context,
 		},
 	}
 
-	return deploy.ApplyService(ctx, r.Client, r.Scheme, instance, service, log)
+	return deploy.ApplyService(ctx, r.Client, r.Scheme, instance, service, logger)
 }
 
 // getServerURL returns the URL for the LlamaStack server.
@@ -498,9 +498,9 @@ func (r *LlamaStackDistributionReconciler) updateStorageStatus(ctx context.Conte
 }
 
 func (r *LlamaStackDistributionReconciler) updateServiceStatus(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) {
-	log := log.FromContext(ctx).WithValues("namespace", instance.Namespace, "name", instance.Name)
+	logger := log.FromContext(ctx)
 	if !instance.HasPorts() {
-		log.Info("No ports defined, skipping service status update")
+		logger.Info("No ports defined, skipping service status update")
 		return
 	}
 	service := &corev1.Service{}
@@ -524,7 +524,7 @@ func (r *LlamaStackDistributionReconciler) updateDistributionConfig(instance *ll
 }
 
 func (r *LlamaStackDistributionReconciler) performHealthChecks(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) {
-	log := log.FromContext(ctx).WithValues("namespace", instance.Namespace, "name", instance.Name)
+	logger := log.FromContext(ctx)
 
 	healthy, err := r.checkHealth(ctx, instance)
 	switch {
@@ -541,7 +541,7 @@ func (r *LlamaStackDistributionReconciler) performHealthChecks(ctx context.Conte
 
 	providers, err := r.getProviderInfo(ctx, instance)
 	if err != nil {
-		log.Error(err, "failed to get provider info, clearing provider list")
+		logger.Error(err, "failed to get provider info, clearing provider list")
 		instance.Status.DistributionConfig.Providers = nil
 	} else {
 		instance.Status.DistributionConfig.Providers = providers
@@ -550,7 +550,7 @@ func (r *LlamaStackDistributionReconciler) performHealthChecks(ctx context.Conte
 
 // reconcileNetworkPolicy manages the NetworkPolicy for the LlamaStack server.
 func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	log := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 	networkPolicy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name + "-network-policy",
@@ -560,7 +560,7 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 
 	// If feature is disabled, delete the NetworkPolicy if it exists
 	if !r.EnableNetworkPolicy {
-		return deploy.HandleDisabledNetworkPolicy(ctx, r.Client, networkPolicy, log)
+		return deploy.HandleDisabledNetworkPolicy(ctx, r.Client, networkPolicy, logger)
 	}
 
 	port := deploy.GetServicePort(instance)
@@ -625,7 +625,7 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 		},
 	}
 
-	return deploy.ApplyNetworkPolicy(ctx, r.Client, r.Scheme, instance, networkPolicy, log)
+	return deploy.ApplyNetworkPolicy(ctx, r.Client, r.Scheme, instance, networkPolicy, logger)
 }
 
 // createDefaultConfigMap creates a ConfigMap with default feature flag values.
