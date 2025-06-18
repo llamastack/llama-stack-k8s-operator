@@ -54,6 +54,9 @@ func TestBuildContainerSpec(t *testing.T) {
 					Name:      "lls-storage",
 					MountPath: llamav1alpha1.DefaultMountPath,
 				}},
+				Env: []corev1.EnvVar{
+					{Name: "HF_HOME", Value: "/.llama"},
+				},
 			},
 		},
 		{
@@ -92,6 +95,7 @@ func TestBuildContainerSpec(t *testing.T) {
 					},
 				},
 				Env: []corev1.EnvVar{
+					{Name: "HF_HOME", Value: "/custom/path"},
 					{Name: "TEST_ENV", Value: "test-value"},
 				},
 				VolumeMounts: []corev1.VolumeMount{{
@@ -124,6 +128,9 @@ func TestBuildContainerSpec(t *testing.T) {
 					Name:      "lls-storage",
 					MountPath: llamav1alpha1.DefaultMountPath,
 				}},
+				Env: []corev1.EnvVar{
+					{Name: "HF_HOME", Value: "/.llama"},
+				},
 			},
 		},
 	}
