@@ -21,7 +21,7 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
@@ -277,6 +277,11 @@ func (in *ServerSpec) DeepCopyInto(out *ServerSpec) {
 		in, out := &in.Storage, &out.Storage
 		*out = new(StorageSpec)
 		(*in).DeepCopyInto(*out)
+	}
+	if in.UserConfig != nil {
+		in, out := &in.UserConfig, &out.UserConfig
+		*out = new(UserConfigSpec)
+		**out = **in
 	}
 }
 

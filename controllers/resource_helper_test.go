@@ -133,6 +133,42 @@ func TestBuildContainerSpec(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "with user config",
+			instance: &llamav1alpha1.LlamaStackDistribution{
+				Spec: llamav1alpha1.LlamaStackDistributionSpec{
+					Server: llamav1alpha1.ServerSpec{
+						Distribution: llamav1alpha1.DistributionType{
+							Name: "ollama",
+						},
+						ContainerSpec: llamav1alpha1.ContainerSpec{},
+						UserConfig: &llamav1alpha1.UserConfigSpec{
+							ConfigMapName: "test-config",
+						},
+					},
+				},
+			},
+			image: "test-image:latest",
+			expectedResult: corev1.Container{
+				Name:            llamav1alpha1.DefaultContainerName,
+				Image:           "test-image:latest",
+				ImagePullPolicy: corev1.PullAlways,
+				Ports:           []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
+				Command:         []string{"python", "-m", "llama_stack.distribution.server.server"},
+				Args:            []string{"--config", "/etc/llama-stack/run.yaml"},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "lls-storage",
+						MountPath: llamav1alpha1.DefaultMountPath,
+					},
+					{
+						Name:      "user-config",
+						MountPath: "/etc/llama-stack/",
+						ReadOnly:  true,
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range testCases {

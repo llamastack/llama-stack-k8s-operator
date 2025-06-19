@@ -77,6 +77,17 @@ type ServerSpec struct {
 	// Storage defines the persistent storage configuration
 	// +optional
 	Storage *StorageSpec `json:"storage,omitempty"`
+	// UserConfig defines the user configuration for the llama-stack server
+	// +optional
+	UserConfig *UserConfigSpec `json:"userConfig,omitempty"`
+}
+
+type UserConfigSpec struct {
+	// ConfigMapName is the name of the ConfigMap containing user configuration
+	ConfigMapName string `json:"configMapName"`
+	// ConfigMapNamespace is the namespace of the ConfigMap (defaults to the same namespace as the CR)
+	// +optional
+	ConfigMapNamespace string `json:"configMapNamespace,omitempty"`
 }
 
 // StorageSpec defines the persistent storage configuration

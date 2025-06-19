@@ -180,6 +180,7 @@ _Appears in:_
 | `containerSpec` _[ContainerSpec](#containerspec)_ |  |  |  |
 | `podOverrides` _[PodOverrides](#podoverrides)_ |  |  |  |
 | `storage` _[StorageSpec](#storagespec)_ | Storage defines the persistent storage configuration |  |  |
+| `userConfig` _[UserConfigSpec](#userconfigspec)_ | UserConfig defines the user configuration for the llama-stack server |  |  |
 
 #### StorageSpec
 
@@ -205,3 +206,13 @@ _Appears in:_
 | `operatorVersion` _string_ | OperatorVersion is the version of the operator managing this distribution |  |  |
 | `llamaStackServerVersion` _string_ | DeploymentVersion is the version of the LlamaStack deployment |  |  |
 | `lastUpdated` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | LastUpdated represents when the version information was last updated |  |  |
+
+#### UserConfigSpec
+
+_Appears in:_
+- [ServerSpec](#serverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing user configuration |  |  |
+| `configMapNamespace` _string_ | ConfigMapNamespace is the namespace of the ConfigMap (defaults to the same namespace as the CR) |  |  |
