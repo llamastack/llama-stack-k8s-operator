@@ -12,12 +12,18 @@ else
     echo "Namespace ollama-dist already exists"
 fi
 
-echo "Creating ServiceAccount..."
-if ! kubectl get sa llama-sa -n ollama-dist &> /dev/null; then
-    echo "Creating ServiceAccount llama-sa..."
-    kubectl create sa llama-sa -n ollama-dist
+echo "Checking if ServiceAccount exists..."
+if ! kubectl get sa ollama-sa -n ollama-dist &> /dev/null; then
+    echo "Creating ServiceAccount ollama-sa..."
+    kubectl create sa ollama-sa -n ollama-dist
 else
-    echo "ServiceAccount llama-sa already exists"
+    echo "ServiceAccount ollama-sa already exists"
+fi
+
+# OpenShift requires specific permissions in order for the ollama container to run as uid 0
+if kubectl api-resources --api-group=security.openshift.io | grep -iq 'SecurityContextConstraints'; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  "$SCRIPT_DIR/ollama-scc.sh"
 fi
 
 echo "Creating Ollama deployment and service with image: $OLLAMA_IMAGE..."
@@ -37,7 +43,7 @@ spec:
       labels:
         app: ollama-server
     spec:
-      serviceAccountName: llama-sa
+      serviceAccountName: ollama-sa
       securityContext:
         runAsUser: 0
         runAsGroup: 0
