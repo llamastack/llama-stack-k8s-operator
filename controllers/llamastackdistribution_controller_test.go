@@ -221,7 +221,8 @@ func TestStorageConfiguration(t *testing.T) {
 				if expectedSize == nil {
 					expectedSize = &llamav1alpha1.DefaultStorageSize
 				}
-				verifyPVC(t, ctrlRuntimeClient, instance, expectedSize)
+				expectedPVCName := fmt.Sprintf("%s-pvc", instance.Name)
+				verifyPVC(t, ctrlRuntimeClient, instance, expectedPVCName, expectedSize)
 			}
 		})
 	}
@@ -265,20 +266,19 @@ func verifyVolumeMount(t *testing.T, containers []corev1.Container, expectedMoun
 	assert.Equal(t, expectedMount.MountPath, foundMount.MountPath, "mount path should match")
 }
 
-func verifyPVC(t *testing.T, ctrlRuntimeClient client.Client, instance *llamav1alpha1.LlamaStackDistribution, expectedSize *resource.Quantity) {
+func verifyPVC(t *testing.T, ctrlRuntimeClient client.Client, instance *llamav1alpha1.LlamaStackDistribution, expectedName string, expectedSize *resource.Quantity) {
 	t.Helper()
 	pvc := &corev1.PersistentVolumeClaim{}
-	pvcKey := types.NamespacedName{Name: instance.Name + "-pvc", Namespace: instance.Namespace}
-
-	// envtest interacts with a real API server, which is eventually consistent.
-	// We use require.Eventually to poll until the PVC becomes available after reconciliation.
+	pvcKey := types.NamespacedName{Name: expectedName, Namespace: instance.Namespace}
 	require.Eventually(t, func() bool {
 		err := ctrlRuntimeClient.Get(context.Background(), pvcKey, pvc)
 		return err == nil
 	}, eventuallyTimeout, eventuallyInterval, "timed out waiting for PVC %s to be available", pvcKey)
 
-	storageRequest, ok := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
-	require.True(t, ok, "PVC does not have storage request")
-	assert.Equal(t, expectedSize.String(), storageRequest.String(),
-		"PVC size should match")
+	// Check the size
+	if storage, ok := pvc.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
+		assert.True(t, expectedSize.Equal(storage), "PVC size should match expected size")
+	} else {
+		assert.Fail(t, "PVC does not have a storage request")
+	}
 }
