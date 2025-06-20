@@ -24,6 +24,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
+// LlamaStackDistributionKind is the kind for the LlamaStackDistribution resource.
+const LlamaStackDistributionKind = "LlamaStackDistribution"
+
 var (
 	// GroupVersion is group version used to register these objects.
 	GroupVersion = schema.GroupVersion{Group: "llamastack.io", Version: "v1alpha1"}
