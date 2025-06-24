@@ -102,6 +102,13 @@ func setTargetField(res *resource.Resource, value any, mapping FieldMapping) err
 		return fmt.Errorf("failed to unmarshal YAML: %w", unmarshalErr)
 	}
 
+	// This loop navigates to the parent of the target field. We must stop one
+	// level short because Golang does not allow taking a pointer to a map value
+	// (e.g., `&myMap["key"]`). To mutate the map, we need a reference to the
+	// parent container to use the `parent[key] = value` syntax.
+	//
+	// This "stop at the parent" approach also gives us the `CreateIfNotExists`
+	// behavior for free, as we can create missing parent maps during traversal.
 	fields := strings.Split(mapping.TargetField, ".")
 	current := data
 	for _, field := range fields[:len(fields)-1] {
