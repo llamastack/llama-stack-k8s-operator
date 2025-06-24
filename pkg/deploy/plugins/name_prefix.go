@@ -3,6 +3,7 @@ package plugins
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"sigs.k8s.io/kustomize/api/resmap"
 )
@@ -34,7 +35,7 @@ type namePrefixTransformer struct {
 func (t *namePrefixTransformer) Transform(m resmap.ResMap) error {
 	for _, res := range m.Resources() {
 		// Skip if the resource already has the prefix to prevent duplicates.
-		if hasPrefix(res.GetName(), t.config.Prefix+"-") {
+		if strings.HasPrefix(res.GetName(), t.config.Prefix+"-") {
 			continue
 		}
 
@@ -71,10 +72,4 @@ func shouldApplyToKind(kind string, includeKinds, excludeKinds []string) bool {
 		return true
 	}
 	return slices.Contains(includeKinds, kind)
-}
-
-// hasPrefix checks if a string has a given prefix.
-// Utility function to avoid redundant prefixing.
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
