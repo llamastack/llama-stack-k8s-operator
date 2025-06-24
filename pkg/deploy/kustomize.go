@@ -1,117 +1,206 @@
 package deploy
 
 import (
-	"bytes"
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
-	"io"
+	"path/filepath"
 
+	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy/plugins"
+	k8serr "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/yaml"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/api/resmap"
+	"sigs.k8s.io/kustomize/api/resource"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
-const yamlBufferSize = 4096
+// RenderKustomize takes a filesystem and a path, runs kustomize, applies Go-based
+// plugins, and returns the final set of in-memory resources.
+func RenderKustomize(
+	fs filesys.FileSystem,
+	manifestPath string,
+	ownerInstance *llamav1alpha1.LlamaStackDistribution,
+) (*resmap.ResMap, error) {
+	// fallback to the 'default' directory' if we cannot initially find
+	// the kustomization file
+	finalManifestPath := manifestPath
+	if exists := fs.Exists(filepath.Join(manifestPath, "kustomization.yaml")); !exists {
+		finalManifestPath = filepath.Join(manifestPath, "default")
+	}
 
-// ApplyKustomizeManifests renders manifests via Kustomize and
-// reconciles each resource in the cluster using server-side apply.
-// Accepts a customizable file system and Kustomizer to support in-memory testing.
-func ApplyKustomizeManifests(
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+
+	resMapVal, err := k.Run(fs, finalManifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to run kustomize: %w", err)
+	}
+	if err := applyPlugins(&resMapVal, ownerInstance); err != nil {
+		return nil, err
+	}
+	return &resMapVal, nil
+}
+
+// ApplyResources takes a Kustomize ResMap and applies the resources to the cluster.
+func ApplyResources(
 	ctx context.Context,
 	cli client.Client,
 	scheme *runtime.Scheme,
-	fs filesys.FileSystem,
-	manifestPath string,
-	fieldOwner string,
+	ownerInstance *llamav1alpha1.LlamaStackDistribution,
+	resMap *resmap.ResMap,
 ) error {
-	// Render all manifests to Unstructured objects.
-	objs, err := RenderKustomize(fs, manifestPath)
-	if err != nil {
-		return err
-	}
-
-	// Use server-side apply for each object so the API server
-	// manages field ownership and merging of concurrent updates.
-	for _, u := range objs {
-		if err := cli.Patch(ctx, u, client.Apply, client.FieldOwner(fieldOwner)); err != nil {
-			return fmt.Errorf("failed to patch %s/%s: %w", u.GetKind(), u.GetName(), err)
+	for _, res := range (*resMap).Resources() {
+		if err := manageResource(ctx, cli, scheme, res, ownerInstance); err != nil {
+			return fmt.Errorf("failed to manage resource %s/%s: %w", res.GetKind(), res.GetName(), err)
 		}
 	}
 	return nil
 }
 
-// RenderKustomize reads manifests from the given file system at path,
-// runs the full Kustomize pipeline (bases, overlays, patches, vars, etc.),
-// and returns a list of Unstructured objects ready for reconciliation.
-// Splitting rendering into its own function enables fast, in-memory testing
-// of manifest composition without involving the cluster client.
-func RenderKustomize(
-	fs filesys.FileSystem,
-	manifestPath string,
-) ([]*unstructured.Unstructured, error) {
-	// --- Build and render the kubernetes api objects ---
-	// create a Kustomizer to execute the overlay
-	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
-
-	// Produce the composed set of resources from base and overlays.
-	resMap, err := k.Run(fs, manifestPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to run kustomize on %q: %w", manifestPath, err)
+// manageResource acts as a dispatcher, checking if a resource exists and then
+// deciding whether to create it or patch it.
+func manageResource(
+	ctx context.Context,
+	cli client.Client,
+	scheme *runtime.Scheme,
+	res *resource.Resource,
+	ownerInstance *llamav1alpha1.LlamaStackDistribution,
+) error {
+	// prevent the controller from trying to apply changes to its own CR
+	if res.GetKind() == llamav1alpha1.LlamaStackDistributionKind && res.GetName() == ownerInstance.Name && res.GetNamespace() == ownerInstance.Namespace {
+		return nil
 	}
 
-	// Serialize to YAML because Kustomize's ResMap does not implement runtime.Object;
-	// YAML is a universal interchange format for the Kubernetes decoder.
-	yamlDocs, err := resMap.AsYaml()
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize kustomize output: %w", err)
+	u := &unstructured.Unstructured{}
+	if err := yaml.Unmarshal([]byte(res.MustYaml()), u); err != nil {
+		return fmt.Errorf("failed to unmarshal resource: %w", err)
 	}
 
-	// Convert the YAML documents into Unstructured types so the controller-runtime
-	// client can apply them generically without requiring typed structs.
-	objs, err := decodeToUnstructured(yamlDocs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode resources: %w", err)
+	kGvk := res.GetGvk()
+	gvk := schema.GroupVersionKind{
+		Group:   kGvk.Group,
+		Version: kGvk.Version,
+		Kind:    kGvk.Kind,
 	}
-	return objs, nil
+
+	found := u.DeepCopy()
+	err := cli.Get(ctx, client.ObjectKeyFromObject(u), found)
+	if err != nil {
+		if !k8serr.IsNotFound(err) {
+			return fmt.Errorf("failed to get resource: %w", err)
+		}
+		return createResource(ctx, cli, u, ownerInstance, scheme, gvk)
+	}
+	return patchResource(ctx, cli, u, found, ownerInstance)
 }
 
-// DecodeToUnstructured transforms the multi-document YAML output from Kustomize
-// into a slice of Unstructured objects so they can be consumed directly by the
-// controller-runtime client. We use a streaming decoder to avoid buffering large
-// manifests in memory, and explicitly set each object's GroupVersionKind
-// for correct routing of dynamic client operations.
-func decodeToUnstructured(yamlDocs []byte) ([]*unstructured.Unstructured, error) {
-	reader := bytes.NewReader(yamlDocs)
-	// Streaming decoder allows incremental parsing of each document.
-	dec := yaml.NewYAMLOrJSONDecoder(reader, yamlBufferSize)
-
-	var objs []*unstructured.Unstructured
-	for {
-		u := &unstructured.Unstructured{}
-		if err := dec.Decode(u); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, fmt.Errorf("failed to decode YAML to Unstructured: %w", err)
-		}
-
-		// Parse apiVersion into Group and Version for setting GVK.
-		gv, err := schema.ParseGroupVersion(u.GetAPIVersion())
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse apiVersion %q: %w", u.GetAPIVersion(), err)
-		}
-		u.SetGroupVersionKind(schema.GroupVersionKind{
-			Group:   gv.Group,
-			Version: gv.Version,
-			Kind:    u.GetKind(),
-		})
-
-		objs = append(objs, u)
+// createResource creates a new resource, setting an owner reference only if it's namespace-scoped.
+func createResource(
+	ctx context.Context,
+	cli client.Client,
+	obj *unstructured.Unstructured,
+	ownerInstance *llamav1alpha1.LlamaStackDistribution,
+	scheme *runtime.Scheme,
+	gvk schema.GroupVersionKind,
+) error {
+	// Check if the resource is cluster-scoped (like a ClusterRole) to avoid
+	// incorrectly setting a namespace-bound owner reference on it.
+	isClusterScoped, err := isClusterScoped(cli.RESTMapper(), gvk)
+	if err != nil {
+		return fmt.Errorf("failed to determine resource scope: %w", err)
 	}
-	return objs, nil
+	if !isClusterScoped {
+		if err := ctrl.SetControllerReference(ownerInstance, obj, scheme); err != nil {
+			return fmt.Errorf("failed to set controller reference for %s: %w", gvk.Kind, err)
+		}
+	}
+	return cli.Create(ctx, obj)
+}
+
+// isClusterScoped checks if a given GVK refers to a cluster-scoped resource.
+func isClusterScoped(mapper meta.RESTMapper, gvk schema.GroupVersionKind) (bool, error) {
+	mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err != nil {
+		return false, fmt.Errorf("failed to get REST mapping for GVK %v: %w", gvk, err)
+	}
+	return mapping.Scope.Name() == meta.RESTScopeNameRoot, nil
+}
+
+// patchResource patches an existing resource, but only if we own it.
+func patchResource(ctx context.Context, cli client.Client, desired, existing *unstructured.Unstructured, ownerInstance *llamav1alpha1.LlamaStackDistribution) error {
+	// Critical safety check to prevent the operator from "stealing" or
+	// overwriting a resource that was created by another user or controller.
+	isOwner := false
+	for _, ref := range existing.GetOwnerReferences() {
+		if ref.UID == ownerInstance.GetUID() {
+			isOwner = true
+			break
+		}
+	}
+	if !isOwner {
+		return fmt.Errorf("failed to patch resource %s/%s because it is not owned by this instance",
+			existing.GetKind(), existing.GetName())
+	}
+
+	data, err := json.Marshal(desired)
+	if err != nil {
+		return fmt.Errorf("failed to marshal desired state: %w", err)
+	}
+
+	return cli.Patch(
+		ctx,
+		existing,
+		client.RawPatch(k8stypes.ApplyPatchType, data),
+		client.ForceOwnership,
+		client.FieldOwner(ownerInstance.GetName()),
+	)
+}
+
+// applyPlugins runs all Go-based transformations on the resource map.
+func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStackDistribution) error {
+	namePrefixPlugin := plugins.CreateNamePrefixPlugin(plugins.NamePrefixConfig{
+		Prefix: ownerInstance.GetName(),
+	})
+	if err := namePrefixPlugin.Transform(*resMap); err != nil {
+		return fmt.Errorf("failed to apply name prefix: %w", err)
+	}
+
+	namespaceSetterPlugin := plugins.CreateNamespacePlugin(ownerInstance.GetNamespace())
+	if err := namespaceSetterPlugin.Transform(*resMap); err != nil {
+		return fmt.Errorf("failed to apply namespace setter plugin: %w", err)
+	}
+
+	fieldTransformerPlugin := plugins.CreateFieldTransformer(plugins.FieldTransformerConfig{
+		Mappings: []plugins.FieldMapping{
+			{
+				SourceValue:       getStorageSize(ownerInstance),
+				DefaultValue:      llamav1alpha1.DefaultStorageSize.String(),
+				TargetField:       "spec.resources.requests.storage",
+				TargetKind:        "PersistentVolumeClaim",
+				CreateIfNotExists: true,
+			},
+		},
+	})
+	if err := fieldTransformerPlugin.Transform(*resMap); err != nil {
+		return fmt.Errorf("failed to apply field transformer: %w", err)
+	}
+
+	return nil
+}
+
+// getStorageSize extracts the storage size from the CR spec.
+func getStorageSize(instance *llamav1alpha1.LlamaStackDistribution) string {
+	if instance.Spec.Server.Storage != nil && instance.Spec.Server.Storage.Size != nil {
+		return instance.Spec.Server.Storage.Size.String()
+	}
+	// Returning an empty string signals the field transformer to use the default value.
+	return ""
 }
