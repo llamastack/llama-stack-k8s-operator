@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/kustomize/api/resmap"
 )
 
@@ -45,8 +46,16 @@ func (t *namePrefixTransformer) Transform(m resmap.ResMap) error {
 			continue
 		}
 
+		prefixedName := makePrefixedName(t.config.Prefix, res.GetName())
+		// Use the strictest naming rule (for Namespaces) to ensure the new name string
+		// is valid for any given Resource.
+		if errs := k8svalidation.IsDNS1123Label(prefixedName); len(errs) > 0 {
+			return fmt.Errorf("failed to make valid prefixed name for %q: %s",
+				prefixedName, strings.Join(errs, ", "))
+		}
+
 		// Performs the actual name prefixing for the resource.
-		if err := res.SetName(t.config.Prefix + "-" + res.GetName()); err != nil {
+		if err := res.SetName(prefixedName); err != nil {
 			return fmt.Errorf("failed to set resource name: %w", err)
 		}
 	}
@@ -72,4 +81,8 @@ func shouldApplyToKind(kind string, includeKinds, excludeKinds []string) bool {
 		return true
 	}
 	return slices.Contains(includeKinds, kind)
+}
+
+func makePrefixedName(prefix, name string) string {
+	return prefix + "-" + name
 }

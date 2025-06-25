@@ -14,6 +14,8 @@ func TestNamePrefixTransformer(t *testing.T) {
 		transformer        *namePrefixTransformer
 		initialResources   []*resource.Resource
 		expectedFinalNames []string
+		expectError        bool
+		expectedErrStr     string
 	}{
 		{
 			name: "apply prefix to all resources when no filters are set",
@@ -61,6 +63,17 @@ func TestNamePrefixTransformer(t *testing.T) {
 			},
 			expectedFinalNames: []string{"my-prefix-backend", "my-prefix-frontend"},
 		},
+		{
+			name: "error on invalid prefixed name",
+			transformer: CreateNamePrefixPlugin(NamePrefixConfig{
+				Prefix: "my.prefix",
+			}),
+			initialResources: []*resource.Resource{
+				newTestResource(t, "apps/v1", "Deployment", "backend", "", nil),
+			},
+			expectError:    true,
+			expectedErrStr: "failed to make valid prefixed name",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -74,16 +87,22 @@ func TestNamePrefixTransformer(t *testing.T) {
 
 			// action
 			err := tc.transformer.Transform(resMap)
-			require.NoError(t, err)
 
 			// assertion
-			require.Equal(t, len(tc.initialResources), resMap.Size())
+			if tc.expectError {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tc.expectedErrStr)
 
-			actualFinalNames := []string{}
-			for _, r := range resMap.Resources() {
-				actualFinalNames = append(actualFinalNames, r.GetName())
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, len(tc.initialResources), resMap.Size())
+
+				actualFinalNames := []string{}
+				for _, r := range resMap.Resources() {
+					actualFinalNames = append(actualFinalNames, r.GetName())
+				}
+				require.ElementsMatch(t, tc.expectedFinalNames, actualFinalNames)
 			}
-			require.ElementsMatch(t, tc.expectedFinalNames, actualFinalNames)
 		})
 	}
 }
