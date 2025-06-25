@@ -11,13 +11,14 @@ import (
 
 // NamePrefixConfig holds configuration for the name prefix plugin.
 type NamePrefixConfig struct {
-	// Prefix to add to resource names
+	// Prefix to add to resource names.
 	Prefix string
-	// ResourceKinds specifies which resource kinds to apply the prefix to.
-	// If empty, applies to all resources. Allows for targeted prefixing.
-	ResourceKinds []string
+	// IncludeKinds specifies which resource kinds to apply the prefix to.
+	// If empty, the prefix is applied to all resource kinds not specified in ExcludeKinds.
+	IncludeKinds []string
 	// ExcludeKinds specifies which resource kinds to exclude from prefixing.
-	// Provides a way to opt-out specific kinds.
+	// This list takes precedence over IncludeKinds; if a kind is in both lists,
+	// it will be excluded.
 	ExcludeKinds []string
 }
 
@@ -42,7 +43,7 @@ func (t *namePrefixTransformer) Transform(m resmap.ResMap) error {
 
 		// Check if we should apply prefix to this resource kind based on include/exclude rules.
 		// Ensures only targeted resource kinds are modified.
-		if !shouldApplyToKind(res.GetKind(), t.config.ResourceKinds, t.config.ExcludeKinds) {
+		if !shouldApplyToKind(res.GetKind(), t.config.IncludeKinds, t.config.ExcludeKinds) {
 			continue
 		}
 
@@ -76,10 +77,11 @@ func shouldApplyToKind(kind string, includeKinds, excludeKinds []string) bool {
 			return false
 		}
 	}
-	// If include list is empty, apply to all kinds (unless excluded).
+	// If include list is empty, apply to all kinds (that weren't excluded).
 	if len(includeKinds) == 0 {
 		return true
 	}
+	// Otherwise, only apply if the kind is explicitly included.
 	return slices.Contains(includeKinds, kind)
 }
 

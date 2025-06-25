@@ -31,8 +31,8 @@ func TestNamePrefixTransformer(t *testing.T) {
 		{
 			name: "apply prefix only to included kinds",
 			transformer: CreateNamePrefixPlugin(NamePrefixConfig{
-				Prefix:        "my-prefix",
-				ResourceKinds: []string{"Deployment"},
+				Prefix:       "my-prefix",
+				IncludeKinds: []string{"Deployment"},
 			}),
 			initialResources: []*resource.Resource{
 				newTestResource(t, "apps/v1", "Deployment", "backend", "", nil),
