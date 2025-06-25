@@ -92,7 +92,6 @@ func TestNamePrefixTransformer(t *testing.T) {
 			if tc.expectError {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tc.expectedErrStr)
-
 			} else {
 				require.NoError(t, err)
 				require.Equal(t, len(tc.initialResources), resMap.Size())
