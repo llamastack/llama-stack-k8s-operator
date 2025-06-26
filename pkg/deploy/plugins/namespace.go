@@ -29,6 +29,9 @@ func (p *namespacePlugin) Transform(m resmap.ResMap) error {
 	if p.namespace == "" {
 		return errors.New("failed to set namespace: namespace cannot be empty")
 	}
+	if err := ValidateName(p.namespace); err != nil {
+		return fmt.Errorf("failed to set namespace: invalid namespace provided: %w", err)
+	}
 	for _, res := range m.Resources() {
 		// skip cluster-scoped resources because they don't have a namespace
 		if res.GetGvk().IsClusterScoped() {
