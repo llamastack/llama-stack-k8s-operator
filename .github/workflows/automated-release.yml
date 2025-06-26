@@ -1,0 +1,248 @@
+name: Generate Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      operator_version:
+        description: 'Operator version to release (e.g., "0.2.1")'
+        required: true
+        type: string
+      llamastack_version:
+        description: 'LlamaStack distribution version (e.g., "0.2.12")'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+  pull-requests: write
+
+env:
+  GIT_USER_NAME: github-actions[bot]
+  GIT_USER_EMAIL: github-actions[bot]@users.noreply.github.com
+  GO_VERSION: '1.23'
+
+jobs:
+  validate-inputs:
+    runs-on: ubuntu-24.04
+    outputs:
+      operator_version: ${{ steps.validate.outputs.operator_version }}
+      llamastack_version: ${{ steps.validate.outputs.llamastack_version }}
+      release_branch: ${{ steps.validate.outputs.release_branch }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history to check existing tags
+
+      - name: Validate inputs
+        id: validate
+        run: |
+          # Validate version formats and check for existing releases
+          [[ "${{ github.event.inputs.operator_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Error: Invalid operator version format"; exit 1; }
+          [[ "${{ github.event.inputs.llamastack_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Error: Invalid llamastack version format"; exit 1; }
+          git tag -l | grep -q "^v${{ github.event.inputs.operator_version }}$" && { echo "Error: Tag v${{ github.event.inputs.operator_version }} already exists"; exit 1; }
+          major_minor=$(echo "${{ github.event.inputs.operator_version }}" | cut -d. -f1-2)
+          git ls-remote --heads origin | grep -q "release-$major_minor" && { echo "Error: Branch release-$major_minor already exists"; exit 1; }
+
+          # Set outputs for later steps
+          echo "operator_version=${{ github.event.inputs.operator_version }}" >> $GITHUB_OUTPUT
+          echo "llamastack_version=${{ github.event.inputs.llamastack_version }}" >> $GITHUB_OUTPUT
+
+          # Extract major.minor for branch name (e.g., "0.2.1" -> "0.2")
+          major_minor=$(echo "${{ github.event.inputs.operator_version }}" | cut -d. -f1-2)
+          echo "release_branch=release-$major_minor" >> $GITHUB_OUTPUT
+
+  update-files:
+    needs: validate-inputs
+    runs-on: ubuntu-24.04
+    env:
+      operator_version: ${{ needs.validate-inputs.outputs.operator_version }}
+      llamastack_version: ${{ needs.validate-inputs.outputs.llamastack_version }}
+      release_branch: ${{ needs.validate-inputs.outputs.release_branch }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure git
+        run: |
+          git config user.name "${{ env.GIT_USER_NAME }}"
+          git config user.email "${{ env.GIT_USER_EMAIL }}"
+
+      - name: Create and push release branch
+        run: |
+          git checkout -b "$release_branch"
+          git push origin "$release_branch"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Prepare release files
+        run: |
+          # Use the new make release command
+          make release VERSION=$operator_version LLAMASTACK_VERSION=$llamastack_version
+
+      - name: Commit changes
+        run: |
+          git add .
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -s -m "Release v$operator_version" \
+                         -m "- Update operator version to v$operator_version" \
+                         -m "- Update LlamaStack distributions to $llamastack_version" \
+                         -m "- Generate release manifests"
+            git push origin $release_branch
+          fi
+
+  run-tests:
+    needs: [validate-inputs, update-files]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate-inputs.outputs.release_branch }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run tests
+        run: |
+          make test
+
+      - name: Run linting
+        run: |
+          make lint
+
+  trigger-release-build:
+    needs: [validate-inputs, run-tests]
+    runs-on: ubuntu-24.04
+    env:
+      operator_version: ${{ needs.validate-inputs.outputs.operator_version }}
+      release_branch: ${{ needs.validate-inputs.outputs.release_branch }}
+    steps:
+      - name: Trigger release image build
+        run: |
+          gh workflow run release-image.yml \
+            -f version="v$operator_version" \
+            -f release_branch="$release_branch" \
+            --ref "$release_branch"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Wait for release build
+        run: |
+          echo "Waiting for release build to start..."
+          sleep 10  # Give workflow time to start
+
+          for i in {1..60}; do
+            run_info=$(gh run list --workflow=release-image.yml --branch=$release_branch --limit=1 --json status,conclusion)
+            status=$(echo "$run_info" | jq -r '.[0].status')
+            conclusion=$(echo "$run_info" | jq -r '.[0].conclusion')
+
+            echo "Build status: $status"
+
+            if [[ "$status" == "completed" ]]; then
+              if [[ "$conclusion" == "success" ]]; then
+                echo "✅ Release build completed successfully!"
+                break
+              else
+                echo "❌ Release build failed with conclusion: $conclusion"
+                exit 1
+              fi
+            fi
+
+            if [[ $i -eq 60 ]]; then
+              echo "❌ Timeout waiting for release build"
+              exit 1
+            fi
+
+            sleep 30
+          done
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  create-github-release:
+    needs: [validate-inputs, trigger-release-build]
+    runs-on: ubuntu-24.04
+    env:
+      operator_version: ${{ needs.validate-inputs.outputs.operator_version }}
+      llamastack_version: ${{ needs.validate-inputs.outputs.llamastack_version }}
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate-inputs.outputs.release_branch }}
+          fetch-depth: 0  # Need full history to create tags
+
+      - name: Create release tag
+        run: |
+          git config user.name "${{ env.GIT_USER_NAME }}"
+          git config user.email "${{ env.GIT_USER_EMAIL }}"
+
+          git tag -a "v$operator_version" -m "Release v$operator_version"
+          git push origin "v$operator_version"
+
+      - name: Create GitHub Release
+        run: |
+          RELEASE_NOTES="## What's Changed
+
+          - Updated operator version to v$operator_version
+          - Updated LlamaStack distributions to $llamastack_version
+          - Generated updated release manifests
+
+          ## Installation
+
+          Install the operator using kubectl:
+
+          \`\`\`bash
+          kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/v$operator_version/release/operator.yaml
+          \`\`\`
+
+          ## Container Images
+
+          - Operator: \`quay.io/llamastack/llama-stack-k8s-operator:v$operator_version\`
+          - LlamaStack distributions: \`docker.io/llamastack/distribution-*:$llamastack_version\`"
+
+          gh release create "v$operator_version" \
+            --title "Release v$operator_version" \
+            --notes "$RELEASE_NOTES"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  cleanup-failed-release:
+    needs: [validate-inputs, update-files, run-tests, trigger-release-build, create-github-release]
+    runs-on: ubuntu-24.04
+    if: failure()
+    env:
+      release_branch: ${{ needs.validate-inputs.outputs.release_branch }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure git
+        run: |
+          git config user.name "${{ env.GIT_USER_NAME }}"
+          git config user.email "${{ env.GIT_USER_EMAIL }}"
+
+      - name: Rename failed release branch
+        run: |
+          failed_branch="${release_branch}-failed-$(date +%Y%m%d-%H%M%S)"
+          echo "Renaming failed release branch to: $failed_branch"
+
+          # Fetch the release branch and rename it
+          git fetch origin "$release_branch" || echo "Branch may not exist yet"
+          if git show-ref --verify --quiet "refs/remotes/origin/$release_branch"; then
+            git checkout "$release_branch"
+            git checkout -b "$failed_branch"
+            git push origin "$failed_branch"
+            git push origin --delete "$release_branch"
+            echo "✅ Renamed $release_branch to $failed_branch"
+          else
+            echo "ℹ️  Release branch $release_branch doesn't exist, nothing to cleanup"
+          fi

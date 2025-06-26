@@ -91,6 +91,14 @@ spec:
 
   The default image used is `quay.io/llamastack/llama-stack-k8s-operator:latest` when not supply argument for `make image`
 
+- Prepare release files with specific versions
+
+  ```commandline
+  make release VERSION=0.2.1 LLAMASTACK_VERSION=0.2.12
+  ```
+
+  This command updates distribution configurations and generates release manifests with the specified versions.
+
 - Once the image is created, the operator can be deployed directly. For each deployment method a
   kubeconfig should be exported
 
