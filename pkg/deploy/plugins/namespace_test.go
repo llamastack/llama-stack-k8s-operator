@@ -17,8 +17,9 @@ func TestNamespacePlugin(t *testing.T) {
 		dep := newTestResource(t, "apps/v1", "Deployment", "my-app", "", nil)
 		require.NoError(t, resMap.Append(dep))
 
-		plugin := CreateNamespacePlugin(testNamespace)
-		err := plugin.Transform(resMap)
+		plugin, err := CreateNamespacePlugin(testNamespace)
+		require.NoError(t, err)
+		err = plugin.Transform(resMap)
 		require.NoError(t, err)
 
 		var transformedDep *resource.Resource
@@ -38,8 +39,9 @@ func TestNamespacePlugin(t *testing.T) {
 		clusterRole := newTestResource(t, "rbac.authorization.k8s.io/v1", "ClusterRole", "admin-role", "", nil)
 		require.NoError(t, resMap.Append(clusterRole))
 
-		plugin := CreateNamespacePlugin(testNamespace)
-		err := plugin.Transform(resMap)
+		plugin, err := CreateNamespacePlugin(testNamespace)
+		require.NoError(t, err)
+		err = plugin.Transform(resMap)
 		require.NoError(t, err)
 
 		var transformedClusterRole *resource.Resource
@@ -59,8 +61,9 @@ func TestNamespacePlugin(t *testing.T) {
 		svc := newTestResource(t, "v1", "Service", "my-service", "", nil)
 		require.NoError(t, resMap.Append(svc))
 
-		plugin := CreateNamespacePlugin(testNamespace)
-		err := plugin.Transform(resMap)
+		plugin, err := CreateNamespacePlugin(testNamespace)
+		require.NoError(t, err)
+		err = plugin.Transform(resMap)
 		require.NoError(t, err)
 
 		var transformedSvc *resource.Resource
@@ -80,8 +83,7 @@ func TestNamespacePlugin(t *testing.T) {
 		dep := newTestResource(t, "apps/v1", "Deployment", "my-app", "", nil)
 		require.NoError(t, resMap.Append(dep))
 
-		plugin := CreateNamespacePlugin("")
-		err := plugin.Transform(resMap)
+		_, err := CreateNamespacePlugin("")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "namespace cannot be empty")
 	})
@@ -92,8 +94,9 @@ func TestNamespacePlugin(t *testing.T) {
 		pvc := newTestResource(t, "v1", "PersistentVolumeClaim", "my-pvc", "old-namespace", nil)
 		require.NoError(t, resMap.Append(pvc))
 
-		plugin := CreateNamespacePlugin(testNamespace)
-		err := plugin.Transform(resMap)
+		plugin, err := CreateNamespacePlugin(testNamespace)
+		require.NoError(t, err)
+		err = plugin.Transform(resMap)
 		require.NoError(t, err)
 
 		var transformedPvc *resource.Resource

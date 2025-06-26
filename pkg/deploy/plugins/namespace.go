@@ -8,10 +8,17 @@ import (
 )
 
 // CreateNamespacePlugin creates a new namespace plugin.
-func CreateNamespacePlugin(namespace string) *namespacePlugin {
+func CreateNamespacePlugin(namespace string) (*namespacePlugin, error) {
+	// do not transform an invalid namespace
+	if namespace == "" {
+		return nil, errors.New("failed to set namespace: namespace cannot be empty")
+	}
+	if err := ValidateName(namespace); err != nil {
+		return nil, fmt.Errorf("failed to set namespace: invalid namespace provided: %w", err)
+	}
 	return &namespacePlugin{
 		namespace: namespace,
-	}
+	}, nil
 }
 
 type namespacePlugin struct {
@@ -25,13 +32,6 @@ func (p *namespacePlugin) Config(h *resmap.PluginHelpers, config []byte) error {
 
 // Transform implements the TransformerPlugin interface.
 func (p *namespacePlugin) Transform(m resmap.ResMap) error {
-	// do not transform an invalid namespace
-	if p.namespace == "" {
-		return errors.New("failed to set namespace: namespace cannot be empty")
-	}
-	if err := ValidateName(p.namespace); err != nil {
-		return fmt.Errorf("failed to set namespace: invalid namespace provided: %w", err)
-	}
 	for _, res := range m.Resources() {
 		// skip cluster-scoped resources because they don't have a namespace
 		if res.GetGvk().IsClusterScoped() {
