@@ -93,3 +93,32 @@ get_volume_name() {
     local provider="$1"
     echo "${provider}-data"
 }
+
+# Generate security related YAML and SCC based on provider
+generate_security_context() {
+    local provider="$1"
+
+    if [ "${provider}" = "ollama" ]; then
+        # Generate security context YAML for Ollama (need root)
+        SECURITY_CONTEXT_YAML="      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0"
+        CONTAINER_SECURITY_CONTEXT_YAML="          securityContext:
+            allowPrivilegeEscalation: true
+            runAsNonRoot: false"
+
+        # OpenShift requires specific permissions in order for the container to run as uid 0
+        if kubectl api-resources --api-group=security.openshift.io | grep -iq 'SecurityContextConstraints'; then
+            "$(dirname "${BASH_SOURCE[0]}")/quickstart-scc.sh" "${provider}"
+        fi
+    else
+        # other providers should not need any special security context, e.g vllm
+        SECURITY_CONTEXT_YAML=""
+        CONTAINER_SECURITY_CONTEXT_YAML=""
+    fi
+
+    # Export variables so they can be used by deploy-quickstart.sh
+    export SECURITY_CONTEXT_YAML
+    export CONTAINER_SECURITY_CONTEXT_YAML
+}

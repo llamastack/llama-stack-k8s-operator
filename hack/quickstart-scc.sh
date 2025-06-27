@@ -8,12 +8,14 @@ NAMESPACE="${PROVIDER}-dist"
 SERVICE_ACCOUNT="${PROVIDER}-sa"
 SCC_NAME="${PROVIDER}-scc"
 
-echo "Checking if OpenShift prerequisites exist for namespace: ${NAMESPACE}, service account: ${SERVICE_ACCOUNT}..."
-if ! kubectl get scc ${SCC_NAME} &> /dev/null || \
-   ! kubectl get sa ${SERVICE_ACCOUNT} -n ${NAMESPACE} &> /dev/null || \
-   ! kubectl get role ${SCC_NAME}-role -n ${NAMESPACE} &> /dev/null || \
-   ! kubectl get rolebinding ${SCC_NAME}-rolebinding -n ${NAMESPACE} &> /dev/null; then
-    echo "Creating ${SCC_NAME}-role and ${SCC_NAME}-rolebinding for ${SERVICE_ACCOUNT}"
+# Helper functions to check if resources exist
+scc_exists() { kubectl get scc "${SCC_NAME}" &> /dev/null; }
+role_exists() { kubectl get role "${SCC_NAME}-role" -n "${NAMESPACE}" &> /dev/null; }
+rolebinding_exists() { kubectl get rolebinding "${SCC_NAME}-rolebinding" -n "${NAMESPACE}" &> /dev/null; }
+
+echo "Checking if OpenShift prerequisites exist in namespace: ${NAMESPACE} for service account: ${SERVICE_ACCOUNT}..."
+if ! scc_exists || ! role_exists || ! rolebinding_exists; then
+    echo "Creating ${SCC_NAME}, ${SCC_NAME}-role and ${SCC_NAME}-rolebinding for ${SERVICE_ACCOUNT}"
     cat <<EOF | kubectl apply -f -
 apiVersion: security.openshift.io/v1
 kind: SecurityContextConstraints

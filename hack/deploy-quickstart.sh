@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
         --help)
             echo "Usage: $0 [OPTIONS]"
             echo "Options:"
-            echo "  --provider NAME     Provider to use (if not setdefault: ollama)"
+            echo "  --provider NAME     Provider to use (if not set default: ollama)"
             echo "                      Supported providers: ollama, vllm"
             echo "  --model NAME        Model to run (if not set, default: llama3.2:1b)"
             echo "                      For vllm see all https://docs.vllm.ai/en/latest/models/supported_models.html"
@@ -123,10 +123,8 @@ else
     echo "ServiceAccount ${SERVICE_ACCOUNT} already exists"
 fi
 
-# OpenShift requires specific permissions in order for the container to run as uid 0
-if kubectl api-resources --api-group=security.openshift.io | grep -iq 'SecurityContextConstraints'; then
-  "${SCRIPT_DIR}/quickstart-scc.sh" "${PROVIDER}"
-fi
+# Generate SCC related config if needed based on provider
+generate_security_context "${PROVIDER}"
 
 echo "Creating ${SERVER_NAME} deployment and service with image: ${IMAGE}..."
 cat <<EOF | kubectl apply -f -
@@ -156,10 +154,7 @@ spec:
           image: ${IMAGE}
           args: ["${INIT_ARGS}"]
       serviceAccountName: ${SERVICE_ACCOUNT}
-      securityContext:
-        runAsUser: 0
-        runAsGroup: 0
-        fsGroup: 0
+${SECURITY_CONTEXT_YAML}
       containers:
         - name: ${SERVER_NAME}
           image: ${IMAGE}
@@ -182,9 +177,7 @@ ${ENV_YAML}
             timeoutSeconds: 5
             failureThreshold: 3
             successThreshold: 1
-          securityContext:
-            allowPrivilegeEscalation: true
-            runAsNonRoot: false
+          ${CONTAINER_SECURITY_CONTEXT_YAML}
           volumeMounts:
           - name: ${VOLUMN}
             mountPath: /root/.${PROVIDER}
