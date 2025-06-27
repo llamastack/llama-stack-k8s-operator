@@ -10,15 +10,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version: '1.21'
 
       - name: Set up limgo
-        uses: GoTestTools/limgo-action@v1.0.2
+        uses: GoTestTools/limgo-action@d4a725a46ab3bdbbf23186bbbe54b4ff4a35d5a7 # v1.0.2
         with:
           version: "v1.0.0"
           install-only: true
@@ -33,7 +33,7 @@ jobs:
           cat /tmp/covcheck.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload test coverage results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ always() }}
         with:
           name: test-coverage-results
