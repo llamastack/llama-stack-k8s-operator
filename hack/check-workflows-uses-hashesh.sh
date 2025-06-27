@@ -19,7 +19,7 @@ for file in $(find .github/workflows/ -type f \( -name "*.yml" -o -name "*.yaml"
     # Extract the ref part after the last @
     ref=$(echo "$line" | sed -E 's/.*@([A-Za-z0-9._-]+).*/\1/')
     # Check if ref is a 40-character hex string (full SHA).
-    #
+
     # Note: strictly speaking, this could also be a tag or branch name, but
     # we'd have to pull this info from the remote. Meh.
     if ! [[ $ref =~ ^[0-9a-fA-F]{40}$ ]]; then
