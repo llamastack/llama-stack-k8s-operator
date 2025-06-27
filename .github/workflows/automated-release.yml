@@ -42,15 +42,14 @@ jobs:
           [[ "${{ github.event.inputs.operator_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Error: Invalid operator version format"; exit 1; }
           [[ "${{ github.event.inputs.llamastack_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Error: Invalid llamastack version format"; exit 1; }
           git tag -l | grep -q "^v${{ github.event.inputs.operator_version }}$" && { echo "Error: Tag v${{ github.event.inputs.operator_version }} already exists"; exit 1; }
+
+          # Extract major.minor for branch name (e.g., "0.2.1" -> "0.2")
           major_minor=$(echo "${{ github.event.inputs.operator_version }}" | cut -d. -f1-2)
           git ls-remote --heads origin | grep -q "release-$major_minor" && { echo "Error: Branch release-$major_minor already exists"; exit 1; }
 
           # Set outputs for later steps
           echo "operator_version=${{ github.event.inputs.operator_version }}" >> $GITHUB_OUTPUT
           echo "llamastack_version=${{ github.event.inputs.llamastack_version }}" >> $GITHUB_OUTPUT
-
-          # Extract major.minor for branch name (e.g., "0.2.1" -> "0.2")
-          major_minor=$(echo "${{ github.event.inputs.operator_version }}" | cut -d. -f1-2)
           echo "release_branch=release-$major_minor" >> $GITHUB_OUTPUT
 
   update-files:
