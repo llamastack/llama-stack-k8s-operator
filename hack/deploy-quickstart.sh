@@ -88,7 +88,6 @@ load_provider_config() {
 load_provider_config
 
 NAMESPACE=$(get_namespace "${PROVIDER}")
-SERVICE_ACCOUNT=$(get_service_account "${PROVIDER}")
 SERVER_NAME=$(get_server_name "${PROVIDER}")
 VOLUMN=$(get_volume_name "${PROVIDER}")
 
@@ -115,16 +114,8 @@ else
     echo "Namespace ${NAMESPACE} already exists"
 fi
 
-echo "Checking if ServiceAccount ${SERVICE_ACCOUNT} exists..."
-if ! kubectl get sa ${SERVICE_ACCOUNT} -n ${NAMESPACE} &> /dev/null; then
-    echo "Creating ServiceAccount ${SERVICE_ACCOUNT}..."
-    kubectl create sa ${SERVICE_ACCOUNT} -n ${NAMESPACE}
-else
-    echo "ServiceAccount ${SERVICE_ACCOUNT} already exists"
-fi
-
 # Generate SCC related config if needed based on provider
-generate_security_context "${PROVIDER}"
+generate_security_context "${PROVIDER}" "${NAMESPACE}"
 
 echo "Creating ${SERVER_NAME} deployment and service with image: ${IMAGE}..."
 cat <<EOF | kubectl apply -f -
@@ -142,6 +133,7 @@ spec:
     metadata:
       labels:
         app: ${SERVER_NAME}
+${OPENSHIFT_ANNOTATION}
     spec:
       initContainers:
         - name: ${SERVER_NAME}-downloadmodel
@@ -153,7 +145,7 @@ spec:
           terminationMessagePolicy: File
           image: ${IMAGE}
           args: ["${INIT_ARGS}"]
-      serviceAccountName: ${SERVICE_ACCOUNT}
+${SERVICE_ACCOUNT:+      serviceAccountName: ${SERVICE_ACCOUNT}}
 ${SECURITY_CONTEXT_YAML}
       containers:
         - name: ${SERVER_NAME}

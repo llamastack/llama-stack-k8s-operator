@@ -76,12 +76,6 @@ get_namespace() {
     echo "${provider}-dist"
 }
 
-# Generate serviceaccount name
-get_service_account() {
-    local provider="$1"
-    echo "${provider}-sa"
-}
-
 # Generate deployment name
 get_server_name() {
     local provider="$1"
@@ -97,28 +91,50 @@ get_volume_name() {
 # Generate security related YAML and SCC based on provider
 generate_security_context() {
     local provider="$1"
+    local namespace="$2"
+    local service_account="${provider}-sa"
 
+    # OpenShift requires specific permissions in order for the container to run as uid 0
     if [ "${provider}" = "ollama" ]; then
+        # Create ServiceAccount for Ollama (needed for SCC)
+        echo "Checking if ServiceAccount ${service_account} exists..."
+        if ! kubectl get sa ${service_account} -n ${namespace} &> /dev/null; then
+            echo "Creating ServiceAccount ${service_account}..."
+            kubectl create sa ${service_account} -n ${namespace}
+        else
+            echo "ServiceAccount ${service_account} already exists"
+        fi
+        export SERVICE_ACCOUNT="${service_account}"
+
         # Generate security context YAML for Ollama (need root)
         SECURITY_CONTEXT_YAML="      securityContext:
         runAsUser: 0
         runAsGroup: 0
         fsGroup: 0"
-        CONTAINER_SECURITY_CONTEXT_YAML="          securityContext:
+        CONTAINER_SECURITY_CONTEXT_YAML="securityContext:
             allowPrivilegeEscalation: true
             runAsNonRoot: false"
+        OPENSHIFT_ANNOTATION=""
 
-        # OpenShift requires specific permissions in order for the container to run as uid 0
         if kubectl api-resources --api-group=security.openshift.io | grep -iq 'SecurityContextConstraints'; then
             "$(dirname "${BASH_SOURCE[0]}")/quickstart-scc.sh" "${provider}"
         fi
     else
-        # other providers should not need any special security context, e.g vllm
+        # For vLLM, use restricted-v2 SCC annotation (do not create new SCC resource)
         SECURITY_CONTEXT_YAML=""
-        CONTAINER_SECURITY_CONTEXT_YAML=""
+        CONTAINER_SECURITY_CONTEXT_YAML="securityContext:
+            runAsNonRoot: true"
+
+        # Add annotation for restricted-v2 SCC to deployment
+        if kubectl api-resources --api-group=security.openshift.io | grep -iq 'SecurityContextConstraints'; then
+            OPENSHIFT_ANNOTATION="      annotations:
+        openshift.io/required-scc: restricted-v2"
+        fi
     fi
 
     # Export variables so they can be used by deploy-quickstart.sh
     export SECURITY_CONTEXT_YAML
     export CONTAINER_SECURITY_CONTEXT_YAML
+    export OPENSHIFT_ANNOTATION
+
 }
