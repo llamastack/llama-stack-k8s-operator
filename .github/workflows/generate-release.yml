@@ -118,8 +118,53 @@ jobs:
         run: |
           make lint
 
+  run-e2e-tests:
+    needs: [validate-inputs, update-files]
+    runs-on: ubuntu-24.04
+    env:
+      release_branch: ${{ needs.validate-inputs.outputs.release_branch }}
+    steps:
+      - name: Trigger E2E tests
+        run: |
+          gh workflow run run-e2e-test.yml \
+            --ref "$release_branch"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Wait for E2E tests
+        run: |
+          echo "Waiting for E2E tests to start..."
+          sleep 10  # Give workflow time to start
+
+          for i in {1..60}; do
+            run_info=$(gh run list --workflow=run-e2e-test.yml --branch=$release_branch --limit=1 --json status,conclusion)
+            status=$(echo "$run_info" | jq -r '.[0].status')
+            conclusion=$(echo "$run_info" | jq -r '.[0].conclusion')
+
+            echo "E2E test status: $status"
+
+            if [[ "$status" == "completed" ]]; then
+              if [[ "$conclusion" == "success" ]]; then
+                echo "✅ E2E tests completed successfully!"
+                break
+              else
+                echo "❌ E2E tests failed with conclusion: $conclusion"
+                exit 1
+              fi
+            fi
+
+            if [[ $i -eq 60 ]]; then
+              echo "❌ Timeout waiting for E2E tests"
+              exit 1
+            fi
+
+            sleep 30
+          done
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   trigger-release-build:
-    needs: [validate-inputs, run-tests]
+    needs: [validate-inputs, run-tests, run-e2e-tests]
     runs-on: ubuntu-24.04
     env:
       operator_version: ${{ needs.validate-inputs.outputs.operator_version }}
