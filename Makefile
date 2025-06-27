@@ -125,7 +125,7 @@ test: manifests generate fmt vet envtest ## Run tests.
 
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests
-	./hack/deploy-ollama.sh # Deploy Ollama
+	./hack/deploy-quickstart.sh # Deploy Ollama
 	go test -v ./tests/e2e/ -run ^TestE2E -v ${E2E_TEST_FLAGS}
 
 GOLANGCI_LINT_TIMEOUT ?= 5m0s
