@@ -77,6 +77,17 @@ type ServerSpec struct {
 	// Storage defines the persistent storage configuration
 	// +optional
 	Storage *StorageSpec `json:"storage,omitempty"`
+	// UserConfig defines the user configuration for the llama-stack server
+	// +optional
+	UserConfig *UserConfigSpec `json:"userConfig,omitempty"`
+}
+
+type UserConfigSpec struct {
+	// ConfigMapName is the name of the ConfigMap containing user configuration
+	ConfigMapName string `json:"configMapName"`
+	// ConfigMapNamespace is the namespace of the ConfigMap (defaults to the same namespace as the CR)
+	// +optional
+	ConfigMapNamespace string `json:"configMapNamespace,omitempty"`
 }
 
 // StorageSpec defines the persistent storage configuration
@@ -174,6 +185,8 @@ type LlamaStackDistributionStatus struct {
 //+kubebuilder:printcolumn:name="Server Version",type="string",JSONPath=".status.version.llamaStackServerVersion"
 //+kubebuilder:printcolumn:name="Available",type="integer",JSONPath=".status.availableReplicas"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+//+kubebuilder:selectablefield:JSONPath=".spec.server.userConfig.configMapName"
+//+kubebuilder:selectablefield:JSONPath=".spec.server.userConfig.configMapNamespace"
 // LlamaStackDistribution is the Schema for the llamastackdistributions API
 
 type LlamaStackDistribution struct {

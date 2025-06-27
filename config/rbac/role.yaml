@@ -8,12 +8,23 @@ rules:
   - ""
   resources:
   - configmaps
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
   - deployments
-  - persistentvolumeclaims
   - persistentvolumes
   - pods
   - pods/exec
   - pods/log
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  - services
   verbs:
   - '*'
 - apiGroups:
@@ -30,15 +41,14 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ""
+  - apps
   resources:
-  - services
+  - deployments
   verbs:
   - '*'
 - apiGroups:
   - apps
   resources:
-  - deployments
   - deployments/finalizers
   verbs:
   - '*'
