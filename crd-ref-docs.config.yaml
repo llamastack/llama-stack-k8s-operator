@@ -3,6 +3,32 @@ render:
     # RE2 regular expressions describing types that should be excluded from the generated documentation.
     ignoreTypes:
       - "(LlamaStackDistribution)List$"
-
-  # Version of Kubernetes to use when generating links to Kubernetes API documentation.
+      - ".*Status$"
+    # Add custom type mappings
+    typeDisplayNamePrefixOverrides:
+      "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1": ""
+  
+  # Enhanced rendering options
   kubernetesVersion: 1.31
+  markdownDisabled: false
+  frontMatter:
+    title: "API Reference"
+    description: "Complete API reference for LlamaStack Kubernetes Operator"
+    weight: 100
+  
+  # Custom sections
+  sections:
+    - title: "Overview"
+      content: |
+        This document contains the API reference for the LlamaStack Kubernetes Operator.
+        The operator manages LlamaStack distributions in Kubernetes clusters.
+        
+        ## Quick Links
+        
+        - [LlamaStackDistribution](#llamastackdistribution) - Main resource for deploying LlamaStack
+        - [Getting Started Guide](../getting-started/quick-start/) - Quick start tutorial
+        - [Examples](../examples/) - Real-world configuration examples
+        
+    - title: "Resource Types"
+      content: |
+        The LlamaStack Operator defines the following Kubernetes custom resources:
