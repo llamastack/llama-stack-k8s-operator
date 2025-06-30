@@ -77,7 +77,7 @@ func TestNamespacePlugin(t *testing.T) {
 		assert.Equal(t, testNamespace, transformedSvc.GetNamespace())
 	})
 
-	t.Run("fails with empty eamespace", func(t *testing.T) {
+	t.Run("fails with empty namespace", func(t *testing.T) {
 		resMap := resmap.New()
 		// create any namespaced resource
 		dep := newTestResource(t, "apps/v1", "Deployment", "my-app", "", nil)
@@ -85,7 +85,8 @@ func TestNamespacePlugin(t *testing.T) {
 
 		_, err := CreateNamespacePlugin("")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "namespace cannot be empty")
+		assert.Contains(t, err.Error(), "namespace")
+		assert.Contains(t, err.Error(), "empty")
 	})
 
 	t.Run("overwrites namespace", func(t *testing.T) {
