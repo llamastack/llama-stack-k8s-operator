@@ -13,7 +13,7 @@ func CreateNamespacePlugin(namespace string) (*namespacePlugin, error) {
 	if namespace == "" {
 		return nil, errors.New("failed to set namespace: namespace cannot be empty")
 	}
-	if err := ValidateName(namespace); err != nil {
+	if err := ValidateK8sLabelName(namespace); err != nil {
 		return nil, fmt.Errorf("failed to set namespace: invalid namespace provided: %w", err)
 	}
 	return &namespacePlugin{

@@ -47,7 +47,7 @@ func (t *namePrefixTransformer) Transform(m resmap.ResMap) error {
 		}
 
 		prefixedName := makePrefixedName(t.config.Prefix, res.GetName())
-		if err := ValidateName(prefixedName); err != nil {
+		if err := ValidateK8sLabelName(prefixedName); err != nil {
 			return fmt.Errorf("failed to make valid prefixed name: %w", err)
 		}
 

@@ -59,7 +59,7 @@ func newTestResource(t *testing.T, apiVersion, kind, name, namespace string, con
 	return res
 }
 
-func TestValidateName(t *testing.T) {
+func TestValidateK8sLabelName(t *testing.T) {
 	// Since the upstream k8svalidation.IsDNS1123Label is already thoroughly
 	// tested, we only need to test that our wrapper function correctly
 	// handles the success and error formatting cases.
@@ -84,7 +84,7 @@ func TestValidateName(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ValidateName(tc.inputName)
+			err := ValidateK8sLabelName(tc.inputName)
 
 			if tc.expectError && err == nil {
 				t.Errorf("expected an error for name %q, but got none", tc.inputName)
