@@ -40,6 +40,8 @@ const (
 	DefaultLabelValue = "llama-stack"
 	// DefaultMountPath is the default mount path for storage
 	DefaultMountPath = "/.llama"
+	// LlamaStackDistributionKind is the kind name for LlamaStackDistribution resources
+	LlamaStackDistributionKind = "LlamaStackDistribution"
 )
 
 // DefaultStorageSize is the default size for persistent storage
