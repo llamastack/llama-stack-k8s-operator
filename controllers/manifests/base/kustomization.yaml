@@ -9,4 +9,3 @@ labels:
   pairs:
     app.kubernetes.io/managed-by: llama-stack-operator
     app.kubernetes.io/part-of: llama-stack
-    some-other-label: some-value
