@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"maps"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -56,4 +57,49 @@ func newTestResource(t *testing.T, apiVersion, kind, name, namespace string, con
 	require.NoError(t, err)
 
 	return res
+}
+
+func TestValidateK8sLabelName(t *testing.T) {
+	// Since the upstream k8svalidation.IsDNS1123Label is already thoroughly
+	// tested, we only need to test that our wrapper function correctly
+	// handles the success and error formatting cases.
+	testCases := []struct {
+		name          string
+		inputName     string
+		expectError   bool
+		expectedCause string
+	}{
+		{
+			name:        "valid name passes validation",
+			inputName:   "a-valid-name",
+			expectError: false,
+		},
+		{
+			name:          "invalid name fails validation",
+			inputName:     "Invalid-Uppercase",
+			expectError:   true,
+			expectedCause: "failed to validate name \"Invalid-Uppercase\"",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateK8sLabelName(tc.inputName)
+
+			if tc.expectError && err == nil {
+				t.Errorf("expected an error for name %q, but got none", tc.inputName)
+			}
+
+			if !tc.expectError && err != nil {
+				t.Errorf("expected no error for name %q, but got: %v", tc.inputName, err)
+			}
+
+			if tc.expectError && err != nil {
+				if !strings.Contains(err.Error(), tc.expectedCause) {
+					t.Errorf("for name %q, expected error to contain %q, but got: %v",
+						tc.inputName, tc.expectedCause, err)
+				}
+			}
+		})
+	}
 }

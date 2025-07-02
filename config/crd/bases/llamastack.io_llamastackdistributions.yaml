@@ -1999,6 +1999,21 @@ spec:
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
                     type: object
+                  userConfig:
+                    description: UserConfig defines the user configuration for the
+                      llama-stack server
+                    properties:
+                      configMapName:
+                        description: ConfigMapName is the name of the ConfigMap containing
+                          user configuration
+                        type: string
+                      configMapNamespace:
+                        description: ConfigMapNamespace is the namespace of the ConfigMap
+                          (defaults to the same namespace as the CR)
+                        type: string
+                    required:
+                    - configMapName
+                    type: object
                 required:
                 - distribution
                 type: object
@@ -2150,6 +2165,9 @@ spec:
         required:
         - spec
         type: object
+    selectableFields:
+    - jsonPath: .spec.server.userConfig.configMapName
+    - jsonPath: .spec.server.userConfig.configMapNamespace
     served: true
     storage: true
     subresources:

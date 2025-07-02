@@ -70,6 +70,16 @@ spec:
 ```
 3. Verify the server pod is running in the user defined namespace.
 
+### Using a ConfigMap for run.yaml configuration
+
+A ConfigMap can be used to store run.yaml configuration for each LlamaStackDistribution.
+Updates to the ConfigMap will restart the Pod to load the new data.
+
+Example to create a run.yaml ConfigMap, and a LlamaStackDistribution that references it:
+```
+kubectl apply -f config/samples/example-with-configmap.yaml
+```
+
 ## Developer Guide
 
 ### Prerequisites

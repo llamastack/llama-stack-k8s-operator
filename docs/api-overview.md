@@ -180,6 +180,7 @@ _Appears in:_
 | `containerSpec` _[ContainerSpec](#containerspec)_ |  |  |  |
 | `podOverrides` _[PodOverrides](#podoverrides)_ |  |  |  |
 | `storage` _[StorageSpec](#storagespec)_ | Storage defines the persistent storage configuration |  |  |
+| `userConfig` _[UserConfigSpec](#userconfigspec)_ | UserConfig defines the user configuration for the llama-stack server |  |  |
 
 #### StorageSpec
 
@@ -192,6 +193,16 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `size` _[Quantity](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#quantity-resource-api)_ | Size is the size of the persistent volume claim created for holding persistent data of the llama-stack server |  |  |
 | `mountPath` _string_ | MountPath is the path where the storage will be mounted in the container |  |  |
+
+#### UserConfigSpec
+
+_Appears in:_
+- [ServerSpec](#serverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing user configuration |  |  |
+| `configMapNamespace` _string_ | ConfigMapNamespace is the namespace of the ConfigMap (defaults to the same namespace as the CR) |  |  |
 
 #### VersionInfo
 

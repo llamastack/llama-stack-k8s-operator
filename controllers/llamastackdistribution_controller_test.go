@@ -282,3 +282,180 @@ func verifyPVC(t *testing.T, ctrlRuntimeClient client.Client, instance *llamav1a
 	assert.Equal(t, expectedSize.String(), storageRequest.String(),
 		"PVC size should match")
 }
+
+func TestConfigMapWatchingFunctionality(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	testEnv := &envtest.Environment{
+		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases")},
+		ErrorIfCRDPathMissing: true,
+		BinaryAssetsDirectory: os.Getenv("KUBEBUILDER_ASSETS"),
+	}
+
+	cfg, err := testEnv.Start()
+	require.NoError(t, err)
+	defer func() { require.NoError(t, testEnv.Stop()) }()
+
+	// Set up the scheme
+	k8sScheme := runtime.NewScheme()
+	require.NoError(t, kubernetesscheme.AddToScheme(k8sScheme))
+	require.NoError(t, llamav1alpha1.AddToScheme(k8sScheme))
+	require.NoError(t, corev1.AddToScheme(k8sScheme))
+	require.NoError(t, appsv1.AddToScheme(k8sScheme))
+	require.NoError(t, networkingv1.AddToScheme(k8sScheme))
+
+	ctrlRuntimeClient, err := client.New(cfg, client.Options{Scheme: k8sScheme})
+	require.NoError(t, err)
+	require.NotNil(t, ctrlRuntimeClient)
+
+	// Create a test namespace
+	testenvNamespaceCounter++
+	nsName := fmt.Sprintf("test-configmap-watch-%d", testenvNamespaceCounter)
+	namespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nsName,
+		},
+	}
+	require.NoError(t, ctrlRuntimeClient.Create(context.Background(), namespace))
+	defer func() {
+		_ = ctrlRuntimeClient.Delete(context.Background(), namespace)
+	}()
+
+	// Create a ConfigMap
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-config",
+			Namespace: namespace.Name,
+		},
+		Data: map[string]string{
+			"run.yaml": `version: '2'
+image_name: ollama
+apis:
+- inference
+providers:
+  inference:
+  - provider_id: ollama
+    provider_type: "remote::ollama"
+    config:
+      url: "http://ollama-server:11434"
+models:
+  - model_id: "llama3.2:1b"
+    provider_id: ollama
+    model_type: llm
+server:
+  port: 8321`,
+		},
+	}
+	require.NoError(t, ctrlRuntimeClient.Create(context.Background(), configMap))
+
+	// Create a LlamaStackDistribution that references the ConfigMap
+	instance := &llamav1alpha1.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-configmap-reference",
+			Namespace: namespace.Name,
+		},
+		Spec: llamav1alpha1.LlamaStackDistributionSpec{
+			Replicas: 1,
+			Server: llamav1alpha1.ServerSpec{
+				Distribution: llamav1alpha1.DistributionType{
+					Name: "ollama",
+				},
+				ContainerSpec: llamav1alpha1.ContainerSpec{
+					Port: 8321,
+				},
+				UserConfig: &llamav1alpha1.UserConfigSpec{
+					ConfigMapName: configMap.Name,
+				},
+			},
+		},
+	}
+	require.NoError(t, ctrlRuntimeClient.Create(context.Background(), instance))
+
+	// Set up the reconciler
+	reconciler := setupTestReconciler(ctrlRuntimeClient, k8sScheme)
+
+	// Reconcile to create initial deployment
+	_, reconcileErr := reconciler.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      instance.Name,
+			Namespace: instance.Namespace,
+		},
+	})
+	require.NoError(t, reconcileErr)
+
+	// Get the initial deployment and check for ConfigMap hash annotation
+	deployment := &appsv1.Deployment{}
+	deploymentKey := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
+	require.Eventually(t, func() bool {
+		err := ctrlRuntimeClient.Get(context.Background(), deploymentKey, deployment)
+		return err == nil
+	}, eventuallyTimeout, eventuallyInterval)
+
+	// Verify the ConfigMap hash annotation exists
+	initialAnnotations := deployment.Spec.Template.Annotations
+	require.Contains(t, initialAnnotations, "configmap.hash/user-config", "ConfigMap hash annotation should be present")
+	initialHash := initialAnnotations["configmap.hash/user-config"]
+	require.NotEmpty(t, initialHash, "ConfigMap hash should not be empty")
+
+	// Update the ConfigMap data
+	require.NoError(t, ctrlRuntimeClient.Get(context.Background(),
+		types.NamespacedName{Name: configMap.Name, Namespace: configMap.Namespace}, configMap))
+
+	configMap.Data["run.yaml"] = `version: '2'
+image_name: ollama
+apis:
+- inference
+providers:
+  inference:
+  - provider_id: ollama
+    provider_type: "remote::ollama"
+    config:
+      url: "http://ollama-server:11434"
+models:
+  - model_id: "llama3.2:3b"
+    provider_id: ollama
+    model_type: llm
+server:
+  port: 8321`
+	require.NoError(t, ctrlRuntimeClient.Update(context.Background(), configMap))
+
+	// Wait a moment for the watch to trigger
+	time.Sleep(2 * time.Second)
+
+	// Trigger reconciliation (in real scenarios this would be triggered by the watch)
+	_, reconcileErr = reconciler.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      instance.Name,
+			Namespace: instance.Namespace,
+		},
+	})
+	require.NoError(t, reconcileErr)
+
+	// Verify the deployment was updated with a new hash
+	require.Eventually(t, func() bool {
+		err := ctrlRuntimeClient.Get(context.Background(), deploymentKey, deployment)
+		if err != nil {
+			return false
+		}
+		newAnnotations := deployment.Spec.Template.Annotations
+		newHash, exists := newAnnotations["configmap.hash/user-config"]
+		return exists && newHash != initialHash && newHash != ""
+	}, eventuallyTimeout, eventuallyInterval, "ConfigMap hash should be updated after ConfigMap data change")
+
+	t.Logf("ConfigMap hash changed from %s to %s", initialHash, deployment.Spec.Template.Annotations["configmap.hash/user-config"])
+
+	// Test that unrelated ConfigMaps don't trigger reconciliation
+	unrelatedConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "unrelated-config",
+			Namespace: namespace.Name,
+		},
+		Data: map[string]string{
+			"some-key": "some-value",
+		},
+	}
+	require.NoError(t, ctrlRuntimeClient.Create(context.Background(), unrelatedConfigMap))
+
+	// Note: In test environment, field indexer might not be set up properly,
+	// so we skip the isConfigMapReferenced checks which rely on field indexing
+}

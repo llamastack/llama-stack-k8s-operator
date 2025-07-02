@@ -69,6 +69,19 @@ func buildContainerSpec(instance *llamav1alpha1.LlamaStackDistribution, image st
 		MountPath: mountPath,
 	})
 
+	// Add ConfigMap volume mount if user config is specified
+	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != "" {
+		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+			Name:      "user-config",
+			MountPath: "/etc/llama-stack/",
+			ReadOnly:  true,
+		})
+
+		// Override the container entrypoint to use the custom config file instead of the default template
+		container.Command = []string{"python", "-m", "llama_stack.distribution.server.server"}
+		container.Args = []string{"--config", "/etc/llama-stack/run.yaml"}
+	}
+
 	if len(instance.Spec.Server.ContainerSpec.Command) > 0 {
 		container.Command = instance.Spec.Server.ContainerSpec.Command
 	}
@@ -106,14 +119,46 @@ func configurePodStorage(instance *llamav1alpha1.LlamaStackDistribution, contain
 		})
 	}
 
-	// Add any pod overrides
-	if instance.Spec.Server.PodOverrides != nil {
-		podSpec.Volumes = append(podSpec.Volumes, instance.Spec.Server.PodOverrides.Volumes...)
-		container.VolumeMounts = append(container.VolumeMounts, instance.Spec.Server.PodOverrides.VolumeMounts...)
-		podSpec.Containers[0] = container // Update with volume mounts
+	// Add ConfigMap volume if user config is specified
+	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != "" {
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: "user-config",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: instance.Spec.Server.UserConfig.ConfigMapName,
+					},
+				},
+			},
+		})
 	}
 
+	// Apply pod overrides including ServiceAccount, volumes, and volume mounts
+	configurePodOverrides(instance, &podSpec)
+
 	return podSpec
+}
+
+// configurePodOverrides applies pod-level overrides from the LlamaStackDistribution spec.
+func configurePodOverrides(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+	if instance.Spec.Server.PodOverrides != nil {
+		// Set ServiceAccount name if specified
+		if instance.Spec.Server.PodOverrides.ServiceAccountName != "" {
+			podSpec.ServiceAccountName = instance.Spec.Server.PodOverrides.ServiceAccountName
+		}
+
+		// Add volumes if specified
+		if len(instance.Spec.Server.PodOverrides.Volumes) > 0 {
+			podSpec.Volumes = append(podSpec.Volumes, instance.Spec.Server.PodOverrides.Volumes...)
+		}
+
+		// Add volume mounts if specified
+		if len(instance.Spec.Server.PodOverrides.VolumeMounts) > 0 {
+			if len(podSpec.Containers) > 0 {
+				podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, instance.Spec.Server.PodOverrides.VolumeMounts...)
+			}
+		}
+	}
 }
 
 // validateDistribution validates the distribution configuration.

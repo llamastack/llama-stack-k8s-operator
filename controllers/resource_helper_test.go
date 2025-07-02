@@ -133,6 +133,45 @@ func TestBuildContainerSpec(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "with user config",
+			instance: &llamav1alpha1.LlamaStackDistribution{
+				Spec: llamav1alpha1.LlamaStackDistributionSpec{
+					Server: llamav1alpha1.ServerSpec{
+						Distribution: llamav1alpha1.DistributionType{
+							Name: "ollama",
+						},
+						ContainerSpec: llamav1alpha1.ContainerSpec{},
+						UserConfig: &llamav1alpha1.UserConfigSpec{
+							ConfigMapName: "test-config",
+						},
+					},
+				},
+			},
+			image: "test-image:latest",
+			expectedResult: corev1.Container{
+				Name:            llamav1alpha1.DefaultContainerName,
+				Image:           "test-image:latest",
+				ImagePullPolicy: corev1.PullAlways,
+				Ports:           []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
+				Command:         []string{"python", "-m", "llama_stack.distribution.server.server"},
+				Args:            []string{"--config", "/etc/llama-stack/run.yaml"},
+				Env: []corev1.EnvVar{
+					{Name: "HF_HOME", Value: llamav1alpha1.DefaultMountPath},
+				},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "lls-storage",
+						MountPath: llamav1alpha1.DefaultMountPath,
+					},
+					{
+						Name:      "user-config",
+						MountPath: "/etc/llama-stack/",
+						ReadOnly:  true,
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -525,25 +564,5 @@ func TestPodOverridesWithoutServiceAccount(t *testing.T) {
 	// Verify ServiceAccount name is empty
 	if deployment.Spec.Template.Spec.ServiceAccountName != "" {
 		t.Errorf("expected empty ServiceAccountName, got %s", deployment.Spec.Template.Spec.ServiceAccountName)
-	}
-}
-
-// configurePodOverrides applies pod-level overrides from the LlamaStackDistribution spec.
-func configurePodOverrides(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
-	if instance.Spec.Server.PodOverrides != nil {
-		// Set ServiceAccount name if specified
-		if instance.Spec.Server.PodOverrides.ServiceAccountName != "" {
-			podSpec.ServiceAccountName = instance.Spec.Server.PodOverrides.ServiceAccountName
-		}
-
-		// Add volumes if specified
-		if len(instance.Spec.Server.PodOverrides.Volumes) > 0 {
-			podSpec.Volumes = append(podSpec.Volumes, instance.Spec.Server.PodOverrides.Volumes...)
-		}
-
-		// Add volume mounts if specified
-		if len(instance.Spec.Server.PodOverrides.VolumeMounts) > 0 {
-			podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, instance.Spec.Server.PodOverrides.VolumeMounts...)
-		}
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/llamastack/llama-stack-k8s-operator/controllers"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"go.uber.org/zap/zapcore"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -59,7 +60,7 @@ func setupReconciler(ctx context.Context, cli client.Client, mgr ctrl.Manager, c
 	if err != nil {
 		return fmt.Errorf("failed to create reconciler: %w", err)
 	}
-	if err = reconciler.SetupWithManager(mgr); err != nil {
+	if err = reconciler.SetupWithManager(ctx, mgr); err != nil {
 		return fmt.Errorf("failed to create controller: %w", err)
 	}
 	return nil
@@ -128,7 +129,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupClient, err := client.New(cfg, client.Options{Scheme: scheme})
+	setupClient, err := client.New(cfg, client.Options{
+		Scheme: scheme,
+		Cache: &client.CacheOptions{
+			DisableFor: []client.Object{
+				&corev1.ConfigMap{},
+			},
+		},
+	})
 	if err != nil {
 		setupLog.Error(err, "failed to set up clients")
 		os.Exit(1)

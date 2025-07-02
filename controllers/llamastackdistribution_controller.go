@@ -46,15 +46,32 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+//+kubebuilder:rbac:groups=llamastack.io,resources=llamastackdistributions,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=llamastack.io,resources=llamastackdistributions/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=llamastack.io,resources=llamastackdistributions/finalizers,verbs=update
+//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
+//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 
 const (
 	operatorConfigData = "llama-stack-operator-config"
 )
 
 // LlamaStackDistributionReconciler reconciles a LlamaStack object.
+//
+// ConfigMap Watching Feature:
+// This reconciler watches for changes to ConfigMaps referenced by LlamaStackDistribution CRs.
+// When a ConfigMap's data changes, it automatically triggers reconciliation of the referencing
+// LlamaStackDistribution, which recalculates a content-based hash and updates the deployment's
+// pod template annotations. This causes Kubernetes to restart the pods with the updated configuration.
 type LlamaStackDistributionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -62,6 +79,35 @@ type LlamaStackDistributionReconciler struct {
 	EnableNetworkPolicy bool
 	// Cluster info
 	ClusterInfo *cluster.ClusterInfo
+}
+
+// hasUserConfigMap checks if the instance has a valid UserConfig with ConfigMapName.
+// Returns true if configured, false otherwise.
+func (r *LlamaStackDistributionReconciler) hasUserConfigMap(instance *llamav1alpha1.LlamaStackDistribution) bool {
+	return instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != ""
+}
+
+// getUserConfigMapNamespace returns the resolved ConfigMap namespace.
+// If ConfigMapNamespace is specified, it returns that; otherwise, it returns the instance's namespace.
+func (r *LlamaStackDistributionReconciler) getUserConfigMapNamespace(instance *llamav1alpha1.LlamaStackDistribution) string {
+	if instance.Spec.Server.UserConfig.ConfigMapNamespace != "" {
+		return instance.Spec.Server.UserConfig.ConfigMapNamespace
+	}
+	return instance.Namespace
+}
+
+// hasValidUserConfig is a standalone helper function to check if a LlamaStackDistribution has valid UserConfig.
+// This is used by functions that don't have access to the reconciler receiver.
+func hasValidUserConfig(llsd *llamav1alpha1.LlamaStackDistribution) bool {
+	return llsd.Spec.Server.UserConfig != nil && llsd.Spec.Server.UserConfig.ConfigMapName != ""
+}
+
+// getUserConfigMapNamespaceStandalone returns the resolved ConfigMap namespace without needing a receiver.
+func getUserConfigMapNamespaceStandalone(llsd *llamav1alpha1.LlamaStackDistribution) string {
+	if llsd.Spec.Server.UserConfig.ConfigMapNamespace != "" {
+		return llsd.Spec.Server.UserConfig.ConfigMapNamespace
+	}
+	return llsd.Namespace
 }
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -135,6 +181,13 @@ func (r *LlamaStackDistributionReconciler) fetchInstance(ctx context.Context, na
 
 // reconcileResources reconciles all resources for the LlamaStackDistribution instance.
 func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	// Reconcile the ConfigMap if specified by the user
+	if r.hasUserConfigMap(instance) {
+		if err := r.reconcileUserConfigMap(ctx, instance); err != nil {
+			return fmt.Errorf("failed to reconcile user ConfigMap: %w", err)
+		}
+	}
+
 	// Reconcile the PVC if storage is configured
 	if instance.Spec.Server.Storage != nil {
 		if err := r.reconcilePVC(ctx, instance); err != nil {
@@ -162,43 +215,334 @@ func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Contex
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *LlamaStackDistributionReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *LlamaStackDistributionReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
+	// Create a field indexer for ConfigMap references to improve performance
+	if err := r.createConfigMapFieldIndexer(ctx, mgr); err != nil {
+		return err
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&llamav1alpha1.LlamaStackDistribution{}, builder.WithPredicates(predicate.Funcs{
-			UpdateFunc: func(e event.UpdateEvent) bool {
-				// Safely type assert old object
-				oldObj, ok := e.ObjectOld.(*llamav1alpha1.LlamaStackDistribution)
-				if !ok {
-					return false
-				}
-				oldObjCopy := oldObj.DeepCopy()
-
-				// Safely type assert new object
-				newObj, ok := e.ObjectNew.(*llamav1alpha1.LlamaStackDistribution)
-				if !ok {
-					return false
-				}
-				newObjCopy := newObj.DeepCopy()
-
-				// Compare only spec, ignoring metadata and status
-				if diff := cmp.Diff(oldObjCopy.Spec, newObjCopy.Spec); diff != "" {
-					logger := mgr.GetLogger().WithValues("namespace", newObjCopy.Namespace, "name", newObjCopy.Name)
-					logger.Info("LlamaStackDistribution CR spec changed")
-					// Note that both the logger and fmt.Printf could appear entangled in the output
-					// but there is no simple way to avoid this (forcing the logger to flush its output).
-					// When the logger is used to print the diff the output is hard to read,
-					// fmt.Printf is better for readability.
-					fmt.Printf("%s\n", diff)
-				}
-
-				return true
-			},
+			UpdateFunc: r.llamaStackUpdatePredicate(mgr),
 		})).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&networkingv1.NetworkPolicy{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.findLlamaStackDistributionsForConfigMap),
+			builder.WithPredicates(predicate.Funcs{
+				UpdateFunc: r.configMapUpdatePredicate,
+				CreateFunc: r.configMapCreatePredicate,
+				DeleteFunc: r.configMapDeletePredicate,
+			}),
+		).
 		Complete(r)
+}
+
+// createConfigMapFieldIndexer creates a field indexer for ConfigMap references.
+func (r *LlamaStackDistributionReconciler) createConfigMapFieldIndexer(ctx context.Context, mgr ctrl.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&llamav1alpha1.LlamaStackDistribution{},
+		"spec.server.userConfig.configMapName",
+		r.configMapIndexFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create ConfigMap reference field indexer: %w", err)
+	}
+	return nil
+}
+
+// configMapIndexFunc is the indexer function for ConfigMap references.
+func (r *LlamaStackDistributionReconciler) configMapIndexFunc(rawObj client.Object) []string {
+	llsd, ok := rawObj.(*llamav1alpha1.LlamaStackDistribution)
+	if !ok {
+		return nil
+	}
+	if !hasValidUserConfig(llsd) {
+		return nil
+	}
+
+	// Create index key as "namespace/name" format
+	configMapNamespace := getUserConfigMapNamespaceStandalone(llsd)
+	indexKey := fmt.Sprintf("%s/%s", configMapNamespace, llsd.Spec.Server.UserConfig.ConfigMapName)
+	return []string{indexKey}
+}
+
+// llamaStackUpdatePredicate returns a predicate function for LlamaStackDistribution updates.
+func (r *LlamaStackDistributionReconciler) llamaStackUpdatePredicate(mgr ctrl.Manager) func(event.UpdateEvent) bool {
+	return func(e event.UpdateEvent) bool {
+		// Safely type assert old object
+		oldObj, ok := e.ObjectOld.(*llamav1alpha1.LlamaStackDistribution)
+		if !ok {
+			return false
+		}
+		oldObjCopy := oldObj.DeepCopy()
+
+		// Safely type assert new object
+		newObj, ok := e.ObjectNew.(*llamav1alpha1.LlamaStackDistribution)
+		if !ok {
+			return false
+		}
+		newObjCopy := newObj.DeepCopy()
+
+		// Compare only spec, ignoring metadata and status
+		if diff := cmp.Diff(oldObjCopy.Spec, newObjCopy.Spec); diff != "" {
+			logger := mgr.GetLogger().WithValues("namespace", newObjCopy.Namespace, "name", newObjCopy.Name)
+			logger.Info("LlamaStackDistribution CR spec changed")
+			// Note that both the logger and fmt.Printf could appear entangled in the output
+			// but there is no simple way to avoid this (forcing the logger to flush its output).
+			// When the logger is used to print the diff the output is hard to read,
+			// fmt.Printf is better for readability.
+			fmt.Printf("%s\n", diff)
+		}
+
+		return true
+	}
+}
+
+// configMapUpdatePredicate handles ConfigMap update events.
+func (r *LlamaStackDistributionReconciler) configMapUpdatePredicate(e event.UpdateEvent) bool {
+	oldConfigMap, oldOk := e.ObjectOld.(*corev1.ConfigMap)
+	newConfigMap, newOk := e.ObjectNew.(*corev1.ConfigMap)
+
+	if !oldOk || !newOk {
+		return false
+	}
+
+	// Only proceed if this ConfigMap is referenced by any LlamaStackDistribution
+	if !r.isConfigMapReferenced(newConfigMap) {
+		return false
+	}
+
+	// Only trigger if Data or BinaryData has changed
+	dataChanged := !cmp.Equal(oldConfigMap.Data, newConfigMap.Data)
+	binaryDataChanged := !cmp.Equal(oldConfigMap.BinaryData, newConfigMap.BinaryData)
+
+	// Log ConfigMap changes for debugging (only for referenced ConfigMaps)
+	if dataChanged || binaryDataChanged {
+		r.logConfigMapDiff(oldConfigMap, newConfigMap, dataChanged, binaryDataChanged)
+	}
+
+	return dataChanged || binaryDataChanged
+}
+
+// logConfigMapDiff logs the differences between old and new ConfigMaps.
+func (r *LlamaStackDistributionReconciler) logConfigMapDiff(oldConfigMap, newConfigMap *corev1.ConfigMap, dataChanged, binaryDataChanged bool) {
+	logger := log.FromContext(context.Background()).WithValues(
+		"configMapName", newConfigMap.Name,
+		"configMapNamespace", newConfigMap.Namespace)
+
+	logger.Info("Referenced ConfigMap change detected")
+
+	if dataChanged {
+		if dataDiff := cmp.Diff(oldConfigMap.Data, newConfigMap.Data); dataDiff != "" {
+			logger.Info("ConfigMap Data changed")
+			fmt.Printf("ConfigMap %s/%s Data diff:\n%s\n", newConfigMap.Namespace, newConfigMap.Name, dataDiff)
+		}
+	}
+
+	if binaryDataChanged {
+		if binaryDataDiff := cmp.Diff(oldConfigMap.BinaryData, newConfigMap.BinaryData); binaryDataDiff != "" {
+			logger.Info("ConfigMap BinaryData changed")
+			fmt.Printf("ConfigMap %s/%s BinaryData diff:\n%s\n", newConfigMap.Namespace, newConfigMap.Name, binaryDataDiff)
+		}
+	}
+}
+
+// configMapCreatePredicate handles ConfigMap create events.
+func (r *LlamaStackDistributionReconciler) configMapCreatePredicate(e event.CreateEvent) bool {
+	configMap, ok := e.Object.(*corev1.ConfigMap)
+	if !ok {
+		return false
+	}
+
+	isReferenced := r.isConfigMapReferenced(configMap)
+	// Log create events for referenced ConfigMaps
+	if isReferenced {
+		log.FromContext(context.Background()).Info("ConfigMap create event detected for referenced ConfigMap",
+			"configMapName", configMap.Name,
+			"configMapNamespace", configMap.Namespace)
+	}
+
+	return isReferenced
+}
+
+// configMapDeletePredicate handles ConfigMap delete events.
+func (r *LlamaStackDistributionReconciler) configMapDeletePredicate(e event.DeleteEvent) bool {
+	configMap, ok := e.Object.(*corev1.ConfigMap)
+	if !ok {
+		return false
+	}
+
+	isReferenced := r.isConfigMapReferenced(configMap)
+	// Log delete events for referenced ConfigMaps - this is critical for deployment health
+	if isReferenced {
+		log.FromContext(context.Background()).Error(nil,
+			"CRITICAL: ConfigMap delete event detected for referenced ConfigMap - this will break dependent deployments",
+			"configMapName", configMap.Name,
+			"configMapNamespace", configMap.Namespace)
+	}
+
+	return isReferenced
+}
+
+// isConfigMapReferenced checks if a ConfigMap is referenced by any LlamaStackDistribution.
+func (r *LlamaStackDistributionReconciler) isConfigMapReferenced(configMap client.Object) bool {
+	logger := log.FromContext(context.Background()).WithValues(
+		"configMapName", configMap.GetName(),
+		"configMapNamespace", configMap.GetNamespace())
+
+	// Use field indexer for efficient lookup - create the same index key format
+	indexKey := fmt.Sprintf("%s/%s", configMap.GetNamespace(), configMap.GetName())
+
+	attachedLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
+
+	err := r.List(context.Background(), &attachedLlamaStacks, client.MatchingFields{"spec.server.userConfig.configMapName": indexKey})
+	if err != nil {
+		// CRITICAL ERROR: If we can't check references, we must log this as a critical error
+		// and err on the side of caution by assuming it IS referenced to trigger reconciliation
+		logger.Error(err, "CRITICAL: Failed to list LlamaStackDistributions for ConfigMap reference check - assuming ConfigMap is referenced to prevent missing reconciliation events")
+		return true // Return true to trigger reconciliation when we can't determine reference status
+	}
+
+	found := len(attachedLlamaStacks.Items) > 0
+
+	if !found {
+		// Fallback: manually check all LlamaStackDistributions
+		manuallyFound := r.manuallyCheckConfigMapReference(configMap)
+		if manuallyFound {
+			return true
+		}
+	}
+
+	return found
+}
+
+// manuallyCheckConfigMapReference manually checks if any LlamaStackDistribution references the given ConfigMap.
+func (r *LlamaStackDistributionReconciler) manuallyCheckConfigMapReference(configMap client.Object) bool {
+	logger := log.FromContext(context.Background()).WithValues(
+		"configMapName", configMap.GetName(),
+		"configMapNamespace", configMap.GetNamespace())
+
+	allLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
+	err := r.List(context.Background(), &allLlamaStacks)
+	if err != nil {
+		logger.Error(err, "CRITICAL: Failed to list all LlamaStackDistributions for manual ConfigMap reference check - assuming ConfigMap is referenced")
+		return true // Return true to trigger reconciliation when we can't determine reference status
+	}
+
+	targetNamespace := configMap.GetNamespace()
+	targetName := configMap.GetName()
+
+	for _, ls := range allLlamaStacks.Items {
+		if hasValidUserConfig(&ls) {
+			configMapNamespace := getUserConfigMapNamespaceStandalone(&ls)
+
+			if configMapNamespace == targetNamespace && ls.Spec.Server.UserConfig.ConfigMapName == targetName {
+				// found a LlamaStackDistribution that references the ConfigMap
+				return true
+			}
+		}
+	}
+
+	// no LlamaStackDistribution found that references the ConfigMap
+	return false
+}
+
+// findLlamaStackDistributionsForConfigMap maps ConfigMap changes to LlamaStackDistribution reconcile requests.
+func (r *LlamaStackDistributionReconciler) findLlamaStackDistributionsForConfigMap(ctx context.Context, configMap client.Object) []reconcile.Request {
+	// Try field indexer lookup first
+	attachedLlamaStacks, found := r.tryFieldIndexerLookup(ctx, configMap)
+	if !found {
+		// Fallback to manual search if field indexer returns no results
+		attachedLlamaStacks = r.performManualSearch(ctx, configMap)
+	}
+
+	// Convert to reconcile requests
+	requests := r.convertToReconcileRequests(attachedLlamaStacks)
+
+	return requests
+}
+
+// tryFieldIndexerLookup attempts to find LlamaStackDistributions using the field indexer.
+func (r *LlamaStackDistributionReconciler) tryFieldIndexerLookup(ctx context.Context, configMap client.Object) (llamav1alpha1.LlamaStackDistributionList, bool) {
+	logger := log.FromContext(ctx).WithValues(
+		"configMapName", configMap.GetName(),
+		"configMapNamespace", configMap.GetNamespace())
+
+	indexKey := fmt.Sprintf("%s/%s", configMap.GetNamespace(), configMap.GetName())
+
+	attachedLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
+	err := r.List(ctx, &attachedLlamaStacks, client.MatchingFields{"spec.server.userConfig.configMapName": indexKey})
+	if err != nil {
+		logger.Error(err, "CRITICAL: Failed to list LlamaStackDistributions using field indexer for ConfigMap event processing",
+			"indexKey", indexKey)
+		return attachedLlamaStacks, false
+	}
+
+	return attachedLlamaStacks, len(attachedLlamaStacks.Items) > 0
+}
+
+// performManualSearch performs a manual search and filtering when field indexer returns no results.
+func (r *LlamaStackDistributionReconciler) performManualSearch(ctx context.Context, configMap client.Object) llamav1alpha1.LlamaStackDistributionList {
+	logger := log.FromContext(ctx).WithValues(
+		"configMapName", configMap.GetName(),
+		"configMapNamespace", configMap.GetNamespace())
+
+	allLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
+	err := r.List(ctx, &allLlamaStacks)
+	if err != nil {
+		logger.Error(err, "CRITICAL: Failed to list all LlamaStackDistributions for manual ConfigMap reference search")
+		return allLlamaStacks
+	}
+
+	// Filter for ConfigMap references
+	filteredItems := r.filterLlamaStacksForConfigMap(allLlamaStacks.Items, configMap)
+	allLlamaStacks.Items = filteredItems
+
+	return allLlamaStacks
+}
+
+// filterLlamaStacksForConfigMap filters LlamaStackDistributions that reference the given ConfigMap.
+func (r *LlamaStackDistributionReconciler) filterLlamaStacksForConfigMap(llamaStacks []llamav1alpha1.LlamaStackDistribution,
+	configMap client.Object) []llamav1alpha1.LlamaStackDistribution {
+	var filteredItems []llamav1alpha1.LlamaStackDistribution
+	targetNamespace := configMap.GetNamespace()
+	targetName := configMap.GetName()
+
+	for _, ls := range llamaStacks {
+		if r.doesLlamaStackReferenceConfigMap(ls, targetNamespace, targetName) {
+			filteredItems = append(filteredItems, ls)
+		}
+	}
+
+	return filteredItems
+}
+
+// doesLlamaStackReferenceConfigMap checks if a LlamaStackDistribution references the specified ConfigMap.
+func (r *LlamaStackDistributionReconciler) doesLlamaStackReferenceConfigMap(ls llamav1alpha1.LlamaStackDistribution, targetNamespace, targetName string) bool {
+	if !hasValidUserConfig(&ls) {
+		return false
+	}
+
+	configMapNamespace := getUserConfigMapNamespaceStandalone(&ls)
+	return configMapNamespace == targetNamespace && ls.Spec.Server.UserConfig.ConfigMapName == targetName
+}
+
+// convertToReconcileRequests converts LlamaStackDistribution items to reconcile requests.
+func (r *LlamaStackDistributionReconciler) convertToReconcileRequests(attachedLlamaStacks llamav1alpha1.LlamaStackDistributionList) []reconcile.Request {
+	requests := make([]reconcile.Request, 0, len(attachedLlamaStacks.Items))
+	for _, llamaStack := range attachedLlamaStacks.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      llamaStack.Name,
+				Namespace: llamaStack.Namespace,
+			},
+		})
+	}
+	return requests
 }
 
 // reconcilePVC creates or updates the PVC for the LlamaStack server.
@@ -264,9 +608,22 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 	// Configure storage
 	podSpec := configurePodStorage(instance, container)
 
-	// Set the service account name if specified in PodOverrides
-	if instance.Spec.Server.PodOverrides != nil && instance.Spec.Server.PodOverrides.ServiceAccountName != "" {
-		podSpec.ServiceAccountName = instance.Spec.Server.PodOverrides.ServiceAccountName
+	// Set the service acc
+	// Prepare annotations for the pod template
+	podAnnotations := make(map[string]string)
+
+	// Add ConfigMap hash to trigger restarts when the ConfigMap changes
+	if r.hasUserConfigMap(instance) {
+		configMapHash, err := r.getConfigMapHash(ctx, instance)
+		if err != nil {
+			return fmt.Errorf("failed to get ConfigMap hash for pod restart annotation: %w", err)
+		}
+		if configMapHash != "" {
+			podAnnotations["configmap.hash/user-config"] = configMapHash
+			logger.V(1).Info("Added ConfigMap hash annotation to trigger pod restart",
+				"configMapName", instance.Spec.Server.UserConfig.ConfigMapName,
+				"hash", configMapHash)
+		}
 	}
 
 	// Create deployment object
@@ -289,6 +646,7 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 						llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
 						"app.kubernetes.io/instance":  instance.Name,
 					},
+					Annotations: podAnnotations,
 				},
 				Spec: podSpec,
 			},
@@ -626,6 +984,66 @@ func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Co
 	}
 
 	return deploy.ApplyNetworkPolicy(ctx, r.Client, r.Scheme, instance, networkPolicy, logger)
+}
+
+// reconcileUserConfigMap validates that the referenced ConfigMap exists.
+func (r *LlamaStackDistributionReconciler) reconcileUserConfigMap(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	logger := log.FromContext(ctx)
+
+	if !r.hasUserConfigMap(instance) {
+		logger.V(1).Info("No user ConfigMap specified, skipping")
+		return nil
+	}
+
+	// Determine the ConfigMap namespace - default to the same namespace as the LlamaStackDistribution.
+	configMapNamespace := r.getUserConfigMapNamespace(instance)
+
+	logger.V(1).Info("Validating referenced ConfigMap exists",
+		"configMapName", instance.Spec.Server.UserConfig.ConfigMapName,
+		"configMapNamespace", configMapNamespace)
+
+	// Check if the ConfigMap exists
+	configMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      instance.Spec.Server.UserConfig.ConfigMapName,
+		Namespace: configMapNamespace,
+	}, configMap)
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			logger.Error(err, "Referenced ConfigMap not found",
+				"configMapName", instance.Spec.Server.UserConfig.ConfigMapName,
+				"configMapNamespace", configMapNamespace)
+			return fmt.Errorf("failed to find referenced ConfigMap %s/%s", configMapNamespace, instance.Spec.Server.UserConfig.ConfigMapName)
+		}
+		return fmt.Errorf("failed to fetch ConfigMap %s/%s: %w", configMapNamespace, instance.Spec.Server.UserConfig.ConfigMapName, err)
+	}
+
+	logger.V(1).Info("User ConfigMap found and validated",
+		"configMap", configMap.Name,
+		"namespace", configMap.Namespace,
+		"dataKeys", len(configMap.Data))
+	return nil
+}
+
+// getConfigMapHash calculates a hash of the ConfigMap data to detect changes.
+func (r *LlamaStackDistributionReconciler) getConfigMapHash(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) (string, error) {
+	if !r.hasUserConfigMap(instance) {
+		return "", nil
+	}
+
+	configMapNamespace := r.getUserConfigMapNamespace(instance)
+
+	configMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      instance.Spec.Server.UserConfig.ConfigMapName,
+		Namespace: configMapNamespace,
+	}, configMap)
+	if err != nil {
+		return "", err
+	}
+
+	// Create a content-based hash that will change when the ConfigMap data changes
+	return fmt.Sprintf("%s-%s", configMap.ResourceVersion, configMap.Name), nil
 }
 
 // createDefaultConfigMap creates a ConfigMap with default feature flag values.
