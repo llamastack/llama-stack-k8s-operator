@@ -100,6 +100,7 @@ kubectl apply -f config/samples/example-with-configmap.yaml
   ```
 
   The default image used is `quay.io/llamastack/llama-stack-k8s-operator:latest` when not supply argument for `make image`
+  To create a local file `local.mk` with env variables can overwrite the default values set in the `Makefile`.
 
 - Once the image is created, the operator can be deployed directly. For each deployment method a
   kubeconfig should be exported

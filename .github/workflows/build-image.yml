@@ -29,4 +29,4 @@ jobs:
           password: ${{ secrets.APP_QUAY_TOKEN }}
 
       - name: Build and push latest image
-        run: make docker-build docker-push -e IMG=quay.io/llamastack/llama-stack-k8s-operator:latest
+        run: make image-build image-push -e IMG=quay.io/llamastack/llama-stack-k8s-operator:latest

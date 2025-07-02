@@ -24,7 +24,7 @@ COPY pkg/ pkg/
 USER root
 
 # GOARCH is intentionally left empty to automatically detect the host architecture
-# This ensures the binary matches the platform where docker-build is executed
+# This ensures the binary matches the platform where image-build is executed
 RUN CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -o manager main.go
 
 # Use distroless as minimal base image to package the manager binary

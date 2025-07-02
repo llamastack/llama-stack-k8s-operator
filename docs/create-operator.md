@@ -44,7 +44,7 @@ The operator's container image needs to be built and pushed to a container regis
 **Note:** Replace `<your-namespace>` with your actual registry and namespace.
 
 ```bash
-make docker-build IMG=$REGISTRY/$REGISTRY_NAMESPACE/llama-stack-operator:$TAG
+make image-build IMG=$REGISTRY/$REGISTRY_NAMESPACE/llama-stack-operator:$TAG
 podman push $REGISTRY/$REGISTRY_NAMESPACE/llama-stack-operator:$TAG
 ```
 

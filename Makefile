@@ -53,7 +53,8 @@ OPERATOR_SDK_VERSION ?= v1.39.2
 ENVTEST_K8S_VERSION = 1.31.0
 
 # Image URL to use all building/pushing image targets
-IMG ?= quay.io/llamastack/llama-stack-k8s-operator:latest
+IMG_TAG ?= latest
+IMG ?= $(IMAGE_TAG_BASE):$(IMG_TAG)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -63,7 +64,7 @@ GOBIN=$(shell go env GOBIN)
 endif
 
 # CONTAINER_TOOL defines the container tool to be used for building images.
-# Be aware that the target commands are only tested with Docker which is
+# Be aware that the target commands are only tested with Docker/Podman which is
 # scaffolded by default. However, you might want to replace it to use other
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= podman
@@ -76,6 +77,9 @@ SHELL = /usr/bin/env bash -o pipefail
 # E2E tests additional flags
 # See README.md, default go test timeout 10m
 E2E_TEST_FLAGS = -timeout 30m
+
+# Include local.mk if it exists (for custom overrides)
+-include local.mk
 
 .PHONY: all
 all: build
@@ -108,12 +112,21 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
 GOLANGCI_TMP_FILE = .golangci.mktmp.yml
+
 .PHONY: fmt
 fmt: golangci-lint yq ## Formats code and imports.
 	go fmt ./...
 	$(YQ) e '.linters = {"disable-all": true, "enable": ["gci"]}' .golangci.yml  > $(GOLANGCI_TMP_FILE)
 	$(GOLANGCI_LINT) run --config=$(GOLANGCI_TMP_FILE) --fix
-CLEANFILES += $(GOLANGCI_TMP_FILE)
+
+.PHONY: clean
+clean: ## Remove temporary files, caches, and downloaded tools
+	@# Clean golangci-lint cache only if golangci-lint is available
+	@if command -v $(GOLANGCI_LINT) >/dev/null 2>&1; then \
+		$(GOLANGCI_LINT) cache clean; \
+	fi
+	rm -f $(GOLANGCI_TMP_FILE) Dockerfile.cross cover.out
+	rm -rf $(LOCALBIN)
 
 .PHONY: vet
 vet: ## Run go vet against code.
@@ -125,7 +138,7 @@ test: manifests generate fmt vet envtest ## Run tests.
 
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests
-	./hack/deploy-ollama.sh # Deploy Ollama
+	./hack/deploy-ollama.sh # Deploy Ollama for e2e tests
 	go test -v ./tests/e2e/ -run ^TestE2E -v ${E2E_TEST_FLAGS}
 
 GOLANGCI_LINT_TIMEOUT ?= 5m0s
@@ -150,12 +163,12 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
-.PHONY: docker-build
-docker-build: ## Build docker image with the manager.
+.PHONY: image-build
+image-build: ## Build image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
 
-.PHONY: docker-push
-docker-push: ## Push docker image with the manager.
+.PHONY: image-push
+image-push: ## Push image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
@@ -183,7 +196,7 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	$(KUSTOMIZE) build config/default > release/operator.yaml
 
 .PHONY: image
-image: docker-build docker-push ## Build and push image with the manager.
+image: image-build image-push ## Build and push image with the manager.
 
 ##@ Deployment
 
@@ -322,7 +335,7 @@ bundle-build: ## Build the bundle image.
 
 .PHONY: bundle-push
 bundle-push: ## Push the bundle image.
-	$(MAKE) docker-push IMG=$(BUNDLE_IMG)
+	$(MAKE) image-push IMG=$(BUNDLE_IMG)
 
 .PHONY: opm
 OPM = $(LOCALBIN)/opm
@@ -358,12 +371,12 @@ endif
 # https://github.com/operator-framework/community-operators/blob/7f1438c/docs/packaging-operator.md#updating-your-existing-operator
 .PHONY: catalog-build
 catalog-build: opm ## Build a catalog image.
-	$(OPM) index add --container-tool docker --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT)
+	$(OPM) index add --container-tool $(CONTAINER_TOOL) --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT)
 
 # Push the catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
-	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+	$(MAKE) image-push IMG=$(CATALOG_IMG)
 
 # Pre-commit checks called explicitly
 .PHONY: pre-commit
