@@ -181,6 +181,7 @@ type LlamaStackDistributionStatus struct {
 }
 
 //+kubebuilder:object:root=true
+//+kubebuilder:resource:shortName=llsd
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 //+kubebuilder:printcolumn:name="Operator Version",type="string",JSONPath=".status.version.operatorVersion"
