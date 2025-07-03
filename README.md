@@ -42,10 +42,34 @@ kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-op
 
 ### Deploying the Llama Stack Server
 
-1. Deploy the inference provider server (ollama, vllm etc). Example to deploy a new ollama server:
+1. Deploy the inference provider server (ollama, vllm)
+
+**Ollama Examples:**
+
+Deploy Ollama with default model llama3.2:1b
+```bash
+./hack/deploy-quickstart.sh
 ```
-bash hack/deploy-ollama.sh
+
+Deploy Ollama with other model:
+```bash
+./hack/deploy-quickstart.sh --provider ollama --model llama3.2:7b
 ```
+
+**vLLM Examples:**
+
+This would require a secret "hf-token-secret" in namespace "vllm-dist" for HuggingFace token (required for downloading models) to be created in advance.
+
+Deploy vLLM with default model (meta-llama/Llama-3.2-1B):
+```bash
+./hack/deploy-quickstart.sh --provider vllm
+```
+
+Deploy vLLM with GPU support:
+```bash
+./hack/deploy-quickstart.sh --provider vllm --runtime-env "VLLM_TARGET_DEVICE=gpu,CUDA_VISIBLE_DEVICES=0"
+```
+
 2. Create LlamaStackDistribution CR to get the server running. Example:
 ```
 apiVersion: llamastack.io/v1alpha1
@@ -89,7 +113,7 @@ kubectl apply -f config/samples/example-with-configmap.yaml
 - operator-sdk **v1.39.2** (v4 layout) or newer
 - kubectl configured to access your cluster
 - A running inference server:
-  - For local development, you can use the provided script: `/hack/deploy-ollama.sh`
+  - For local development, you can use the provided script: `/hack/deploy-quickstart.sh`
 
 ### Building the Operator
 
