@@ -156,6 +156,13 @@ func patchResource(ctx context.Context, cli client.Client, desired, existing *un
 		return nil
 	}
 
+	if existing.GetKind() == "PersistentVolumeClaim" {
+		logger.Info("Skipping PVC patch - PVCs are immutable after creation",
+			"name", existing.GetName(),
+			"namespace", existing.GetNamespace())
+		return nil
+	}
+
 	data, err := json.Marshal(desired)
 	if err != nil {
 		return fmt.Errorf("failed to marshal desired state: %w", err)
