@@ -5,6 +5,9 @@
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
 VERSION ?= 0.0.1
 
+# LLAMASTACK_VERSION defines the version of LlamaStack distributions to use
+LLAMASTACK_VERSION ?= latest
+
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
 # To re-generate a bundle for other specific channels without changing the standard setup, you can:
@@ -382,3 +385,30 @@ catalog-push: ## Push a catalog image.
 .PHONY: pre-commit
 pre-commit:
 	pre-commit run --show-diff-on-failure --color=always --all-files
+
+##@ Release
+
+.PHONY: release
+release: ## Prepare release files with VERSION and LLAMASTACK_VERSION
+	@if [ "$(LLAMASTACK_VERSION)" = "latest" ]; then \
+		echo "Error: LLAMASTACK_VERSION must be explicitly set for releases."; \
+		echo "Usage: make release VERSION=0.2.1 LLAMASTACK_VERSION=0.2.12"; \
+		exit 1; \
+	fi
+	@echo "Preparing release with operator version $(VERSION) and LlamaStack version $(LLAMASTACK_VERSION)"
+
+	# Update distribution configmap with LlamaStack version
+	sed -i 's/:latest/:$(LLAMASTACK_VERSION)/g' config/manager/distribution-configmap.yaml
+
+	# Generate manifests and build installer
+	$(MAKE) manifests generate
+	$(MAKE) build-installer IMG=quay.io/llamastack/llama-stack-k8s-operator:v$(VERSION)
+
+	# Update environment variables in generated operator.yaml
+	sed -i 's/value: latest/value: v$(VERSION)/' release/operator.yaml
+	sed -i 's/LLAMA_STACK_VERSION.*value: latest/LLAMA_STACK_VERSION\n          value: $(LLAMASTACK_VERSION)/' release/operator.yaml
+
+	@echo "Release preparation complete!"
+	@echo "Files updated:"
+	@echo "  - config/manager/distribution-configmap.yaml"
+	@echo "  - release/operator.yaml"
