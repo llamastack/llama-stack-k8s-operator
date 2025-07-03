@@ -19,6 +19,7 @@ COPY main.go main.go
 COPY api/ api/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
+COPY distributions.json distributions.json
 
 # Build the manager binary
 USER root

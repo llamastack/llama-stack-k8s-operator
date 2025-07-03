@@ -26,7 +26,6 @@ import (
 	"github.com/llamastack/llama-stack-k8s-operator/controllers"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"go.uber.org/zap/zapcore"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -38,10 +37,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	_ "embed"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
+
+//go:embed distributions.json
+var embeddedDistributions []byte
 
 var (
 	scheme   = runtime.NewScheme()
@@ -131,18 +134,13 @@ func main() {
 
 	setupClient, err := client.New(cfg, client.Options{
 		Scheme: scheme,
-		Cache: &client.CacheOptions{
-			DisableFor: []client.Object{
-				&corev1.ConfigMap{},
-			},
-		},
 	})
 	if err != nil {
 		setupLog.Error(err, "failed to set up clients")
 		os.Exit(1)
 	}
 
-	clusterInfo, err := cluster.NewClusterInfo(ctx, setupClient)
+	clusterInfo, err := cluster.NewClusterInfo(ctx, setupClient, embeddedDistributions)
 	if err != nil {
 		setupLog.Error(err, "failed to initialize cluster config")
 		os.Exit(1)
