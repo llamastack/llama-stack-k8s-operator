@@ -1,32 +1,32 @@
-exclude: 'build/'
+exclude: "build/"
 
 default_language_version:
-    python: python3
+  python: python3
 
 repos:
--   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0  # Latest stable version
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b # v5.0.0
     hooks:
-    -   id: check-merge-conflict
-        args: ['--assume-in-merge']
-    -   id: trailing-whitespace
-    -   id: check-added-large-files
-        args: ['--maxkb=1000']
-    -   id: end-of-file-fixer
+      - id: check-merge-conflict
+        args: ["--assume-in-merge"]
+      - id: trailing-whitespace
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+      - id: end-of-file-fixer
         exclude: '^(.*\.svg)$'
-    -   id: no-commit-to-branch
-    -   id: check-yaml
+      - id: no-commit-to-branch
+      - id: check-yaml
         args: ["--unsafe"]
-    -   id: detect-private-key
-    -   id: mixed-line-ending
+      - id: detect-private-key
+      - id: mixed-line-ending
         args: [--fix=lf] # Forces to replace line ending by LF (line feed)
-    -   id: check-executables-have-shebangs
-    -   id: check-json
-    -   id: check-shebang-scripts-are-executable
-    -   id: check-symlinks
-    -   id: check-toml
+      - id: check-executables-have-shebangs
+      - id: check-json
+      - id: check-shebang-scripts-are-executable
+      - id: check-symlinks
+      - id: check-toml
 
--   repo: local
+  - repo: local
     hooks:
       - id: linters
         name: Linters
@@ -57,3 +57,11 @@ repos:
         entry: ./hack/check_go_errors.py
         language: python
         types: [go]
+      - id: check-workflows-use-hashes
+        name: Check GitHub Actions use SHA-pinned actions
+        entry: ./hack/check-workflows-uses-hashes.sh
+        language: system
+        pass_filenames: false
+        require_serial: true
+        always_run: true
+        files: ^\.github/workflows/.*\.ya?ml$
