@@ -20,6 +20,8 @@ spec:
     kind: LlamaStackDistribution
     listKind: LlamaStackDistributionList
     plural: llamastackdistributions
+    shortNames:
+    - llsd
     singular: llamastackdistribution
   scope: Namespaced
   versions:
