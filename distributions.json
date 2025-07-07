@@ -1,9 +1,6 @@
 {
-"starter": "docker.io/llamastack/distribution-starter:latest",
-"ollama": "docker.io/llamastack/distribution-ollama:latest",
-"bedrock": "docker.io/llamastack/distribution-bedrock:latest",
-"remote-vllm": "docker.io/llamastack/distribution-remote-vllm:latest",
-"tgi": "docker.io/llamastack/distribution-tgi:latest",
-"together": "docker.io/llamastack/distribution-together:latest",
-"vllm-gpu": "docker.io/llamastack/distribution-vllm-gpu:latest"
+  "starter": "docker.io/llamastack/distribution-starter:latest",
+  "remote-vllm": "docker.io/llamastack/distribution-remote-vllm:latest",
+  "meta-reference-gpu": "docker.io/llamastack/distribution-meta-reference-gpu:latest",
+  "postgres-demo": "docker.io/llamastack/distribution-postgres-demo:latest"
 }
