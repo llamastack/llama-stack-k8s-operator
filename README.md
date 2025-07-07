@@ -80,21 +80,22 @@ spec:
   replicas: 1
   server:
     distribution:
-      name: ollama
+      name: starter
     containerSpec:
-      port: 8321
       env:
       - name: INFERENCE_MODEL
-        value: "llama3.2:1b"
+        value: "llama3.2:3b"
       - name: OLLAMA_URL
         value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
+      - name: ENABLE_OLLAMA
+        value: ollama
     storage:
       size: "20Gi"
       mountPath: "/home/lls/.lls"
 ```
 3. Verify the server pod is running in the user defined namespace.
 
-### Using a ConfigMap for run.yaml configuration
+### Using a ConfigMap to override default run.yaml configuration from distribution
 
 A ConfigMap can be used to store run.yaml configuration for each LlamaStackDistribution.
 Updates to the ConfigMap will restart the Pod to load the new data.
