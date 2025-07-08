@@ -41,20 +41,20 @@ jobs:
           # Validate version formats and check for existing releases
           [[ "${{ github.event.inputs.operator_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Error: Invalid operator version format"; exit 1; }
           [[ "${{ github.event.inputs.llamastack_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Error: Invalid llamastack version format"; exit 1; }
-          
+
           # Check for existing tag idempotently
           if git tag -l | grep -q "^v${{ github.event.inputs.operator_version }}$"; then
             echo "Tag v${{ github.event.inputs.operator_version }} already exists - verifying consistency..."
-            
+
             # Get the commit SHA that the existing tag points to
             tag_sha=$(git rev-list -n 1 "v${{ github.event.inputs.operator_version }}")
             current_sha=$(git rev-parse HEAD)
-            
+
             if [ "$tag_sha" != "$current_sha" ]; then
               echo "Error: Tag v${{ github.event.inputs.operator_version }} exists but points to different commit ($tag_sha vs $current_sha)"
               exit 1
             fi
-            
+
             echo "✅ Tag v${{ github.event.inputs.operator_version }} already exists and points to current commit - release is idempotent"
           else
             echo "✅ Tag v${{ github.event.inputs.operator_version }} does not exist - proceeding with new release"

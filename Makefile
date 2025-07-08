@@ -397,18 +397,18 @@ release: ## Prepare release files with VERSION and LLAMASTACK_VERSION
 	fi
 	@echo "Preparing release with operator version $(VERSION) and LlamaStack version $(LLAMASTACK_VERSION)"
 
-	# Update distribution configmap with LlamaStack version
-	sed -i 's/:latest/:$(LLAMASTACK_VERSION)/g' config/manager/distribution-configmap.yaml
+	# Update distributions.json with LlamaStack version
+	$(YQ) -i 'to_entries | map(.value |= sub(":latest"; ":$(LLAMASTACK_VERSION)")) | from_entries' distributions.json
 
 	# Generate manifests and build installer
 	$(MAKE) manifests generate
 	$(MAKE) build-installer IMG=quay.io/llamastack/llama-stack-k8s-operator:v$(VERSION)
 
 	# Update environment variables in generated operator.yaml
-	sed -i 's/value: latest/value: v$(VERSION)/' release/operator.yaml
-	sed -i 's/LLAMA_STACK_VERSION.*value: latest/LLAMA_STACK_VERSION\n          value: $(LLAMASTACK_VERSION)/' release/operator.yaml
+	$(YQ) -i '(select(.kind == "Deployment") | .spec.template.spec.containers[].env[] | select(.name == "OPERATOR_VERSION") | .value) = "v$(VERSION)"' release/operator.yaml
+	$(YQ) -i '(select(.kind == "Deployment") | .spec.template.spec.containers[].env[] | select(.name == "LLAMA_STACK_VERSION") | .value) = "$(LLAMASTACK_VERSION)"' release/operator.yaml
 
 	@echo "Release preparation complete!"
 	@echo "Files updated:"
-	@echo "  - config/manager/distribution-configmap.yaml"
+	@echo "  - distributions.json"
 	@echo "  - release/operator.yaml"
