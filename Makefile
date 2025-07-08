@@ -389,7 +389,7 @@ pre-commit:
 ##@ Release
 
 .PHONY: release
-release: ## Prepare release files with VERSION and LLAMASTACK_VERSION
+release: yq ## Prepare release files with VERSION and LLAMASTACK_VERSION
 	@if [ "$(LLAMASTACK_VERSION)" = "latest" ]; then \
 		echo "Error: LLAMASTACK_VERSION must be explicitly set for releases."; \
 		echo "Usage: make release VERSION=0.2.1 LLAMASTACK_VERSION=0.2.12"; \
