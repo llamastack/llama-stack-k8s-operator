@@ -115,8 +115,11 @@ jobs:
       - name: Run pre-commit checks and handle file modifications
         shell: bash
         run: |
-          pre-commit run --show-diff-on-failure --color=always --all-files
-          exit_code=$?
+          if pre-commit run --show-diff-on-failure --color=always --all-files; then
+            exit_code=0
+          else
+            exit_code=$?
+          fi
 
           if [ $exit_code -eq 0 ]; then
             echo "✅ Pre-commit checks passed"
