@@ -36,11 +36,29 @@ jobs:
 
       - name: Validate inputs
         id: validate
+        shell: bash
         run: |
           # Validate version formats and check for existing releases
           [[ "${{ github.event.inputs.operator_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Error: Invalid operator version format"; exit 1; }
           [[ "${{ github.event.inputs.llamastack_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Error: Invalid llamastack version format"; exit 1; }
-          git tag -l | grep -q "^v${{ github.event.inputs.operator_version }}$" && { echo "Error: Tag v${{ github.event.inputs.operator_version }} already exists"; exit 1; }
+          
+          # Check for existing tag idempotently
+          if git tag -l | grep -q "^v${{ github.event.inputs.operator_version }}$"; then
+            echo "Tag v${{ github.event.inputs.operator_version }} already exists - verifying consistency..."
+            
+            # Get the commit SHA that the existing tag points to
+            tag_sha=$(git rev-list -n 1 "v${{ github.event.inputs.operator_version }}")
+            current_sha=$(git rev-parse HEAD)
+            
+            if [ "$tag_sha" != "$current_sha" ]; then
+              echo "Error: Tag v${{ github.event.inputs.operator_version }} exists but points to different commit ($tag_sha vs $current_sha)"
+              exit 1
+            fi
+            
+            echo "✅ Tag v${{ github.event.inputs.operator_version }} already exists and points to current commit - release is idempotent"
+          else
+            echo "✅ Tag v${{ github.event.inputs.operator_version }} does not exist - proceeding with new release"
+          fi
 
           # Extract major.minor for branch name (e.g., "0.2.1" -> "0.2")
           major_minor=$(echo "${{ github.event.inputs.operator_version }}" | cut -d. -f1-2)
@@ -56,11 +74,13 @@ jobs:
           echo "  Release branch: release-$major_minor"
 
       - name: Configure git
+        shell: bash
         run: |
           git config user.name "${{ env.GIT_USER_NAME }}"
           git config user.email "${{ env.GIT_USER_EMAIL }}"
 
       - name: Create or checkout release branch
+        shell: bash
         run: |
           release_branch="${{ steps.validate.outputs.release_branch }}"
 
@@ -81,22 +101,22 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Prepare release files
+        shell: bash
         run: |
           # Use the make release command to update all necessary files
           make release VERSION=${{ steps.validate.outputs.operator_version }} LLAMASTACK_VERSION=${{ steps.validate.outputs.llamastack_version }}
 
       - name: Install pre-commit
+        shell: bash
         run: |
           python -m pip install pre-commit
           pre-commit install --install-hooks
 
       - name: Run pre-commit checks and handle file modifications
+        shell: bash
         run: |
-          # Run pre-commit and capture exit code
-          set +e
           pre-commit run --show-diff-on-failure --color=always --all-files
           exit_code=$?
-          set -e
 
           if [ $exit_code -eq 0 ]; then
             echo "✅ Pre-commit checks passed"
@@ -141,16 +161,19 @@ jobs:
           fi
 
       - name: Run unit and integration tests
+        shell: bash
         run: |
           make test
 
       - name: Build release image (validation gate)
+        shell: bash
         run: |
           # Build the image to validate it works before proceeding
           make docker-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ steps.validate.outputs.operator_version }}
           echo "✅ Image built successfully: quay.io/llamastack/llama-stack-k8s-operator:v${{ steps.validate.outputs.operator_version }}"
 
       - name: Commit and push changes
+        shell: bash
         run: |
           git add .
           if git diff --staged --quiet; then
@@ -179,43 +202,55 @@ jobs:
           fetch-depth: 0
 
       - name: Configure git
+        shell: bash
         run: |
           git config user.name "${{ env.GIT_USER_NAME }}"
           git config user.email "${{ env.GIT_USER_EMAIL }}"
 
       - name: Create release tag
+        shell: bash
         run: |
-          # Create and push the release tag
-          git tag -a "v${{ env.operator_version }}" -m "Release v${{ env.operator_version }}"
-          git push origin "v${{ env.operator_version }}"
-          echo "✅ Created tag v${{ env.operator_version }}"
+          # Create and push the release tag (idempotent)
+          if git tag -l | grep -q "^v${{ env.operator_version }}$"; then
+            echo "✅ Tag v${{ env.operator_version }} already exists - skipping creation"
+          else
+            git tag -a "v${{ env.operator_version }}" -m "Release v${{ env.operator_version }}"
+            git push origin "v${{ env.operator_version }}"
+            echo "✅ Created tag v${{ env.operator_version }}"
+          fi
 
       - name: Create GitHub Release
+        shell: bash
         run: |
-          RELEASE_NOTES="## What's Changed
+          # Check if release already exists
+          if gh release view "v${{ env.operator_version }}" >/dev/null 2>&1; then
+            echo "✅ GitHub release v${{ env.operator_version }} already exists - skipping creation"
+          else
+            RELEASE_NOTES="## What's Changed
 
-          - Updated operator version to v${{ env.operator_version }}
-          - Updated LlamaStack distributions to ${{ env.llamastack_version }}
-          - Generated updated release manifests
+            - Updated operator version to v${{ env.operator_version }}
+            - Updated LlamaStack distributions to ${{ env.llamastack_version }}
+            - Generated updated release manifests
 
-          ## Installation
+            ## Installation
 
-          Install the operator using kubectl:
+            Install the operator using kubectl:
 
-          \`\`\`bash
-          kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/v${{ env.operator_version }}/release/operator.yaml
-          \`\`\`
+            \`\`\`bash
+            kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/v${{ env.operator_version }}/release/operator.yaml
+            \`\`\`
 
-          ## Container Images
+            ## Container Images
 
-          - Operator: \`quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}\`
-          - LlamaStack distributions: \`docker.io/llamastack/distribution-*:${{ env.llamastack_version }}\`"
+            - Operator: \`quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}\`
+            - LlamaStack distributions: \`docker.io/llamastack/distribution-*:${{ env.llamastack_version }}\`"
 
-          gh release create "v${{ env.operator_version }}" \
-            --title "Release v${{ env.operator_version }}" \
-            --notes "$RELEASE_NOTES"
+            gh release create "v${{ env.operator_version }}" \
+              --title "Release v${{ env.operator_version }}" \
+              --notes "$RELEASE_NOTES"
 
-          echo "🎉 Created GitHub release v${{ env.operator_version }}"
+            echo "🎉 Created GitHub release v${{ env.operator_version }}"
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -225,6 +260,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Build release image
+        shell: bash
         run: |
           # Build the image before pushing
           make docker-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
@@ -238,12 +274,14 @@ jobs:
           password: ${{ secrets.APP_QUAY_TOKEN }}
 
       - name: Push release image
+        shell: bash
         run: |
           # Push the release image after successfully creating the release
           make docker-push IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
           echo "✅ Pushed: quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}"
 
       - name: Release complete
+        shell: bash
         run: |
           echo "🚀 Release v${{ env.operator_version }} completed successfully!"
           echo "📦 Container image: quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}"
