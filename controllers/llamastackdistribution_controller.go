@@ -242,6 +242,8 @@ func (r *LlamaStackDistributionReconciler) SetupWithManager(ctx context.Context,
 }
 
 // createConfigMapFieldIndexer creates a field indexer for ConfigMap references.
+// On older Kubernetes versions that don't support custom field labels for custom resources,
+// this will fail gracefully and the operator will fall back to manual searching.
 func (r *LlamaStackDistributionReconciler) createConfigMapFieldIndexer(ctx context.Context, mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(
 		ctx,
@@ -249,8 +251,12 @@ func (r *LlamaStackDistributionReconciler) createConfigMapFieldIndexer(ctx conte
 		"spec.server.userConfig.configMapName",
 		r.configMapIndexFunc,
 	); err != nil {
-		return fmt.Errorf("failed to create ConfigMap reference field indexer: %w", err)
+		// Log warning but don't fail startup - older Kubernetes versions may not support this
+		mgr.GetLogger().Info("Field indexer for ConfigMap references not supported, will use manual search fallback",
+			"error", err.Error())
+		return nil
 	}
+	mgr.GetLogger().Info("Successfully created field indexer for ConfigMap references - will use efficient lookups")
 	return nil
 }
 
@@ -401,10 +407,10 @@ func (r *LlamaStackDistributionReconciler) isConfigMapReferenced(configMap clien
 
 	err := r.List(context.Background(), &attachedLlamaStacks, client.MatchingFields{"spec.server.userConfig.configMapName": indexKey})
 	if err != nil {
-		// CRITICAL ERROR: If we can't check references, we must log this as a critical error
-		// and err on the side of caution by assuming it IS referenced to trigger reconciliation
-		logger.Error(err, "CRITICAL: Failed to list LlamaStackDistributions for ConfigMap reference check - assuming ConfigMap is referenced to prevent missing reconciliation events")
-		return true // Return true to trigger reconciliation when we can't determine reference status
+		// Field indexer failed (likely due to older Kubernetes version not supporting custom field labels)
+		// Fall back to a manual check instead of assuming all ConfigMaps are referenced
+		logger.Info("Field indexer not supported, falling back to manual ConfigMap reference check", "error", err.Error())
+		return r.manuallyCheckConfigMapReference(configMap)
 	}
 
 	found := len(attachedLlamaStacks.Items) > 0
@@ -477,8 +483,8 @@ func (r *LlamaStackDistributionReconciler) tryFieldIndexerLookup(ctx context.Con
 	attachedLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
 	err := r.List(ctx, &attachedLlamaStacks, client.MatchingFields{"spec.server.userConfig.configMapName": indexKey})
 	if err != nil {
-		logger.Error(err, "CRITICAL: Failed to list LlamaStackDistributions using field indexer for ConfigMap event processing",
-			"indexKey", indexKey)
+		logger.Info("Field indexer not supported, will fall back to a manual search for ConfigMap event processing",
+			"indexKey", indexKey, "error", err.Error())
 		return attachedLlamaStacks, false
 	}
 
