@@ -50,6 +50,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
 //+kubebuilder:rbac:groups=llamastack.io,resources=llamastackdistributions,verbs=get;list;watch;create;update;patch;delete
@@ -63,6 +64,7 @@ import (
 
 const (
 	operatorConfigData = "llama-stack-operator-config"
+	manifestsBasePath  = "manifests/base"
 )
 
 // LlamaStackDistributionReconciler reconciles a LlamaStack object.
@@ -190,8 +192,12 @@ func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Contex
 
 	// Reconcile the PVC if storage is configured
 	if instance.Spec.Server.Storage != nil {
-		if err := r.reconcilePVC(ctx, instance); err != nil {
-			return fmt.Errorf("failed to reconcile PVC: %w", err)
+		resMap, err := deploy.RenderManifest(filesys.MakeFsOnDisk(), manifestsBasePath, instance)
+		if err != nil {
+			return fmt.Errorf("failed to render PVC manifests: %w", err)
+		}
+		if err := deploy.ApplyResources(ctx, r.Client, r.Scheme, instance, resMap); err != nil {
+			return fmt.Errorf("failed to apply PVC manifests: %w", err)
 		}
 	}
 
@@ -549,48 +555,6 @@ func (r *LlamaStackDistributionReconciler) convertToReconcileRequests(attachedLl
 		})
 	}
 	return requests
-}
-
-// reconcilePVC creates or updates the PVC for the LlamaStack server.
-func (r *LlamaStackDistributionReconciler) reconcilePVC(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	logger := log.FromContext(ctx)
-
-	// Use default size if none specified
-	size := instance.Spec.Server.Storage.Size
-	if size == nil {
-		size = &llamav1alpha1.DefaultStorageSize
-	}
-
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      instance.Name + "-pvc",
-			Namespace: instance.Namespace,
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: *size,
-				},
-			},
-		},
-	}
-
-	if err := ctrl.SetControllerReference(instance, pvc, r.Scheme); err != nil {
-		return fmt.Errorf("failed to set controller reference: %w", err)
-	}
-
-	found := &corev1.PersistentVolumeClaim{}
-	err := r.Get(ctx, client.ObjectKeyFromObject(pvc), found)
-	if err != nil {
-		if k8serrors.IsNotFound(err) {
-			logger.Info("Creating PVC", "pvc", pvc.Name)
-			return r.Create(ctx, pvc)
-		}
-		return fmt.Errorf("failed to fetch PVC: %w", err)
-	}
-	// PVCs are immutable after creation, so we don't need to update them
-	return nil
 }
 
 // reconcileDeployment manages the Deployment for the LlamaStack server.
