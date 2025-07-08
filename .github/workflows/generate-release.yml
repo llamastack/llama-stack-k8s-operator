@@ -172,7 +172,7 @@ jobs:
         shell: bash
         run: |
           # Build the image to validate it works before proceeding
-          make docker-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ steps.validate.outputs.operator_version }}
+          make image-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ steps.validate.outputs.operator_version }}
           echo "✅ Image built successfully: quay.io/llamastack/llama-stack-k8s-operator:v${{ steps.validate.outputs.operator_version }}"
 
       - name: Commit and push changes
@@ -266,7 +266,7 @@ jobs:
         shell: bash
         run: |
           # Build the image before pushing
-          make docker-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
+          make image-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
           echo "✅ Image built successfully: quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}"
 
       - name: Log in to Quay.io
@@ -280,7 +280,7 @@ jobs:
         shell: bash
         run: |
           # Push the release image after successfully creating the release
-          make docker-push IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
+          make image-push IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
           echo "✅ Pushed: quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}"
 
       - name: Release complete
