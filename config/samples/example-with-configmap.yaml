@@ -6,7 +6,7 @@ data:
   run.yaml: |
     # Llama Stack Configuration
     version: '2'
-    image_name: ollama
+    image_name: starter
     apis:
     - inference
     providers:
@@ -16,7 +16,7 @@ data:
         config:
           url: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
     models:
-      - model_id: "llama3.2:1b"
+      - model_id: "ollama/llama3.2:3b"
         provider_id: ollama
         model_type: llm
     server:
@@ -30,14 +30,16 @@ spec:
   replicas: 1
   server:
     distribution:
-      name: ollama
+      name: starter
     containerSpec:
       port: 8321
       env:
       - name: INFERENCE_MODEL
-        value: "llama3.2:1b"
+        value: "llama3.2:3b"
       - name: OLLAMA_URL
         value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
+      - name: ENABLE_OLLAMA
+        value: ollama
     userConfig:
       configMapName: llama-stack-config
       # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR

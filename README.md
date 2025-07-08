@@ -42,7 +42,7 @@ kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-op
 
 ### Deploying the Llama Stack Server
 
-1. Deploy the inference provider server (ollama, vllm etc). Example to deploy a new ollama server:
+1. Deploy the inference provider server (ollama). Example to deploy a new ollama server:
 ```
 bash hack/deploy-ollama.sh
 ```
@@ -56,14 +56,15 @@ spec:
   replicas: 1
   server:
     distribution:
-      name: ollama
+      name: starter
     containerSpec:
-      port: 8321
       env:
       - name: INFERENCE_MODEL
-        value: "llama3.2:1b"
+        value: "llama3.2:3b"
       - name: OLLAMA_URL
         value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
+      - name: ENABLE_OLLAMA
+        value: ollama
     storage:
       size: "20Gi"
       mountPath: "/home/lls/.lls"
