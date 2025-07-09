@@ -402,8 +402,10 @@ release: yq ## Prepare release files with VERSION and LLAMASTACK_VERSION
 
 	# Update kustomization files using kustomize
 	cd config/manager && $(KUSTOMIZE) edit set image controller=quay.io/llamastack/llama-stack-k8s-operator:v$(VERSION)
-	cd config/manager && $(KUSTOMIZE) edit set env OPERATOR_VERSION=$(VERSION)
-	cd config/manager && $(KUSTOMIZE) edit set env LLAMA_STACK_VERSION=$(LLAMASTACK_VERSION)
+
+	# Update environment variables in manager.yaml using yq
+	$(YQ) -i '(.spec.template.spec.containers[].env[] | select(.name == "OPERATOR_VERSION") | .value) = "$(VERSION)"' config/manager/manager.yaml
+	$(YQ) -i '(.spec.template.spec.containers[].env[] | select(.name == "LLAMA_STACK_VERSION") | .value) = "$(LLAMASTACK_VERSION)"' config/manager/manager.yaml
 
 	# Generate manifests and build installer
 	$(MAKE) manifests generate
