@@ -93,6 +93,14 @@ kubectl apply -f config/samples/example-with-configmap.yaml
 
 ### Building the Operator
 
+- Prepare release files with specific versions
+
+  ```commandline
+  make release VERSION=0.2.1 LLAMASTACK_VERSION=0.2.12
+  ```
+
+  This command updates distribution configurations and generates release manifests with the specified versions.
+
 - Custom operator image can be built using your local repository
 
   ```commandline
@@ -101,14 +109,6 @@ kubectl apply -f config/samples/example-with-configmap.yaml
 
   The default image used is `quay.io/llamastack/llama-stack-k8s-operator:latest` when not supply argument for `make image`
   To create a local file `local.mk` with env variables can overwrite the default values set in the `Makefile`.
-
-- Prepare release files with specific versions
-
-  ```commandline
-  make release VERSION=0.2.1 LLAMASTACK_VERSION=0.2.12
-  ```
-
-  This command updates distribution configurations and generates release manifests with the specified versions.
 
 - Once the image is created, the operator can be deployed directly. For each deployment method a
   kubeconfig should be exported
