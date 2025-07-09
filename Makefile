@@ -409,4 +409,4 @@ release: yq kustomize ## Prepare release files with VERSION and LLAMASTACK_VERSI
 
 	# Generate manifests and build installer
 	$(MAKE) manifests generate
-	$(MAKE) build-installer IMG=quay.io/llamastack/llama-stack-k8s-operator:v$(VERSION)
+	$(MAKE) -e IMG=quay.io/llamastack/llama-stack-k8s-operator:v$(VERSION) build-installer
