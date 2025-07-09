@@ -173,7 +173,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit - release files are already up to date"
           else
-            git commit -s -m "Release v${{ steps.validate.outputs.operator_version }}" \
+            git commit -s -m "v${{ steps.validate.outputs.operator_version }}" \
                          -m "- Update operator version to v${{ steps.validate.outputs.operator_version }}" \
                          -m "- Update LlamaStack distributions to ${{ steps.validate.outputs.llamastack_version }}" \
                          -m "- Generate release manifests"

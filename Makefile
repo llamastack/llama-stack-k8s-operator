@@ -400,15 +400,18 @@ release: yq ## Prepare release files with VERSION and LLAMASTACK_VERSION
 	# Update distributions.json with LlamaStack version
 	$(YQ) -i 'to_entries | map(.value |= sub(":latest"; ":$(LLAMASTACK_VERSION)")) | from_entries' distributions.json
 
+	# Update kustomization files using kustomize
+	cd config/manager && $(KUSTOMIZE) edit set image controller=quay.io/llamastack/llama-stack-k8s-operator:v$(VERSION)
+	cd config/manager && $(KUSTOMIZE) edit set env OPERATOR_VERSION=$(VERSION)
+	cd config/manager && $(KUSTOMIZE) edit set env LLAMA_STACK_VERSION=$(LLAMASTACK_VERSION)
+
 	# Generate manifests and build installer
 	$(MAKE) manifests generate
 	$(MAKE) build-installer IMG=quay.io/llamastack/llama-stack-k8s-operator:v$(VERSION)
 
-	# Update environment variables in generated operator.yaml
-	$(YQ) -i '(select(.kind == "Deployment") | .spec.template.spec.containers[].env[] | select(.name == "OPERATOR_VERSION") | .value) = "v$(VERSION)"' release/operator.yaml
-	$(YQ) -i '(select(.kind == "Deployment") | .spec.template.spec.containers[].env[] | select(.name == "LLAMA_STACK_VERSION") | .value) = "$(LLAMASTACK_VERSION)"' release/operator.yaml
-
 	@echo "Release preparation complete!"
 	@echo "Files updated:"
 	@echo "  - distributions.json"
-	@echo "  - release/operator.yaml"
+	@echo "  - config/manager/kustomization.yaml"
+	@echo "  - config/manager/manager.yaml"
+	@echo "  - release/operator.yaml (generated)"
