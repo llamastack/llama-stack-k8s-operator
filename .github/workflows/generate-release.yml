@@ -122,7 +122,7 @@ jobs:
           # Check if there are any modified files after pre-commit
           if [ "${{ steps.precommit.outcome }}" = "failure" ]; then
             echo "📝 Pre-commit checks failed - checking for file modifications"
-            
+
             # Show what files exist and their status
             echo "Git status before staging:"
             git status --porcelain
