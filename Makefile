@@ -309,6 +309,14 @@ define yq-fmt
 	$(YAMLFMT) -formatter indentless_arrays=true,retain_line_breaks=true $(2)
 endef
 
+# json-fmt runs yq with the given expression on a JSON file, then formats it nicely
+# $1 - yq expression  
+# $2 - target JSON file
+define json-fmt
+	$(YQ) -i $(1) $(2)
+	$(YQ) -i -o json -I 2 '.' $(2)
+endef
+
 .PHONY: operator-sdk
 OPERATOR_SDK ?= $(LOCALBIN)/operator-sdk
 operator-sdk: ## Download operator-sdk locally if necessary.
@@ -412,8 +420,8 @@ release: yq kustomize yamlfmt ## Prepare release files with VERSION and LLAMASTA
 	fi
 	@echo "Preparing release with operator version $(VERSION) and LlamaStack version $(LLAMASTACK_VERSION)"
 
-	# Update distributions.json with LlamaStack version and format
-	$(call yq-fmt,'to_entries | map(.value |= sub(":latest"; ":$(LLAMASTACK_VERSION)")) | from_entries',distributions.json)
+	# Update distributions.json with LlamaStack version and format as pretty JSON
+	$(call json-fmt,'to_entries | map(.value |= sub(":latest"; ":$(LLAMASTACK_VERSION)")) | from_entries',distributions.json)
 
 	# Update kustomization files using Kustomize
 	cd config/manager && $(KUSTOMIZE) edit set image controller=quay.io/llamastack/llama-stack-k8s-operator:v$(VERSION)
