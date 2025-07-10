@@ -2400,31 +2400,6 @@ subjects:
 ---
 apiVersion: v1
 data:
-  bedrock: docker.io/llamastack/distribution-bedrock:latest
-  cerebras: docker.io/llamastack/distribution-cerebras:latest
-  fireworks: docker.io/llamastack/distribution-fireworks:latest
-  hf-endpoint: docker.io/llamastack/distribution-hf-endpoint:latest
-  hf-serverless: docker.io/llamastack/distribution-hf-serverless:latest
-  nvidia: docker.io/llamastack/distribution-nvidia:latest
-  ollama: docker.io/llamastack/distribution-ollama:latest
-  open-benchmark: docker.io/llamastack/distribution-open-benchmark:latest
-  passthrough: docker.io/llamastack/distribution-passthrough:latest
-  remote-vllm: docker.io/llamastack/distribution-remote-vllm:latest
-  sambanova: docker.io/llamastack/distribution-sambanova:latest
-  tgi: docker.io/llamastack/distribution-tgi:latest
-  together: docker.io/llamastack/distribution-together:latest
-  vllm-gpu: docker.io/llamastack/distribution-vllm-gpu:latest
-  watsonx: docker.io/llamastack/distribution-watsonx:latest
-immutable: true
-kind: ConfigMap
-metadata:
-  labels:
-    app.kubernetes.io/name: llama-stack-k8s-operator
-  name: llama-stack-k8s-operator-distribution-images
-  namespace: llama-stack-k8s-operator-system
----
-apiVersion: v1
-data:
   controller_manager_config.yaml: |
     apiVersion: controller-runtime.sigs.k8s.io/v1alpha1
     kind: ControllerManagerConfig

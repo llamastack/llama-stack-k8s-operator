@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -416,4 +417,64 @@ func TestApplyResources(t *testing.T) {
 		// cleanup the clusterrole
 		require.NoError(t, k8sClient.Delete(context.Background(), createdClusterRole))
 	})
+}
+
+// TestApplyResources_PVCImmutability verifies that PVCs are not patched to maintain immutability.
+func TestApplyResources_PVCImmutability(t *testing.T) {
+	// given
+	ctx, testNs, owner := setupApplyResourcesTest(t, "pvc-immutable")
+
+	// create an existing PVC owned by our operator instance
+	existingPVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pvc",
+			Namespace: testNs,
+			Labels:    map[string]string{"state": "original"},
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(owner, owner.GroupVersionKind()),
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("10Gi"),
+				},
+			},
+		},
+	}
+	require.NoError(t, k8sClient.Create(ctx, existingPVC))
+
+	// create a desired PVC with modified labels (this would normally trigger a patch)
+	expStorageSize := "10Gi"
+	desiredPVCSpec := map[string]any{
+		"accessModes": []any{"ReadWriteOnce"},
+		"resources": map[string]any{
+			"requests": map[string]any{
+				"storage": expStorageSize,
+			},
+		},
+	}
+	desiredPVC := newTestResource(t, "v1", "PersistentVolumeClaim", "my-pvc", testNs, desiredPVCSpec)
+	desiredPVC.SetLabels(map[string]string{"state": "modified"}) // Different labels
+
+	resMap := resmap.New()
+	require.NoError(t, resMap.Append(desiredPVC))
+
+	// when
+	require.NoError(t, ApplyResources(ctx, k8sClient, scheme.Scheme, owner, &resMap))
+
+	// then
+	// the PVC was NOT modified
+	unchangedPVC := &corev1.PersistentVolumeClaim{}
+	pvcKey := types.NamespacedName{Name: "my-pvc", Namespace: testNs}
+	require.NoError(t, k8sClient.Get(ctx, pvcKey, unchangedPVC))
+	// labels were NOT updated
+	require.Equal(t, "original", unchangedPVC.Labels["state"], "PVC labels should remain unchanged")
+	// it's still owned by our instance
+	require.Len(t, unchangedPVC.GetOwnerReferences(), 1, "PVC should still have exactly one owner reference")
+	require.Equal(t, owner.UID, unchangedPVC.GetOwnerReferences()[0].UID, "PVC should still be owned by our instance")
+	// spec remains the same
+	storageRequest := unchangedPVC.Spec.Resources.Requests[corev1.ResourceStorage]
+	require.Equal(t, expStorageSize, storageRequest.String(), "PVC storage spec should remain unchanged")
 }

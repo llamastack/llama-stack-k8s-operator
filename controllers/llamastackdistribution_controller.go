@@ -50,6 +50,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
 //+kubebuilder:rbac:groups=llamastack.io,resources=llamastackdistributions,verbs=get;list;watch;create;update;patch;delete
@@ -63,6 +64,7 @@ import (
 
 const (
 	operatorConfigData = "llama-stack-operator-config"
+	manifestsBasePath  = "manifests/base"
 )
 
 // LlamaStackDistributionReconciler reconciles a LlamaStack object.
@@ -190,8 +192,12 @@ func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Contex
 
 	// Reconcile the PVC if storage is configured
 	if instance.Spec.Server.Storage != nil {
-		if err := r.reconcilePVC(ctx, instance); err != nil {
-			return fmt.Errorf("failed to reconcile PVC: %w", err)
+		resMap, err := deploy.RenderManifest(filesys.MakeFsOnDisk(), manifestsBasePath, instance)
+		if err != nil {
+			return fmt.Errorf("failed to render PVC manifests: %w", err)
+		}
+		if err := deploy.ApplyResources(ctx, r.Client, r.Scheme, instance, resMap); err != nil {
+			return fmt.Errorf("failed to apply PVC manifests: %w", err)
 		}
 	}
 
@@ -242,6 +248,8 @@ func (r *LlamaStackDistributionReconciler) SetupWithManager(ctx context.Context,
 }
 
 // createConfigMapFieldIndexer creates a field indexer for ConfigMap references.
+// On older Kubernetes versions that don't support custom field labels for custom resources,
+// this will fail gracefully and the operator will fall back to manual searching.
 func (r *LlamaStackDistributionReconciler) createConfigMapFieldIndexer(ctx context.Context, mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(
 		ctx,
@@ -249,8 +257,12 @@ func (r *LlamaStackDistributionReconciler) createConfigMapFieldIndexer(ctx conte
 		"spec.server.userConfig.configMapName",
 		r.configMapIndexFunc,
 	); err != nil {
-		return fmt.Errorf("failed to create ConfigMap reference field indexer: %w", err)
+		// Log warning but don't fail startup - older Kubernetes versions may not support this
+		mgr.GetLogger().Info("Field indexer for ConfigMap references not supported, will use manual search fallback",
+			"error", err.Error())
+		return nil
 	}
+	mgr.GetLogger().Info("Successfully created field indexer for ConfigMap references - will use efficient lookups")
 	return nil
 }
 
@@ -401,10 +413,10 @@ func (r *LlamaStackDistributionReconciler) isConfigMapReferenced(configMap clien
 
 	err := r.List(context.Background(), &attachedLlamaStacks, client.MatchingFields{"spec.server.userConfig.configMapName": indexKey})
 	if err != nil {
-		// CRITICAL ERROR: If we can't check references, we must log this as a critical error
-		// and err on the side of caution by assuming it IS referenced to trigger reconciliation
-		logger.Error(err, "CRITICAL: Failed to list LlamaStackDistributions for ConfigMap reference check - assuming ConfigMap is referenced to prevent missing reconciliation events")
-		return true // Return true to trigger reconciliation when we can't determine reference status
+		// Field indexer failed (likely due to older Kubernetes version not supporting custom field labels)
+		// Fall back to a manual check instead of assuming all ConfigMaps are referenced
+		logger.Info("Field indexer not supported, falling back to manual ConfigMap reference check", "error", err.Error())
+		return r.manuallyCheckConfigMapReference(configMap)
 	}
 
 	found := len(attachedLlamaStacks.Items) > 0
@@ -477,8 +489,8 @@ func (r *LlamaStackDistributionReconciler) tryFieldIndexerLookup(ctx context.Con
 	attachedLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
 	err := r.List(ctx, &attachedLlamaStacks, client.MatchingFields{"spec.server.userConfig.configMapName": indexKey})
 	if err != nil {
-		logger.Error(err, "CRITICAL: Failed to list LlamaStackDistributions using field indexer for ConfigMap event processing",
-			"indexKey", indexKey)
+		logger.Info("Field indexer not supported, will fall back to a manual search for ConfigMap event processing",
+			"indexKey", indexKey, "error", err.Error())
 		return attachedLlamaStacks, false
 	}
 
@@ -543,48 +555,6 @@ func (r *LlamaStackDistributionReconciler) convertToReconcileRequests(attachedLl
 		})
 	}
 	return requests
-}
-
-// reconcilePVC creates or updates the PVC for the LlamaStack server.
-func (r *LlamaStackDistributionReconciler) reconcilePVC(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	logger := log.FromContext(ctx)
-
-	// Use default size if none specified
-	size := instance.Spec.Server.Storage.Size
-	if size == nil {
-		size = &llamav1alpha1.DefaultStorageSize
-	}
-
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      instance.Name + "-pvc",
-			Namespace: instance.Namespace,
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: *size,
-				},
-			},
-		},
-	}
-
-	if err := ctrl.SetControllerReference(instance, pvc, r.Scheme); err != nil {
-		return fmt.Errorf("failed to set controller reference: %w", err)
-	}
-
-	found := &corev1.PersistentVolumeClaim{}
-	err := r.Get(ctx, client.ObjectKeyFromObject(pvc), found)
-	if err != nil {
-		if k8serrors.IsNotFound(err) {
-			logger.Info("Creating PVC", "pvc", pvc.Name)
-			return r.Create(ctx, pvc)
-		}
-		return fmt.Errorf("failed to fetch PVC: %w", err)
-	}
-	// PVCs are immutable after creation, so we don't need to update them
-	return nil
 }
 
 // reconcileDeployment manages the Deployment for the LlamaStack server.

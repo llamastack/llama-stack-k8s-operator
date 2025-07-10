@@ -3,7 +3,6 @@ kind: Kustomization
 
 resources:
 - manager.yaml
-- distribution-configmap.yaml
 
 generatorOptions:
   disableNameSuffixHash: true
