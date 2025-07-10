@@ -158,10 +158,9 @@ jobs:
         run: |
           make test
 
-      - name: Build release image (validation gate)
+      - name: Validate build release image
         shell: bash
         run: |
-          # Build the image to validate it works before proceeding
           make image-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ steps.validate.outputs.operator_version }}
 
       - name: Commit and push changes
@@ -199,10 +198,9 @@ jobs:
           git config user.name "${{ env.GIT_USER_NAME }}"
           git config user.email "${{ env.GIT_USER_EMAIL }}"
 
-      - name: Create release tag
+      - name: Create and push the release tag
         shell: bash
         run: |
-          # Create and push the release tag (idempotent)
           if git tag -l | grep -q "^v${{ env.operator_version }}$"; then
             echo "✅ Tag v${{ env.operator_version }} already exists - skipping creation"
           else
@@ -214,7 +212,6 @@ jobs:
       - name: Create GitHub Release
         shell: bash
         run: |
-          # Check if release already exists
           if gh release view "v${{ env.operator_version }}" >/dev/null 2>&1; then
             echo "✅ GitHub release v${{ env.operator_version }} already exists - skipping creation"
           else
@@ -254,7 +251,6 @@ jobs:
       - name: Build release image
         shell: bash
         run: |
-          # Build the image before pushing
           make image-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
 
       - name: Log in to Quay.io
@@ -267,7 +263,6 @@ jobs:
       - name: Push release image
         shell: bash
         run: |
-          # Push the release image after successfully creating the release
           make image-push IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
           echo "✅ Pushed: quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}"
 
