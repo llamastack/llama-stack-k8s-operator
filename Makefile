@@ -310,7 +310,7 @@ define yq-fmt
 endef
 
 # json-fmt runs yq with the given expression on a JSON file, then formats it nicely
-# $1 - yq expression  
+# $1 - yq expression
 # $2 - target JSON file
 define json-fmt
 	$(YQ) -i $(1) $(2)
