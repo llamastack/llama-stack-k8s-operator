@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy/plugins"
@@ -219,4 +220,16 @@ func getStorageSize(instance *llamav1alpha1.LlamaStackDistribution) string {
 	}
 	// Returning an empty string signals the field transformer to use the default value.
 	return ""
+}
+
+func FilterIncludeKinds(resMap *resmap.ResMap, kindsToKeep []string) (*resmap.ResMap, error) {
+	filteredResMap := resmap.New()
+	for _, res := range (*resMap).Resources() {
+		if slices.Contains(kindsToKeep, res.GetKind()) {
+			if err := filteredResMap.Append(res); err != nil {
+				return nil, fmt.Errorf("failed to append resource while filtering %s/%s: %w", res.GetKind(), res.GetName(), err)
+			}
+		}
+	}
+	return &filteredResMap, nil
 }

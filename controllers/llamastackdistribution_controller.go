@@ -181,23 +181,49 @@ func (r *LlamaStackDistributionReconciler) fetchInstance(ctx context.Context, na
 	return instance, nil
 }
 
+// determineKindsToInclude returns a list of resource kinds that should be applied
+// based on the instance specification.
+func (r *LlamaStackDistributionReconciler) determineKindsToInclude(instance *llamav1alpha1.LlamaStackDistribution) []string {
+	var kinds []string
+
+	if instance.Spec.Server.Storage != nil {
+		kinds = append(kinds, "PersistentVolumeClaim")
+	}
+
+	return kinds
+}
+
+// reconcileManifestResources applies resources that are managed by the operator
+// based on the instance specification.
+func (r *LlamaStackDistributionReconciler) reconcileManifestResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	kindsToInclude := r.determineKindsToInclude(instance)
+	if len(kindsToInclude) == 0 {
+		return nil
+	}
+
+	resMap, err := deploy.RenderManifest(filesys.MakeFsOnDisk(), manifestsBasePath, instance)
+	if err != nil {
+		return fmt.Errorf("failed to render manifests: %w", err)
+	}
+
+	filteredResMap, err := deploy.FilterIncludeKinds(resMap, kindsToInclude)
+	if err != nil {
+		return fmt.Errorf("failed to filter manifests: %w", err)
+	}
+
+	if err := deploy.ApplyResources(ctx, r.Client, r.Scheme, instance, filteredResMap); err != nil {
+		return fmt.Errorf("failed to apply manifests: %w", err)
+	}
+
+	return nil
+}
+
 // reconcileResources reconciles all resources for the LlamaStackDistribution instance.
 func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
 	// Reconcile the ConfigMap if specified by the user
 	if r.hasUserConfigMap(instance) {
 		if err := r.reconcileUserConfigMap(ctx, instance); err != nil {
 			return fmt.Errorf("failed to reconcile user ConfigMap: %w", err)
-		}
-	}
-
-	// Reconcile the PVC if storage is configured
-	if instance.Spec.Server.Storage != nil {
-		resMap, err := deploy.RenderManifest(filesys.MakeFsOnDisk(), manifestsBasePath, instance)
-		if err != nil {
-			return fmt.Errorf("failed to render PVC manifests: %w", err)
-		}
-		if err := deploy.ApplyResources(ctx, r.Client, r.Scheme, instance, resMap); err != nil {
-			return fmt.Errorf("failed to apply PVC manifests: %w", err)
 		}
 	}
 
@@ -217,6 +243,12 @@ func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Contex
 			return fmt.Errorf("failed to reconcile service: %w", err)
 		}
 	}
+
+	// Reconcile manifest-based resources
+	if err := r.reconcileManifestResources(ctx, instance); err != nil {
+		return err
+	}
+
 	return nil
 }
 

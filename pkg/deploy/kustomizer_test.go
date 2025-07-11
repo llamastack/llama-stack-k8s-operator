@@ -478,3 +478,38 @@ func TestApplyResources_PVCImmutability(t *testing.T) {
 	storageRequest := unchangedPVC.Spec.Resources.Requests[corev1.ResourceStorage]
 	require.Equal(t, expStorageSize, storageRequest.String(), "PVC storage spec should remain unchanged")
 }
+
+// TestFilterIncludeKinds tests the filtering functionality.
+func TestFilterIncludeKinds(t *testing.T) {
+	t.Run("filters by kind", func(t *testing.T) {
+		pvc := newTestResource(t, "v1", "PersistentVolumeClaim", "test-pvc", "test-ns", nil)
+		svc := newTestResource(t, "v1", "Service", "test-svc", "test-ns", nil)
+
+		resMap := resmap.New()
+		require.NoError(t, resMap.Append(pvc))
+		require.NoError(t, resMap.Append(svc))
+
+		filtered, err := FilterIncludeKinds(&resMap, []string{"PersistentVolumeClaim"})
+		require.NoError(t, err)
+		require.Equal(t, 1, (*filtered).Size())
+		require.Equal(t, "PersistentVolumeClaim", (*filtered).Resources()[0].GetKind())
+	})
+
+	t.Run("returns empty for no matches", func(t *testing.T) {
+		svc := newTestResource(t, "v1", "Service", "test-svc", "test-ns", nil)
+		resMap := resmap.New()
+		require.NoError(t, resMap.Append(svc))
+
+		filtered, err := FilterIncludeKinds(&resMap, []string{"Deployment"})
+		require.NoError(t, err)
+		require.Equal(t, 0, (*filtered).Size())
+	})
+
+	t.Run("handles empty inputs", func(t *testing.T) {
+		emptyResMap := resmap.New()
+
+		filtered, err := FilterIncludeKinds(&emptyResMap, []string{"PersistentVolumeClaim"})
+		require.NoError(t, err)
+		require.Equal(t, 0, (*filtered).Size())
+	})
+}
