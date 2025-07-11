@@ -81,6 +81,10 @@ SHELL = /usr/bin/env bash -o pipefail
 # See README.md, default go test timeout 10m
 E2E_TEST_FLAGS = -timeout 30m
 
+# Test configuration
+TEST_PKGS ?= $$(go list ./... | grep -v /e2e)
+TEST_FLAGS ?= -coverprofile cover.out
+
 # Include local.mk if it exists (for custom overrides)
 -include local.mk
 
@@ -136,8 +140,8 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+test: manifests generate fmt vet envtest ## Run tests. Use TEST_PKGS and TEST_FLAGS to customize.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $(TEST_PKGS) $(TEST_FLAGS)
 
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests

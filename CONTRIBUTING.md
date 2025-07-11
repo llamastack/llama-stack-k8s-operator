@@ -71,6 +71,46 @@ All error messages in the codebase must follow a consistent format to improve re
 1. All **wrapped** error messages must start with "failed to"
 2. Error messages should be descriptive and actionable
 
+## Testing
+
+### Running Tests
+
+The project uses `make test` to run the unit tests. By default, this runs all tests except end-to-end tests with code coverage.
+
+```bash
+# Run all tests (default behavior)
+make test
+
+# Run tests for a specific package
+make test TEST_PKGS=./pkg/deploy
+
+# Run a specific test function
+make test TEST_PKGS=./pkg/deploy TEST_FLAGS="-v -run TestRenderManifest"
+
+# Run tests with verbose output
+make test TEST_FLAGS="-v -coverprofile cover.out"
+
+# Run tests for multiple packages
+make test TEST_PKGS="./pkg/deploy ./controllers"
+```
+
+### Test Configuration Variables
+
+The `make test` target supports the following variables for customization:
+
+- `TEST_PKGS` - Space-separated list of packages to test (default: all packages except e2e)
+- `TEST_FLAGS` - Additional flags to pass to `go test` (default: `-coverprofile cover.out`)
+
+### Test-Driven Development (TDD)
+
+For rapid development cycles, you can use focused test runs:
+
+```bash
+# Example TDD workflow for working on the deploy package
+make test TEST_PKGS=./pkg/deploy TEST_FLAGS="-v -run TestRenderManifest"
+```
+
+
 ## Questions?
 
 If you have any questions about contributing, please open an issue in the repository.
