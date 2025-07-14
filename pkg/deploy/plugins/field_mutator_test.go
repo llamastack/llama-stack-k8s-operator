@@ -218,6 +218,29 @@ func TestTransform(t *testing.T) {
 			},
 			expectError: true,
 		},
+		{
+			name: "array index support integration",
+			transformer: CreateFieldMutator(FieldMutatorConfig{
+				Mappings: []FieldMapping{
+					{TargetKind: "Service", TargetField: "spec.ports[0].port", SourceValue: 8080, CreateIfNotExists: true},
+					{TargetKind: "Service", TargetField: "spec.ports[0].targetPort", SourceValue: 8080, CreateIfNotExists: true},
+				},
+			}),
+			initialResources: []*resource.Resource{
+				newTestResource(t, "v1", "Service", "my-service", "", map[string]any{
+					"ports": []any{
+						map[string]any{"port": 80, "name": "http"},
+					},
+				}),
+			},
+			expectedSpecs: map[string]map[string]any{
+				"my-service": {
+					"ports": []any{
+						map[string]any{"port": 8080, "targetPort": 8080, "name": "http"},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range testCases {
