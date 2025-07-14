@@ -181,13 +181,24 @@ func (r *LlamaStackDistributionReconciler) fetchInstance(ctx context.Context, na
 	return instance, nil
 }
 
-// determineKindsToInclude returns a list of resource kinds that should be applied
+// determineKindsToExclude returns a list of resource kinds that should be excluded
 // based on the instance specification.
-func (r *LlamaStackDistributionReconciler) determineKindsToInclude(instance *llamav1alpha1.LlamaStackDistribution) []string {
+func (r *LlamaStackDistributionReconciler) determineKindsToExclude(instance *llamav1alpha1.LlamaStackDistribution) []string {
 	var kinds []string
 
-	if instance.Spec.Server.Storage != nil {
+	// Exclude PersistentVolumeClaim if storage is not configured
+	if instance.Spec.Server.Storage == nil {
 		kinds = append(kinds, "PersistentVolumeClaim")
+	}
+
+	// Exclude NetworkPolicy if the feature is disabled
+	if !r.EnableNetworkPolicy {
+		kinds = append(kinds, "NetworkPolicy")
+	}
+
+	// Exclude Service if no ports are defined
+	if !instance.HasPorts() {
+		kinds = append(kinds, "Service")
 	}
 
 	return kinds
@@ -196,17 +207,13 @@ func (r *LlamaStackDistributionReconciler) determineKindsToInclude(instance *lla
 // reconcileManifestResources applies resources that are managed by the operator
 // based on the instance specification.
 func (r *LlamaStackDistributionReconciler) reconcileManifestResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	kindsToInclude := r.determineKindsToInclude(instance)
-	if len(kindsToInclude) == 0 {
-		return nil
-	}
-
 	resMap, err := deploy.RenderManifest(filesys.MakeFsOnDisk(), manifestsBasePath, instance)
 	if err != nil {
 		return fmt.Errorf("failed to render manifests: %w", err)
 	}
 
-	filteredResMap, err := deploy.FilterIncludeKinds(resMap, kindsToInclude)
+	kindsToExclude := r.determineKindsToExclude(instance)
+	filteredResMap, err := deploy.FilterExcludeKinds(resMap, kindsToExclude)
 	if err != nil {
 		return fmt.Errorf("failed to filter manifests: %w", err)
 	}

@@ -222,10 +222,10 @@ func getStorageSize(instance *llamav1alpha1.LlamaStackDistribution) string {
 	return ""
 }
 
-func FilterIncludeKinds(resMap *resmap.ResMap, kindsToKeep []string) (*resmap.ResMap, error) {
+func FilterExcludeKinds(resMap *resmap.ResMap, kindsToExclude []string) (*resmap.ResMap, error) {
 	filteredResMap := resmap.New()
 	for _, res := range (*resMap).Resources() {
-		if slices.Contains(kindsToKeep, res.GetKind()) {
+		if !slices.Contains(kindsToExclude, res.GetKind()) {
 			if err := filteredResMap.Append(res); err != nil {
 				return nil, fmt.Errorf("failed to append resource while filtering %s/%s: %w", res.GetKind(), res.GetName(), err)
 			}
