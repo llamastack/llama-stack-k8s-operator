@@ -245,23 +245,39 @@ data:
     help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
 EOF
 
+# Add registry configuration for containerd
+for node in $(kind get nodes --name "${CLUSTER_NAME}"); do
+    docker exec "${node}" mkdir -p /etc/containerd/certs.d/localhost:${REGISTRY_PORT}
+    docker exec "${node}" tee /etc/containerd/certs.d/localhost:${REGISTRY_PORT}/hosts.toml > /dev/null <<EOF
+[host."http://${REGISTRY_NAME}:5000"]
+EOF
+done
+
+# Restart containerd to pick up the new configuration
+for node in $(kind get nodes --name "${CLUSTER_NAME}"); do
+    docker exec "${node}" systemctl restart containerd
+done
+
 print_success "Kind cluster created and registry connected"
 
 # Build and push operator image
 if [ "$SKIP_BUILD" = false ]; then
     print_step "Building operator image"
     
-    IMAGE_NAME="localhost:${REGISTRY_PORT}/llama-stack-k8s-operator:${IMAGE_TAG}"
+    IMAGE_NAME="${REGISTRY_NAME}:5000/llama-stack-k8s-operator:${IMAGE_TAG}"
     
     docker build -t "${IMAGE_NAME}" -f Dockerfile .
     
     print_step "Pushing operator image to local registry"
-    docker push "${IMAGE_NAME}"
+    docker push "localhost:${REGISTRY_PORT}/llama-stack-k8s-operator:${IMAGE_TAG}"
+    
+    # Tag with registry name that Kind can resolve
+    docker tag "${IMAGE_NAME}" "localhost:${REGISTRY_PORT}/llama-stack-k8s-operator:${IMAGE_TAG}"
     
     print_success "Operator image built and pushed"
 else
     print_warning "Skipping image build"
-    IMAGE_NAME="localhost:${REGISTRY_PORT}/llama-stack-k8s-operator:${IMAGE_TAG}"
+    IMAGE_NAME="${REGISTRY_NAME}:5000/llama-stack-k8s-operator:${IMAGE_TAG}"
 fi
 
 # Deploy the operator
