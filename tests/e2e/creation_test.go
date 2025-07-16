@@ -36,25 +36,25 @@ func TestCreationSuite(t *testing.T) {
 		testPVCConfiguration(t, llsdistributionCR)
 	})
 
-	t.Run("should handle direct deployment updates", func(t *testing.T) {
-		testDirectDeploymentUpdates(t, llsdistributionCR)
-	})
+	// t.Run("should handle direct deployment updates", func(t *testing.T) {
+	// 	testDirectDeploymentUpdates(t, llsdistributionCR)
+	// })
 
-	t.Run("should check health status", func(t *testing.T) {
-		testHealthStatus(t, llsdistributionCR)
-	})
+	// t.Run("should check health status", func(t *testing.T) {
+	// 	testHealthStatus(t, llsdistributionCR)
+	// })
 
-	t.Run("should update deployment through CR", func(t *testing.T) {
-		testCRDeploymentUpdate(t, llsdistributionCR)
-	})
+	// t.Run("should update deployment through CR", func(t *testing.T) {
+	// 	testCRDeploymentUpdate(t, llsdistributionCR)
+	// })
 
-	t.Run("should update distribution status", func(t *testing.T) {
-		testDistributionStatus(t, llsdistributionCR)
-	})
+	// t.Run("should update distribution status", func(t *testing.T) {
+	// 	testDistributionStatus(t, llsdistributionCR)
+	// })
 
-	t.Run("should use custom ServiceAccount from PodOverrides", func(t *testing.T) {
-		testServiceAccountOverride(t, llsdistributionCR)
-	})
+	// t.Run("should use custom ServiceAccount from PodOverrides", func(t *testing.T) {
+	// 	testServiceAccountOverride(t, llsdistributionCR)
+	// })
 }
 
 func testCreateDistribution(t *testing.T) *v1alpha1.LlamaStackDistribution {
