@@ -93,10 +93,33 @@ func testCreateDistribution(t *testing.T) *v1alpha1.LlamaStackDistribution {
 		Version: "v1",
 		Kind:    "Service",
 	}, llsdistributionCR.Name+"-service", ns.Name, ResourceReadyTimeout, func(u *unstructured.Unstructured) bool {
-		// Check if the service has a valid spec and status
+		// DEBUGGING: Log the full Service object structure
+		t.Logf("=== Service Readiness Check Debug ===")
+
+		// Check spec field
 		spec, specFound, _ := unstructured.NestedMap(u.Object, "spec")
+		t.Logf("Spec found: %v, Spec nil: %v", specFound, spec == nil)
+
+		// Check status field existence and content
 		status, statusFound, _ := unstructured.NestedMap(u.Object, "status")
-		return specFound && statusFound && spec != nil && status != nil
+		t.Logf("Status found: %v, Status nil: %v, Status content: %+v", statusFound, status == nil, status)
+
+		// Log service type for verification
+		serviceType, typeFound, _ := unstructured.NestedString(u.Object, "spec", "type")
+		t.Logf("Service type found: %v, Service type: %s", typeFound, serviceType)
+
+		// ORIGINAL BUGGY LOGIC - checking both spec and status (restore this to trigger failures)
+		originalResult := specFound && statusFound && spec != nil && status != nil
+		t.Logf("Original buggy logic result: %v", originalResult)
+
+		// PROPOSED FIX LOGIC - checking only spec (for comparison)
+		fixedResult := specFound && spec != nil
+		t.Logf("Fixed logic result: %v", fixedResult)
+
+		t.Logf("=== End Service Debug ===")
+
+		// Use the original buggy logic to potentially trigger failures and gather evidence
+		return originalResult
 	})
 	require.NoError(t, err)
 
