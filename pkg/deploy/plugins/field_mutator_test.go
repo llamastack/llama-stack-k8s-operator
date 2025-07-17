@@ -85,7 +85,7 @@ func TestSetTargetField(t *testing.T) {
 		{
 			name:         "overwrite existing value",
 			initialSpec:  map[string]any{"replicas": 1},
-			mapping:      FieldMapping{TargetField: "spec.replicas"},
+			mapping:      FieldMapping{TargetField: "/spec/replicas"},
 			value:        3,
 			expectedSpec: map[string]any{"replicas": 3},
 		},
@@ -93,7 +93,7 @@ func TestSetTargetField(t *testing.T) {
 			name:        "create nested path that does not exist",
 			initialSpec: map[string]any{},
 			mapping: FieldMapping{
-				TargetField:       "spec.strategy.type",
+				TargetField:       "/spec/strategy/type",
 				CreateIfNotExists: true,
 			},
 			value:        "Recreate",
@@ -102,18 +102,18 @@ func TestSetTargetField(t *testing.T) {
 		{
 			name:          "fail when path does not exist and CreateIfNotExists is false",
 			initialSpec:   map[string]any{},
-			mapping:       FieldMapping{TargetField: "spec.strategy.type"},
+			mapping:       FieldMapping{TargetField: "/spec/strategy/type"},
 			value:         "Recreate",
 			expectError:   true,
-			errorContains: "failed to find field strategy",
+			errorContains: "object has no key \"strategy\"",
 		},
 		{
 			name:          "fail when intermediate path is not a map",
 			initialSpec:   map[string]any{"replicas": 1},
-			mapping:       FieldMapping{TargetField: "spec.replicas.count"},
+			mapping:       FieldMapping{TargetField: "/spec/replicas/count"},
 			value:         1,
 			expectError:   true,
-			errorContains: "failed to convert field replicas to map",
+			errorContains: "invalid token reference \"count\"",
 		},
 	}
 
@@ -132,7 +132,7 @@ func TestSetTargetField(t *testing.T) {
 				require.NoError(t, err)
 				finalMap, err := res.Map()
 				require.NoError(t, err)
-				require.Equal(t, tc.expectedSpec, finalMap["spec"]) // Compare the 'spec' field of the transformed resource
+				require.Equal(t, tc.expectedSpec, finalMap["spec"])
 			}
 		})
 	}
@@ -167,7 +167,7 @@ func TestTransform(t *testing.T) {
 			name: "apply mapping to correct resource kind",
 			transformer: CreateFieldMutator(FieldMutatorConfig{
 				Mappings: []FieldMapping{
-					{TargetKind: "Deployment", TargetField: "spec.replicas", SourceValue: 5},
+					{TargetKind: "Deployment", TargetField: "/spec/replicas", SourceValue: 5},
 				},
 			}),
 			initialResources: []*resource.Resource{
@@ -190,7 +190,7 @@ func TestTransform(t *testing.T) {
 			name: "use default value when source is empty",
 			transformer: CreateFieldMutator(FieldMutatorConfig{
 				Mappings: []FieldMapping{
-					{TargetKind: "Deployment", TargetField: "spec.replicas", SourceValue: nil, DefaultValue: 3},
+					{TargetKind: "Deployment", TargetField: "/spec/replicas", SourceValue: nil, DefaultValue: 3},
 				},
 			}),
 			initialResources: []*resource.Resource{
@@ -210,7 +210,7 @@ func TestTransform(t *testing.T) {
 			name: "propagate error from helper",
 			transformer: CreateFieldMutator(FieldMutatorConfig{
 				Mappings: []FieldMapping{
-					{TargetKind: "Deployment", TargetField: "spec.replicas.invalid", SourceValue: 1},
+					{TargetKind: "Deployment", TargetField: "/spec/replicas/invalid", SourceValue: 1},
 				},
 			}),
 			initialResources: []*resource.Resource{
@@ -222,8 +222,8 @@ func TestTransform(t *testing.T) {
 			name: "array index support integration",
 			transformer: CreateFieldMutator(FieldMutatorConfig{
 				Mappings: []FieldMapping{
-					{TargetKind: "Service", TargetField: "spec.ports[0].port", SourceValue: 8080, CreateIfNotExists: true},
-					{TargetKind: "Service", TargetField: "spec.ports[0].targetPort", SourceValue: 8080, CreateIfNotExists: true},
+					{TargetKind: "Service", TargetField: "/spec/ports/0/port", SourceValue: 8080, CreateIfNotExists: true},
+					{TargetKind: "Service", TargetField: "/spec/ports/0/targetPort", SourceValue: 8080, CreateIfNotExists: true},
 				},
 			}),
 			initialResources: []*resource.Resource{
@@ -237,6 +237,32 @@ func TestTransform(t *testing.T) {
 				"my-service": {
 					"ports": []any{
 						map[string]any{"port": 8080, "targetPort": 8080, "name": "http"},
+					},
+				},
+			},
+		},
+		{
+			name: "Service selector with Kubernetes label keys containing dots",
+			transformer: CreateFieldMutator(FieldMutatorConfig{
+				Mappings: []FieldMapping{
+					{TargetKind: "Service", TargetField: "/spec/selector/app.kubernetes.io~1instance", SourceValue: "dynamic-instance-name", CreateIfNotExists: true},
+					{TargetKind: "Service", TargetField: "/spec/selector/app.kubernetes.io~1name", SourceValue: "llamastack", CreateIfNotExists: true},
+				},
+			}),
+			initialResources: []*resource.Resource{
+				newTestResource(t, "v1", "Service", "my-service", "", map[string]any{
+					"selector": map[string]any{
+						"app.kubernetes.io/instance": "hardcoded-value",
+						"app":                        "other-label",
+					},
+				}),
+			},
+			expectedSpecs: map[string]map[string]any{
+				"my-service": {
+					"selector": map[string]any{
+						"app.kubernetes.io/instance": "dynamic-instance-name",
+						"app.kubernetes.io/name":     "llamastack",
+						"app":                        "other-label",
 					},
 				},
 			},
@@ -261,7 +287,6 @@ func TestTransform(t *testing.T) {
 					expectedSpec := tc.expectedSpecs[res.GetName()]
 					finalMap, err := res.Map()
 					require.NoError(t, err)
-					// Compare the 'spec' field of the transformed resource
 					require.Equal(t, expectedSpec, finalMap["spec"])
 				}
 			}

@@ -211,19 +211,19 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 			{
 				SourceValue:       getStorageSize(ownerInstance),
 				DefaultValue:      llamav1alpha1.DefaultStorageSize.String(),
-				TargetField:       "spec.resources.requests.storage",
+				TargetField:       "/spec/resources/requests/storage",
 				TargetKind:        "PersistentVolumeClaim",
 				CreateIfNotExists: true,
 			},
 			{
 				SourceValue:       ownerInstance.GetNamespace(),
-				TargetField:       "subjects[0].namespace",
+				TargetField:       "/subjects/0/namespace",
 				TargetKind:        "ClusterRoleBinding",
 				CreateIfNotExists: true,
 			},
 			{
 				SourceValue:       ownerInstance.GetName() + "-sa",
-				TargetField:       "subjects[0].name",
+				TargetField:       "/subjects/0/name",
 				TargetKind:        "ClusterRoleBinding",
 				CreateIfNotExists: true,
 			},
