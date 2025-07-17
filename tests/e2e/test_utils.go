@@ -12,6 +12,7 @@ import (
 	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -181,4 +182,254 @@ func GetSampleCR(t *testing.T) *v1alpha1.LlamaStackDistribution {
 	require.NoError(t, err)
 
 	return distribution
+}
+
+// checkLlamaStackDistributionStatus helps identify if the custom resource reached the expected state during test execution.
+func checkLlamaStackDistributionStatus(t *testing.T, testenv *TestEnvironment, namespace, name string) {
+	t.Helper()
+
+	llsDistro := &v1alpha1.LlamaStackDistribution{}
+	err := testenv.Client.Get(testenv.Ctx, client.ObjectKey{Namespace: namespace, Name: name}, llsDistro)
+	if err != nil {
+		t.Logf("⚠️  Error getting LlamaStackDistribution: %v", err)
+		return
+	}
+
+	t.Logf("LlamaStackDistribution status:")
+	t.Logf("  Phase: %s", llsDistro.Status.Phase)
+	t.Logf("  Generation: %d", llsDistro.Generation)
+	t.Logf("  ResourceVersion: %s", llsDistro.ResourceVersion)
+	t.Logf("  Conditions: %+v", llsDistro.Status.Conditions)
+}
+
+// checkNamespaceEvents reveals what Kubernetes operations occurred and why they may have failed.
+func checkNamespaceEvents(t *testing.T, testenv *TestEnvironment, namespace string) {
+	t.Helper()
+
+	eventList := &corev1.EventList{}
+	err := testenv.Client.List(testenv.Ctx, eventList, client.InNamespace(namespace))
+	if err != nil {
+		t.Logf("⚠️  Error getting events: %v", err)
+		return
+	}
+
+	if len(eventList.Items) == 0 {
+		t.Log("📝 No events found in namespace")
+		return
+	}
+
+	maxEvents := 25
+	if len(eventList.Items) > maxEvents {
+		t.Logf("📝 Showing first %d events (of %d total):", maxEvents, len(eventList.Items))
+		eventList.Items = eventList.Items[:maxEvents]
+	} else {
+		t.Logf("📝 Found %d events in namespace %s:", len(eventList.Items), namespace)
+	}
+
+	for _, event := range eventList.Items {
+		t.Logf("  %s: %s (%s) - %s",
+			event.LastTimestamp.Format("15:04:05"),
+			event.Reason,
+			event.Type,
+			event.Message)
+	}
+}
+
+// checkOperatorHealth determines if test failures are caused by operator pod issues rather than application problems.
+func checkOperatorHealth(t *testing.T, testenv *TestEnvironment) {
+	t.Helper()
+
+	operatorNS := "llama-stack-k8s-operator-system"
+	podList := &corev1.PodList{}
+	err := testenv.Client.List(testenv.Ctx, podList, client.InNamespace(operatorNS))
+	if err != nil {
+		t.Logf("⚠️  Error getting operator pods: %v", err)
+		return
+	}
+
+	for _, pod := range podList.Items {
+		if pod.Labels["control-plane"] == "controller-manager" {
+			t.Logf("Operator pod health: Phase=%s, Ready=%v", pod.Status.Phase, isPodReady(&pod))
+			if len(pod.Status.ContainerStatuses) > 0 {
+				container := pod.Status.ContainerStatuses[0]
+				t.Logf("  Container: Ready=%v, RestartCount=%d", container.Ready, container.RestartCount)
+			}
+		}
+	}
+}
+
+func isPodReady(pod *corev1.Pod) bool {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+// requireNoErrorWithDebugging provides comprehensive debugging context when tests fail to help identify root causes quickly.
+func requireNoErrorWithDebugging(t *testing.T, testenv *TestEnvironment, err error, msg string, namespace, crName string) {
+	t.Helper()
+	if err != nil {
+		t.Logf("💥 ERROR OCCURRED: %s - %v", msg, err)
+
+		// Check custom resource status first to see if the operator processed the request correctly
+		checkLlamaStackDistributionStatus(t, testenv, namespace, crName)
+
+		// Check events to understand what Kubernetes operations were attempted and why they failed
+		checkNamespaceEvents(t, testenv, namespace)
+
+		// Check pod details to identify container startup issues or crash loops
+		logPodDetails(t, testenv, namespace)
+
+		// Check service endpoints to see if pods are being discovered by services
+		logServiceEndpoints(t, testenv, namespace, crName+"-service")
+
+		// Check service configuration to identify selector mismatches
+		logServiceSpec(t, testenv, namespace, crName+"-service")
+
+		// Check deployment spec to identify configuration problems preventing pod startup
+		logDeploymentSpec(t, testenv, namespace, crName)
+
+		// Check operator health last to rule out operator-side issues
+		checkOperatorHealth(t, testenv)
+
+		require.NoError(t, err, msg)
+	}
+}
+
+// logPodDetails helps diagnose pod startup issues and container restart problems during test failures.
+func logPodDetails(t *testing.T, testenv *TestEnvironment, namespace string) {
+	t.Helper()
+
+	podList := &corev1.PodList{}
+	err := testenv.Client.List(testenv.Ctx, podList, client.InNamespace(namespace))
+	if err != nil {
+		t.Logf("Failed to list pods: %v", err)
+		return
+	}
+
+	t.Logf("📦 Found %d pods in namespace %s:", len(podList.Items), namespace)
+	for _, pod := range podList.Items {
+		t.Logf("Pod: %s, Phase: %s", pod.Name, pod.Status.Phase)
+
+		for _, cs := range pod.Status.ContainerStatuses {
+			// RestartCount indicates crash loops or configuration issues
+			t.Logf("  Container %s: Ready=%v, RestartCount=%d",
+				cs.Name, cs.Ready, cs.RestartCount)
+
+			// Container states reveal why pods aren't starting or are crashing
+			if cs.State.Waiting != nil {
+				t.Logf("    Waiting: %s - %s",
+					cs.State.Waiting.Reason, cs.State.Waiting.Message)
+			}
+			if cs.State.Terminated != nil {
+				t.Logf("    Terminated: %s - %s",
+					cs.State.Terminated.Reason, cs.State.Terminated.Message)
+			}
+		}
+
+		// Pod logs would show startup errors but require different client access
+		t.Logf("  (Pod logs require direct kubectl access)")
+	}
+}
+
+// logServiceEndpoints logs service endpoint details to see if pods are ready.
+func logServiceEndpoints(t *testing.T, testenv *TestEnvironment, namespace, serviceName string) {
+	t.Helper()
+
+	endpoints := &corev1.Endpoints{}
+	err := testenv.Client.Get(testenv.Ctx, types.NamespacedName{
+		Name:      serviceName,
+		Namespace: namespace,
+	}, endpoints)
+
+	if err != nil {
+		t.Logf("Failed to get endpoints for service %s: %v", serviceName, err)
+		return
+	}
+
+	t.Logf("🔗 Service %s endpoints:", serviceName)
+	for i, subset := range endpoints.Subsets {
+		t.Logf("  Subset %d:", i)
+		// Ready addresses indicate pods that passed health checks and can receive traffic
+		t.Logf("    Ready addresses: %d", len(subset.Addresses))
+		for _, addr := range subset.Addresses {
+			t.Logf("      - %s", addr.IP)
+		}
+		// Not ready addresses show pods that exist but failed health checks
+		t.Logf("    Not ready addresses: %d", len(subset.NotReadyAddresses))
+		for _, addr := range subset.NotReadyAddresses {
+			t.Logf("      - %s", addr.IP)
+		}
+		t.Logf("    Ports:")
+		for _, port := range subset.Ports {
+			t.Logf("      - %s: %d", port.Name, port.Port)
+		}
+	}
+}
+
+// logDeploymentSpec helps identify configuration mismatches that prevent pods from starting correctly.
+func logDeploymentSpec(t *testing.T, testenv *TestEnvironment, namespace, name string) {
+	t.Helper()
+
+	deployment := &appsv1.Deployment{}
+	err := testenv.Client.Get(testenv.Ctx, types.NamespacedName{
+		Name:      name,
+		Namespace: namespace,
+	}, deployment)
+
+	if err != nil {
+		t.Logf("Failed to get deployment: %v", err)
+		return
+	}
+
+	t.Logf("🚀 Deployment %s spec:", name)
+	t.Logf("  Replicas: %d", *deployment.Spec.Replicas)
+	// Selector must match pod labels or pods won't be managed by deployment
+	t.Logf("  Selector: %+v", deployment.Spec.Selector.MatchLabels)
+	t.Logf("  Template labels: %+v", deployment.Spec.Template.Labels)
+
+	for _, container := range deployment.Spec.Template.Spec.Containers {
+		t.Logf("  Container: %s", container.Name)
+		t.Logf("    Image: %s", container.Image)
+		t.Logf("    Ports:")
+		for _, port := range container.Ports {
+			t.Logf("      - %d", port.ContainerPort)
+		}
+		// Environment variables can cause startup failures if misconfigured
+		t.Logf("    Env vars:")
+		for _, env := range container.Env {
+			t.Logf("      %s=%s", env.Name, env.Value)
+		}
+		// Readiness probe configuration affects when pods become service endpoints
+		if container.ReadinessProbe != nil {
+			t.Logf("    Readiness probe: %+v", container.ReadinessProbe)
+		}
+	}
+}
+
+// logServiceSpec logs the actual service configuration to debug selector issues.
+func logServiceSpec(t *testing.T, testenv *TestEnvironment, namespace, serviceName string) {
+	t.Helper()
+
+	service := &corev1.Service{}
+	err := testenv.Client.Get(testenv.Ctx, types.NamespacedName{
+		Name:      serviceName,
+		Namespace: namespace,
+	}, service)
+
+	if err != nil {
+		t.Logf("Failed to get service %s: %v", serviceName, err)
+		return
+	}
+
+	t.Logf("🔧 Service %s spec:", serviceName)
+	t.Logf("  Type: %s", service.Spec.Type)
+	// Selector must match pod labels or service won't route traffic to pods
+	t.Logf("  Selector: %+v", service.Spec.Selector)
+	t.Logf("  Ports:")
+	for _, port := range service.Spec.Ports {
+		t.Logf("    - %s: %d -> %s", port.Name, port.Port, port.TargetPort.String())
+	}
 }
