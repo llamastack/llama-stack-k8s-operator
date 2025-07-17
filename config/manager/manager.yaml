@@ -41,8 +41,6 @@ spec:
         env:
         - name: OPERATOR_VERSION
           value: "latest"
-        - name: LLAMA_STACK_VERSION
-          value: "latest"
         image: controller:latest
         name: manager
         securityContext:

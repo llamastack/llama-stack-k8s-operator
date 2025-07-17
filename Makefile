@@ -433,7 +433,6 @@ release: yq kustomize yamlfmt ## Prepare release files with VERSION and LLAMASTA
 	# Update environment variables in manager.yaml and format with our preferred YAML style
 	# using YQ because Kustomize doesn't support setting environment variables
 	$(call yq-fmt,'(select(.kind == "Deployment") | .spec.template.spec.containers[].env[] | select(.name == "OPERATOR_VERSION") | .value) = "$(VERSION)"',config/manager/manager.yaml)
-	$(call yq-fmt,'(select(.kind == "Deployment") | .spec.template.spec.containers[].env[] | select(.name == "LLAMA_STACK_VERSION") | .value) = "$(LLAMASTACK_VERSION)"',config/manager/manager.yaml)
 
 	# Generate manifests and build installer
 	$(MAKE) manifests generate

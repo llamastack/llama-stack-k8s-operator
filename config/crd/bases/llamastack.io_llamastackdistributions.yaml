@@ -2155,8 +2155,8 @@ spec:
                     format: date-time
                     type: string
                   llamaStackServerVersion:
-                    description: DeploymentVersion is the version of the LlamaStack
-                      deployment
+                    description: LlamaStackServerVersion is the version of the LlamaStack
+                      server
                     type: string
                   operatorVersion:
                     description: OperatorVersion is the version of the operator managing

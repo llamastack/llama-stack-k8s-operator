@@ -160,8 +160,8 @@ const (
 type VersionInfo struct {
 	// OperatorVersion is the version of the operator managing this distribution
 	OperatorVersion string `json:"operatorVersion,omitempty"`
-	// DeploymentVersion is the version of the LlamaStack deployment
-	LlamaStackVersion string `json:"llamaStackServerVersion,omitempty"`
+	// LlamaStackServerVersion is the version of the LlamaStack server
+	LlamaStackServerVersion string `json:"llamaStackServerVersion,omitempty"`
 	// LastUpdated represents when the version information was last updated
 	LastUpdated metav1.Time `json:"lastUpdated,omitempty"`
 }

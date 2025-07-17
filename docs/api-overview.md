@@ -214,5 +214,5 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `operatorVersion` _string_ | OperatorVersion is the version of the operator managing this distribution |  |  |
-| `llamaStackServerVersion` _string_ | DeploymentVersion is the version of the LlamaStack deployment |  |  |
+| `llamaStackServerVersion` _string_ | LlamaStackServerVersion is the version of the LlamaStack server |  |  |
 | `lastUpdated` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | LastUpdated represents when the version information was last updated |  |  |
