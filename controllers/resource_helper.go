@@ -22,6 +22,7 @@ import (
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 )
 
 // buildContainerSpec creates the container specification.
@@ -109,6 +110,34 @@ func configurePodStorage(instance *llamav1alpha1.LlamaStackDistribution, contain
 				},
 			},
 		})
+
+		// Add init container to fix permissions on the PVC mount
+		mountPath := llamav1alpha1.DefaultMountPath
+		if instance.Spec.Server.Storage.MountPath != "" {
+			mountPath = instance.Spec.Server.Storage.MountPath
+		}
+
+		initContainer := corev1.Container{
+			Name:  "update-pvc-permissions",
+			Image: "registry.access.redhat.com/ubi9/ubi-minimal:latest",
+			Command: []string{
+				"/bin/sh",
+				"-c",
+				fmt.Sprintf("chown --verbose --recursive 1001:0 %s", mountPath),
+			},
+			VolumeMounts: []corev1.VolumeMount{
+				{
+					Name:      "lls-storage",
+					MountPath: mountPath,
+				},
+			},
+			SecurityContext: &corev1.SecurityContext{
+				RunAsUser:  ptr.To(int64(0)), // Run as root to be able to change ownership
+				RunAsGroup: ptr.To(int64(0)),
+			},
+		}
+
+		podSpec.InitContainers = append(podSpec.InitContainers, initContainer)
 	} else {
 		// Use emptyDir for non-persistent storage
 		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
