@@ -11,7 +11,15 @@ package controllers
 // Service permissions - controller creates and manages services
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 
-// PVC permissions - controller creates PVCs (immutable after creation, no update/patch needed)
+// ServiceAccount permissions - controller creates and manages service accounts for PVC permissions
+//+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch
+
+//+kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=use
+//+kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,resourceNames=anyuid,verbs=use
+
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create
 
 // ConfigMap permissions - controller reads user configmaps and manages operator config configmaps

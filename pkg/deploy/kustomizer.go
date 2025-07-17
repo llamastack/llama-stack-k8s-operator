@@ -86,6 +86,17 @@ func manageResource(
 		return fmt.Errorf("failed to unmarshal resource: %w", err)
 	}
 
+	// Check if ClusterRoleBinding references a ClusterRole that exists
+	if u.GetKind() == "ClusterRoleBinding" {
+		if shouldSkip, err := CheckClusterRoleExists(ctx, cli, u); err != nil {
+			return fmt.Errorf("failed to check ClusterRole existence: %w", err)
+		} else if shouldSkip {
+			log.FromContext(ctx).V(1).Info("Skipping ClusterRoleBinding - referenced ClusterRole not found",
+				"clusterRoleBinding", u.GetName())
+			return nil
+		}
+	}
+
 	kGvk := res.GetGvk()
 	gvk := schema.GroupVersionKind{
 		Group:   kGvk.Group,
@@ -204,6 +215,18 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 				TargetKind:        "PersistentVolumeClaim",
 				CreateIfNotExists: true,
 			},
+			{
+				SourceValue:       ownerInstance.GetNamespace(),
+				TargetField:       "subjects[0].namespace",
+				TargetKind:        "ClusterRoleBinding",
+				CreateIfNotExists: true,
+			},
+			{
+				SourceValue:       ownerInstance.GetName() + "-sa",
+				TargetField:       "subjects[0].name",
+				TargetKind:        "ClusterRoleBinding",
+				CreateIfNotExists: true,
+			},
 		},
 	})
 	if err := fieldTransformerPlugin.Transform(*resMap); err != nil {
@@ -232,4 +255,34 @@ func FilterExcludeKinds(resMap *resmap.ResMap, kindsToExclude []string) (*resmap
 		}
 	}
 	return &filteredResMap, nil
+}
+
+// CheckClusterRoleExists checks if a ClusterRoleBinding should be skipped due to missing ClusterRole.
+func CheckClusterRoleExists(ctx context.Context, cli client.Client, crb *unstructured.Unstructured) (bool, error) {
+	roleRef, found, _ := unstructured.NestedMap(crb.Object, "roleRef")
+	if !found {
+		return false, nil // No roleRef, don't skip
+	}
+
+	roleName, _, _ := unstructured.NestedString(roleRef, "name")
+	if roleName == "" {
+		return false, nil // Empty roleName, don't skip
+	}
+
+	// Check if the referenced ClusterRole exists
+	clusterRole := &unstructured.Unstructured{}
+	clusterRole.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "rbac.authorization.k8s.io",
+		Version: "v1",
+		Kind:    "ClusterRole",
+	})
+	clusterRole.SetName(roleName)
+
+	err := cli.Get(ctx, client.ObjectKey{Name: roleName}, clusterRole)
+	if err != nil && k8serr.IsNotFound(err) {
+		return true, nil
+	} else if err != nil {
+		return false, err
+	}
+	return false, nil
 }

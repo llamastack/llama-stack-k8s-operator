@@ -561,8 +561,8 @@ func TestPodOverridesWithoutServiceAccount(t *testing.T) {
 	// Apply pod overrides
 	configurePodOverrides(instance, &deployment.Spec.Template.Spec)
 
-	// Verify ServiceAccount name is empty
-	if deployment.Spec.Template.Spec.ServiceAccountName != "" {
-		t.Errorf("expected empty ServiceAccountName, got %s", deployment.Spec.Template.Spec.ServiceAccountName)
+	// Verify ServiceAccount name is empty (default ServiceAccountName should be set when not explicitly provided)
+	if deployment.Spec.Template.Spec.ServiceAccountName != instance.Name+"-sa" {
+		t.Errorf("expected default ServiceAccountName when not explicitly provided, got %s", deployment.Spec.Template.Spec.ServiceAccountName)
 	}
 }

@@ -170,12 +170,15 @@ func configurePodStorage(instance *llamav1alpha1.LlamaStackDistribution, contain
 
 // configurePodOverrides applies pod-level overrides from the LlamaStackDistribution spec.
 func configurePodOverrides(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
-	if instance.Spec.Server.PodOverrides != nil {
-		// Set ServiceAccount name if specified
-		if instance.Spec.Server.PodOverrides.ServiceAccountName != "" {
-			podSpec.ServiceAccountName = instance.Spec.Server.PodOverrides.ServiceAccountName
-		}
+	// Set ServiceAccount name - use override if specified, otherwise use default
+	if instance.Spec.Server.PodOverrides != nil && instance.Spec.Server.PodOverrides.ServiceAccountName != "" {
+		podSpec.ServiceAccountName = instance.Spec.Server.PodOverrides.ServiceAccountName
+	} else {
+		podSpec.ServiceAccountName = instance.Name + "-sa"
+	}
 
+	// Apply other pod overrides if specified
+	if instance.Spec.Server.PodOverrides != nil {
 		// Add volumes if specified
 		if len(instance.Spec.Server.PodOverrides.Volumes) > 0 {
 			podSpec.Volumes = append(podSpec.Volumes, instance.Spec.Server.PodOverrides.Volumes...)

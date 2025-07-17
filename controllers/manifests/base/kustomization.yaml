@@ -3,6 +3,8 @@ kind: Kustomization
 
 resources:
 - pvc.yaml
+- serviceaccount.yaml
+- scc-binding.yaml
 
 labels:
 - includeSelectors: true
