@@ -123,7 +123,7 @@ func configurePodStorage(instance *llamav1alpha1.LlamaStackDistribution, contain
 			Command: []string{
 				"/bin/sh",
 				"-c",
-				fmt.Sprintf("chown --verbose --recursive 1001:0 %s", mountPath),
+				fmt.Sprintf("chmod --verbose --recursive 775 %s", mountPath),
 			},
 			VolumeMounts: []corev1.VolumeMount{
 				{
