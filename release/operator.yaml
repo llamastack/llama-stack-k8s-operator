@@ -2480,6 +2480,7 @@ spec:
         - name: OPERATOR_VERSION
           value: latest
         image: quay.io/llamastack/llama-stack-k8s-operator:latest
+        imagePullPolicy: Always
         livenessProbe:
           httpGet:
             path: /healthz
@@ -2496,10 +2497,10 @@ spec:
         resources:
           limits:
             cpu: 500m
-            memory: 128Mi
+            memory: 1Gi
           requests:
             cpu: 10m
-            memory: 64Mi
+            memory: 256Mi
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
