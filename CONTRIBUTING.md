@@ -110,6 +110,42 @@ For rapid development cycles, you can use focused test runs:
 make test TEST_PKGS=./pkg/deploy TEST_FLAGS="-v -run TestRenderManifest"
 ```
 
+## Anti-Fragile Testing Principles
+
+### Test Structure
+- **DAMP and DRY together**: Apply DAMP (Descriptive And Meaningful Phrases) to test scenarios, and DRY to implementation details. Keep test intent explicit while extracting common setup logic.
+- **Use AAA pattern**: Arrange, Act, Assert with clear comments separating each phase.
+
+### Test Data
+- **Integration tests**: Use production constants to verify the controller applies defaults correctly.
+- **E2E tests**: Use test-owned constants to focus on user workflows, not implementation details.
+- **Make test intent obvious**: Use descriptive names and explicit values that show what each test is verifying.
+
+### Test Isolation
+- **No shared state**: Each test should be independent with unique namespaces and fresh instances.
+- **Use builders for variations**: Create test instances with clear intent using the builder pattern.
+- **Async operations**: Use `require.Eventually` with appropriate timeouts for Kubernetes operations.
+
+### Example
+```go
+// Good: Descriptive test names that explain behavior
+{
+    name: "No storage configuration - should use emptyDir",
+    buildInstance: func(namespace string) *llamav1alpha1.LlamaStackDistribution {
+        return NewDistributionBuilder().
+            WithStorage(nil). // Clear intent: testing emptyDir behavior
+            Build()
+    },
+},
+
+// Bad: Vague test name that doesn't explain expected behavior
+{
+    name: "test nil storage",
+    // ...
+}
+```
+
+Focus: Tests should survive refactoring and clearly communicate what behavior they're verifying.
 
 ## Questions?
 
