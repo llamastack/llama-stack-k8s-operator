@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/compare"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy/plugins"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -162,6 +163,10 @@ func patchResource(ctx context.Context, cli client.Client, desired, existing *un
 			"name", existing.GetName(),
 			"namespace", existing.GetNamespace())
 		return nil
+	} else if existing.GetKind() == "Service" {
+		if err := compare.CheckAndLogServiceChanges(ctx, cli, desired); err != nil {
+			return fmt.Errorf("failed to validate resource mutations while patching: %w", err)
+		}
 	}
 
 	data, err := json.Marshal(desired)
@@ -200,8 +205,36 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 			{
 				SourceValue:       getStorageSize(ownerInstance),
 				DefaultValue:      llamav1alpha1.DefaultStorageSize.String(),
-				TargetField:       "spec.resources.requests.storage",
+				TargetField:       "/spec/resources/requests/storage",
 				TargetKind:        "PersistentVolumeClaim",
+				CreateIfNotExists: true,
+			},
+			{
+				SourceValue:       getServicePort(ownerInstance),
+				DefaultValue:      llamav1alpha1.DefaultServerPort,
+				TargetField:       "/spec/ports/0/port",
+				TargetKind:        "Service",
+				CreateIfNotExists: true,
+			},
+			{
+				SourceValue:       getServicePort(ownerInstance),
+				DefaultValue:      llamav1alpha1.DefaultServerPort,
+				TargetField:       "/spec/ports/0/targetPort",
+				TargetKind:        "Service",
+				CreateIfNotExists: true,
+			},
+			{
+				SourceValue:       nil,
+				DefaultValue:      llamav1alpha1.DefaultLabelValue,
+				TargetField:       "/spec/selector/" + llamav1alpha1.DefaultLabelKey,
+				TargetKind:        "Service",
+				CreateIfNotExists: true,
+			},
+			{
+				SourceValue:       nil,
+				DefaultValue:      ownerInstance.GetName(),
+				TargetField:       "/spec/selector/app.kubernetes.io~1instance",
+				TargetKind:        "Service",
 				CreateIfNotExists: true,
 			},
 		},
@@ -220,6 +253,15 @@ func getStorageSize(instance *llamav1alpha1.LlamaStackDistribution) string {
 	}
 	// Returning an empty string signals the field transformer to use the default value.
 	return ""
+}
+
+// getServicePort returns the service port or nil if not specified.
+func getServicePort(instance *llamav1alpha1.LlamaStackDistribution) any {
+	if instance.Spec.Server.ContainerSpec.Port != 0 {
+		return instance.Spec.Server.ContainerSpec.Port
+	}
+	// Returning nil signals the field transformer to use the default value.
+	return nil
 }
 
 func FilterExcludeKinds(resMap *resmap.ResMap, kindsToExclude []string) (*resmap.ResMap, error) {

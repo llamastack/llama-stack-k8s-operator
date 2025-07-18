@@ -21,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	kubernetesscheme "k8s.io/client-go/kubernetes/scheme" // Alias to avoid conflict
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -458,4 +459,132 @@ server:
 
 	// Note: In test environment, field indexer might not be set up properly,
 	// so we skip the isConfigMapReferenced checks which rely on field indexing
+}
+
+func TestServiceConfiguration(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	testEnv := &envtest.Environment{
+		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases")},
+		ErrorIfCRDPathMissing: true,
+		BinaryAssetsDirectory: os.Getenv("KUBEBUILDER_ASSETS"),
+	}
+
+	cfg, err := testEnv.Start()
+	require.NoError(t, err)
+	defer func() { require.NoError(t, testEnv.Stop()) }()
+
+	k8sScheme := runtime.NewScheme()
+	require.NoError(t, kubernetesscheme.AddToScheme(k8sScheme))
+	require.NoError(t, llamav1alpha1.AddToScheme(k8sScheme))
+	require.NoError(t, corev1.AddToScheme(k8sScheme))
+	require.NoError(t, appsv1.AddToScheme(k8sScheme))
+	require.NoError(t, networkingv1.AddToScheme(k8sScheme))
+	require.NoError(t, rbacv1.AddToScheme(k8sScheme))
+
+	ctrlRuntimeClient, err := client.New(cfg, client.Options{Scheme: k8sScheme})
+	require.NoError(t, err)
+	require.NotNil(t, ctrlRuntimeClient)
+
+	tests := []struct {
+		name             string
+		instanceName     string
+		instancePort     int32
+		expectedSelector map[string]string
+		expectedPort     corev1.ServicePort
+	}{
+		{
+			name:         "reconcile service happy path",
+			instanceName: "llamastackdistribution-sample",
+			instancePort: 8321,
+			expectedSelector: map[string]string{
+				"app":                        "llama-stack",
+				"app.kubernetes.io/instance": "llamastackdistribution-sample",
+			},
+			expectedPort: corev1.ServicePort{
+				Name:       "",
+				Port:       8321,
+				TargetPort: intstr.FromInt(8321),
+				Protocol:   corev1.ProtocolTCP,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// envtest does not fully support namespace deletion and cleanup between test cases.
+			// To ensure test isolation and avoid interference, a unique namespace is created for each test run.
+			testenvNamespaceCounter++
+			nsName := fmt.Sprintf("test-service-%d", testenvNamespaceCounter)
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: nsName}}
+			require.NoError(t, ctrlRuntimeClient.Create(context.Background(), ns))
+
+			// Attempt to delete the namespace after the test. While envtest might not fully reclaim it,
+			// this is good practice and helps keep the test environment cleaner.
+			defer func() {
+				if err := ctrlRuntimeClient.Delete(context.Background(), ns); err != nil && !apierrors.IsNotFound(err) {
+					t.Logf("Failed to delete test namespace %s: %v", nsName, err)
+				}
+			}()
+
+			// baseInstance creates a generic LlamaStackDistribution object.
+			// The namespace is then overridden here to use the unique namespace for this test case.
+			instance := baseInstance()
+			instance.Name = tt.instanceName // Set the instance name to test dynamic selector
+			instance.Namespace = nsName
+			instance.Spec.Server.Distribution.Name = "ollama" // Ensure distribution name is set
+			instance.Spec.Server.ContainerSpec.Port = tt.instancePort
+			require.NoError(t, ctrlRuntimeClient.Create(context.Background(), instance))
+
+			// Attempt to delete the LlamaStackDistribution instance after the test.
+			defer func() {
+				if err := ctrlRuntimeClient.Delete(context.Background(), instance); err != nil && !apierrors.IsNotFound(err) {
+					t.Logf("Failed to delete LlamaStackDistribution instance %s/%s: %v", instance.Namespace, instance.Name, err)
+				}
+			}()
+
+			// setupTestReconciler creates a reconciler instance with the real Kubernetes client and scheme provided by envtest.
+			reconciler := setupTestReconciler(ctrlRuntimeClient, k8sScheme)
+
+			_, reconcileErr := reconciler.Reconcile(context.Background(), ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      instance.Name,
+					Namespace: instance.Namespace,
+				},
+			})
+			require.NoError(t, reconcileErr, "reconcile should not fail")
+
+			service := &corev1.Service{}
+			serviceKey := types.NamespacedName{Name: instance.Name + "-service", Namespace: instance.Namespace}
+			// envtest interacts with a real API server, which is eventually consistent.
+			// We use require.Eventually to poll until the Service becomes available.
+			require.Eventually(t, func() bool {
+				err := ctrlRuntimeClient.Get(context.Background(), serviceKey, service)
+				return err == nil
+			}, eventuallyTimeout, eventuallyInterval, "timed out waiting for service %s to be available", serviceKey)
+
+			deployment := &appsv1.Deployment{}
+			deploymentKey := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
+			// envtest interacts with a real API server, which is eventually consistent.
+			// We use require.Eventually to poll until the Deployment becomes available.
+			require.Eventually(t, func() bool {
+				err := ctrlRuntimeClient.Get(context.Background(), deploymentKey, deployment)
+				return err == nil
+			}, eventuallyTimeout, eventuallyInterval, "timed out waiting for deployment %s to be available", deploymentKey)
+
+			// --- assert ---
+			// ports
+			assert.Equal(t, tt.expectedPort, service.Spec.Ports[0], "Service port should match expected")
+			assert.Equal(t, service.Spec.Ports[0].TargetPort.IntVal, deployment.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort,
+				"Service target port should match deployment container port")
+			// selector
+			assert.Equal(t, tt.expectedSelector, service.Spec.Selector, "Service selector should match expected")
+			assert.Equal(t, service.Spec.Selector, deployment.Spec.Template.Labels, "Service selector should match deployment pod labels")
+			// owner references
+			assert.Len(t, service.OwnerReferences, 1, "Service should have owner reference")
+			assert.Equal(t, instance.UID, service.OwnerReferences[0].UID, "Service should be owned by instance")
+			assert.Len(t, deployment.OwnerReferences, 1, "Deployment should have owner reference")
+			assert.Equal(t, instance.UID, deployment.OwnerReferences[0].UID, "Deployment should be owned by instance")
+		})
+	}
 }

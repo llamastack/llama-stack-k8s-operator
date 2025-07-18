@@ -225,6 +225,11 @@ func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Contex
 		}
 	}
 
+	// Reconcile manifest-based resources
+	if err := r.reconcileManifestResources(ctx, instance); err != nil {
+		return err
+	}
+
 	// Reconcile the NetworkPolicy
 	if err := r.reconcileNetworkPolicy(ctx, instance); err != nil {
 		return fmt.Errorf("failed to reconcile NetworkPolicy: %w", err)
@@ -233,18 +238,6 @@ func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Contex
 	// Reconcile the Deployment
 	if err := r.reconcileDeployment(ctx, instance); err != nil {
 		return fmt.Errorf("failed to reconcile Deployment: %w", err)
-	}
-
-	// Reconcile the Service if ports are defined, else use default port
-	if instance.HasPorts() {
-		if err := r.reconcileService(ctx, instance); err != nil {
-			return fmt.Errorf("failed to reconcile service: %w", err)
-		}
-	}
-
-	// Reconcile manifest-based resources
-	if err := r.reconcileManifestResources(ctx, instance); err != nil {
-		return err
 	}
 
 	return nil
@@ -654,36 +647,6 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 	}
 
 	return deploy.ApplyDeployment(ctx, r.Client, r.Scheme, instance, deployment, logger)
-}
-
-// reconcileService manages the Service if ports are defined.
-func (r *LlamaStackDistributionReconciler) reconcileService(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	logger := log.FromContext(ctx)
-	// Use the container's port (defaulted to 8321 if unset)
-	port := deploy.GetServicePort(instance)
-
-	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      deploy.GetServiceName(instance),
-			Namespace: instance.Namespace,
-		},
-		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{
-				llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
-				"app.kubernetes.io/instance":  instance.Name,
-			},
-			Ports: []corev1.ServicePort{{
-				Name: llamav1alpha1.DefaultServicePortName,
-				Port: port,
-				TargetPort: intstr.IntOrString{
-					IntVal: port,
-				},
-			}},
-			Type: corev1.ServiceTypeClusterIP,
-		},
-	}
-
-	return deploy.ApplyService(ctx, r.Client, r.Scheme, instance, service, logger)
 }
 
 // getServerURL returns the URL for the LlamaStack server.

@@ -98,7 +98,7 @@ func testCreateDistribution(t *testing.T) *v1alpha1.LlamaStackDistribution {
 		status, statusFound, _ := unstructured.NestedMap(u.Object, "status")
 		return specFound && statusFound && spec != nil && status != nil
 	})
-	require.NoError(t, err)
+	requireNoErrorWithDebugging(t, TestEnv, err, "Service readiness check failed", llsdistributionCR.Namespace, llsdistributionCR.Name)
 
 	return llsdistributionCR
 }
@@ -183,7 +183,7 @@ func testHealthStatus(t *testing.T, distribution *v1alpha1.LlamaStackDistributio
 		}
 		return updatedDistribution.Status.Phase == v1alpha1.LlamaStackDistributionPhaseReady, nil
 	})
-	require.NoError(t, err, "Failed to wait for distribution status update")
+	requireNoErrorWithDebugging(t, TestEnv, err, "Failed to wait for distribution status update", distribution.Namespace, distribution.Name)
 }
 
 func testDistributionStatus(t *testing.T, llsdistributionCR *v1alpha1.LlamaStackDistribution) {
@@ -223,7 +223,7 @@ func testDistributionStatus(t *testing.T, llsdistributionCR *v1alpha1.LlamaStack
 			Namespace: llsdistributionCR.Namespace,
 			Name:      llsdistributionCR.Name,
 		}, finalDistribution)
-		require.NoError(t, err, "Failed to wait for distribution status update", finalDistribution.Status)
+		requireNoErrorWithDebugging(t, TestEnv, err, "Failed to wait for distribution status update", llsdistributionCR.Namespace, llsdistributionCR.Name)
 	}
 
 	// Get final state and verify

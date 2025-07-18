@@ -12,6 +12,7 @@ import (
 	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -181,4 +182,223 @@ func GetSampleCR(t *testing.T) *v1alpha1.LlamaStackDistribution {
 	require.NoError(t, err)
 
 	return distribution
+}
+
+func checkLlamaStackDistributionStatus(t *testing.T, testenv *TestEnvironment, namespace, name string) {
+	t.Helper()
+
+	llsd := &v1alpha1.LlamaStackDistribution{}
+	err := testenv.Client.Get(testenv.Ctx, client.ObjectKey{Namespace: namespace, Name: name}, llsd)
+	if err != nil {
+		t.Logf("⚠️  Error getting LlamaStackDistribution: %v", err)
+		return
+	}
+
+	t.Logf("LlamaStackDistribution status:")
+	t.Logf("  Phase: %s", llsd.Status.Phase)
+	t.Logf("  Generation: %d", llsd.Generation)
+	t.Logf("  ResourceVersion: %s", llsd.ResourceVersion)
+	t.Logf("  Conditions: %+v", llsd.Status.Conditions)
+}
+
+func checkNamespaceEvents(t *testing.T, testenv *TestEnvironment, namespace string) {
+	t.Helper()
+
+	eventList := &corev1.EventList{}
+	err := testenv.Client.List(testenv.Ctx, eventList, client.InNamespace(namespace))
+	if err != nil {
+		t.Logf("⚠️  Error getting events: %v", err)
+		return
+	}
+
+	if len(eventList.Items) == 0 {
+		t.Log("📝 No events found in namespace")
+		return
+	}
+
+	t.Logf("📝 Found %d events in namespace %s:", len(eventList.Items), namespace)
+	for _, event := range eventList.Items {
+		t.Logf("  %s: %s (%s) - %s",
+			event.LastTimestamp.Format("15:04:05"),
+			event.Reason,
+			event.Type,
+			event.Message)
+	}
+}
+
+func checkOperatorHealth(t *testing.T, testenv *TestEnvironment) {
+	t.Helper()
+
+	operatorNS := "llama-stack-k8s-operator-system"
+	podList := &corev1.PodList{}
+	err := testenv.Client.List(testenv.Ctx, podList, client.InNamespace(operatorNS))
+	if err != nil {
+		t.Logf("⚠️  Error getting operator pods: %v", err)
+		return
+	}
+
+	for _, pod := range podList.Items {
+		if pod.Labels["control-plane"] == "controller-manager" {
+			t.Logf("Operator pod health: Phase=%s, Ready=%v", pod.Status.Phase, isPodReady(&pod))
+			if len(pod.Status.ContainerStatuses) > 0 {
+				container := pod.Status.ContainerStatuses[0]
+				t.Logf("  Container: Ready=%v, RestartCount=%d", container.Ready, container.RestartCount)
+			}
+		}
+	}
+}
+
+func isPodReady(pod *corev1.Pod) bool {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+// requireNoErrorWithDebugging checks for an error and runs full system debugging if one occurs.
+func requireNoErrorWithDebugging(t *testing.T, testenv *TestEnvironment, err error, msg string, namespace, crName string) {
+	t.Helper()
+	if err != nil {
+		t.Logf("💥 ERROR OCCURRED: %s - %v", msg, err)
+		checkLlamaStackDistributionStatus(t, testenv, namespace, crName)
+		checkNamespaceEvents(t, testenv, namespace)
+		logPodDetails(t, testenv, namespace)
+		logServiceEndpoints(t, testenv, namespace, crName+"-service")
+		logServiceSpec(t, testenv, namespace, crName+"-service")
+		logDeploymentSpec(t, testenv, namespace, crName)
+		checkOperatorHealth(t, testenv)
+		require.NoError(t, err, msg)
+	}
+}
+
+// logPodDetails logs detailed information about pods including logs and container statuses.
+func logPodDetails(t *testing.T, testenv *TestEnvironment, namespace string) {
+	t.Helper()
+
+	podList := &corev1.PodList{}
+	err := testenv.Client.List(testenv.Ctx, podList, client.InNamespace(namespace))
+	if err != nil {
+		t.Logf("Failed to list pods: %v", err)
+		return
+	}
+
+	t.Logf("📦 Found %d pods in namespace %s:", len(podList.Items), namespace)
+	for _, pod := range podList.Items {
+		t.Logf("Pod: %s, Phase: %s", pod.Name, pod.Status.Phase)
+
+		for _, cs := range pod.Status.ContainerStatuses {
+			t.Logf("  Container %s: Ready=%v, RestartCount=%d",
+				cs.Name, cs.Ready, cs.RestartCount)
+
+			// Log if container is in error state
+			if cs.State.Waiting != nil {
+				t.Logf("    Waiting: %s - %s",
+					cs.State.Waiting.Reason, cs.State.Waiting.Message)
+			}
+			if cs.State.Terminated != nil {
+				t.Logf("    Terminated: %s - %s",
+					cs.State.Terminated.Reason, cs.State.Terminated.Message)
+			}
+		}
+
+		// Note: Cannot get pod logs with controller-runtime client
+		// Would need typed clientset for that functionality
+		t.Logf("  (Pod logs require direct kubectl access)")
+	}
+}
+
+// logServiceEndpoints logs service endpoint details to see if pods are ready.
+func logServiceEndpoints(t *testing.T, testenv *TestEnvironment, namespace, serviceName string) {
+	t.Helper()
+
+	endpoints := &corev1.Endpoints{}
+	err := testenv.Client.Get(testenv.Ctx, types.NamespacedName{
+		Name:      serviceName,
+		Namespace: namespace,
+	}, endpoints)
+
+	if err != nil {
+		t.Logf("Failed to get endpoints for service %s: %v", serviceName, err)
+		return
+	}
+
+	t.Logf("🔗 Service %s endpoints:", serviceName)
+	for i, subset := range endpoints.Subsets {
+		t.Logf("  Subset %d:", i)
+		t.Logf("    Ready addresses: %d", len(subset.Addresses))
+		for _, addr := range subset.Addresses {
+			t.Logf("      - %s", addr.IP)
+		}
+		t.Logf("    Not ready addresses: %d", len(subset.NotReadyAddresses))
+		for _, addr := range subset.NotReadyAddresses {
+			t.Logf("      - %s", addr.IP)
+		}
+		t.Logf("    Ports:")
+		for _, port := range subset.Ports {
+			t.Logf("      - %s: %d", port.Name, port.Port)
+		}
+	}
+}
+
+// logDeploymentSpec logs deployment configuration details.
+func logDeploymentSpec(t *testing.T, testenv *TestEnvironment, namespace, name string) {
+	t.Helper()
+
+	deployment := &appsv1.Deployment{}
+	err := testenv.Client.Get(testenv.Ctx, types.NamespacedName{
+		Name:      name,
+		Namespace: namespace,
+	}, deployment)
+
+	if err != nil {
+		t.Logf("Failed to get deployment: %v", err)
+		return
+	}
+
+	t.Logf("🚀 Deployment %s spec:", name)
+	t.Logf("  Replicas: %d", *deployment.Spec.Replicas)
+	t.Logf("  Selector: %+v", deployment.Spec.Selector.MatchLabels)
+	t.Logf("  Template labels: %+v", deployment.Spec.Template.Labels)
+
+	for _, container := range deployment.Spec.Template.Spec.Containers {
+		t.Logf("  Container: %s", container.Name)
+		t.Logf("    Image: %s", container.Image)
+		t.Logf("    Ports:")
+		for _, port := range container.Ports {
+			t.Logf("      - %d", port.ContainerPort)
+		}
+		t.Logf("    Env vars:")
+		for _, env := range container.Env {
+			t.Logf("      %s=%s", env.Name, env.Value)
+		}
+		if container.ReadinessProbe != nil {
+			t.Logf("    Readiness probe: %+v", container.ReadinessProbe)
+		}
+	}
+}
+
+// logServiceSpec logs the actual service configuration to debug selector issues.
+func logServiceSpec(t *testing.T, testenv *TestEnvironment, namespace, serviceName string) {
+	t.Helper()
+
+	service := &corev1.Service{}
+	err := testenv.Client.Get(testenv.Ctx, types.NamespacedName{
+		Name:      serviceName,
+		Namespace: namespace,
+	}, service)
+
+	if err != nil {
+		t.Logf("Failed to get service %s: %v", serviceName, err)
+		return
+	}
+
+	t.Logf("🔧 Service %s spec:", serviceName)
+	t.Logf("  Type: %s", service.Spec.Type)
+	t.Logf("  Selector: %+v", service.Spec.Selector)
+	t.Logf("  Ports:")
+	for _, port := range service.Spec.Ports {
+		t.Logf("    - %s: %d -> %s", port.Name, port.Port, port.TargetPort.String())
+	}
 }

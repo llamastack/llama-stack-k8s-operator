@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy/plugins"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -529,4 +530,54 @@ func TestFilterExcludeKinds(t *testing.T) {
 		require.Equal(t, 1, (*filtered).Size())
 		require.Equal(t, "Deployment", (*filtered).Resources()[0].GetKind())
 	})
+}
+
+func TestSetDefaultPort(t *testing.T) {
+	// arrange
+	// instance with no custom port and service with empty port values
+	instance := &llamav1alpha1.LlamaStackDistribution{
+		Spec: llamav1alpha1.LlamaStackDistributionSpec{
+			Server: llamav1alpha1.ServerSpec{
+				ContainerSpec: llamav1alpha1.ContainerSpec{
+					Port: 0, // no port configured
+				},
+			},
+		},
+	}
+
+	service := newTestResource(t, "v1", "Service", "test-service", "test-ns", map[string]any{
+		"ports": []any{
+			map[string]any{"port": nil}, // empty port to trigger default
+		},
+	})
+
+	fieldMutator := plugins.CreateFieldMutator(plugins.FieldMutatorConfig{
+		Mappings: []plugins.FieldMapping{
+			{
+				SourceValue:       getServicePort(instance), // tests getServicePort() integration with kustomizer
+				DefaultValue:      llamav1alpha1.DefaultServerPort,
+				TargetField:       "spec.ports[0].port",
+				TargetKind:        "Service",
+				CreateIfNotExists: true,
+			},
+		},
+	})
+
+	resMap := resmap.New()
+	require.NoError(t, resMap.Append(service))
+
+	// act
+	// apply field transformation
+	require.NoError(t, fieldMutator.Transform(resMap))
+
+	// assert
+	// port should be set to default value
+	transformedService := resMap.Resources()[0]
+	serviceMap, err := transformedService.Map()
+	require.NoError(t, err)
+	ports, ok := serviceMap["spec"].(map[string]any)["ports"].([]any)
+	require.True(t, ok)
+	actualPort, ok := ports[0].(map[string]any)["port"]
+	require.True(t, ok)
+	require.Equal(t, int(llamav1alpha1.DefaultServerPort), actualPort)
 }
