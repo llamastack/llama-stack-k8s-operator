@@ -24,6 +24,7 @@ testbin/*
 *.swo
 *~
 .golangci.mktmp.yml
+.vscode/
 
 # Operator SDK bundle artifacts
 bundle/
