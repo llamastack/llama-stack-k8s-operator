@@ -235,38 +235,6 @@ func checkNamespaceEvents(t *testing.T, testenv *TestEnvironment, namespace stri
 	}
 }
 
-// checkOperatorHealth determines if test failures are caused by operator pod issues rather than application problems.
-func checkOperatorHealth(t *testing.T, testenv *TestEnvironment) {
-	t.Helper()
-
-	operatorNS := "llama-stack-k8s-operator-system"
-	podList := &corev1.PodList{}
-	err := testenv.Client.List(testenv.Ctx, podList, client.InNamespace(operatorNS))
-	if err != nil {
-		t.Logf("⚠️  Error getting operator pods: %v", err)
-		return
-	}
-
-	for _, pod := range podList.Items {
-		if pod.Labels["control-plane"] == "controller-manager" {
-			t.Logf("Operator pod health: Phase=%s, Ready=%v", pod.Status.Phase, isPodReady(&pod))
-			if len(pod.Status.ContainerStatuses) > 0 {
-				container := pod.Status.ContainerStatuses[0]
-				t.Logf("  Container: Ready=%v, RestartCount=%d", container.Ready, container.RestartCount)
-			}
-		}
-	}
-}
-
-func isPodReady(pod *corev1.Pod) bool {
-	for _, condition := range pod.Status.Conditions {
-		if condition.Type == corev1.PodReady {
-			return condition.Status == corev1.ConditionTrue
-		}
-	}
-	return false
-}
-
 // requireNoErrorWithDebugging provides comprehensive debugging context when tests fail to help identify root causes quickly.
 func requireNoErrorWithDebugging(t *testing.T, testenv *TestEnvironment, err error, msg string, namespace, crName string) {
 	t.Helper()
@@ -290,9 +258,6 @@ func requireNoErrorWithDebugging(t *testing.T, testenv *TestEnvironment, err err
 
 		// Check deployment spec to identify configuration problems preventing pod startup
 		logDeploymentSpec(t, testenv, namespace, crName)
-
-		// Check operator health last to rule out operator-side issues
-		checkOperatorHealth(t, testenv)
 
 		require.NoError(t, err, msg)
 	}
