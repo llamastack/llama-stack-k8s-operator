@@ -6,38 +6,44 @@ data:
   run.yaml: |
     # Llama Stack Configuration
     version: '2'
-    image_name: ollama
+    image_name: starter
     apis:
     - inference
     providers:
       inference:
-      - provider_id: ollama
+      - provider_id: ${env.ENABLE_OLLAMA:=__disabled__}
         provider_type: "remote::ollama"
         config:
           url: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
     models:
-      - model_id: "llama3.2:1b"
+      - model_id: "ollama/llama3.2:3b"
         provider_id: ollama
         model_type: llm
+        provider_model_id: llama3.2:3b
+      - embedding_dimension: 384
+        model_id: ${env.ENABLE_OLLAMA:=__disabled__}/${env.OLLAMA_EMBEDDING_MODEL:=__disabled__}
+        provider_id: ${env.ENABLE_OLLAMA:=__disabled__}
+        provider_model_id: ${env.OLLAMA_EMBEDDING_MODEL:=__disabled__}
+        model_type: embedding
     server:
       port: 8321
 ---
 apiVersion: llamastack.io/v1alpha1
 kind: LlamaStackDistribution
 metadata:
-  name: llamastack-with-config
+  name: llamastack-with-userconfig
 spec:
   replicas: 1
   server:
     distribution:
-      name: ollama
+      name: starter
     containerSpec:
       port: 8321
       env:
-      - name: INFERENCE_MODEL
-        value: "llama3.2:1b"
-      - name: OLLAMA_URL
-        value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
+      - name: ENABLE_OLLAMA
+        value: ollama
+      - name: OLLAMA_EMBEDDING_MODEL
+        value: all-minilm:l6-v2
     userConfig:
-      configMapName: llama-stack-config
+      configMapName: llama-stack-config  # use ConfigMap's data.run.yaml
       # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR
