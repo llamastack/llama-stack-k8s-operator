@@ -272,10 +272,86 @@ func AssertPVCHasSize(t *testing.T, pvc *corev1.PersistentVolumeClaim, expectedS
 		"PVC should request %s storage, got %s", expectedSize, storageRequest.String())
 }
 
-func ReconcileDistribution(t *testing.T, instance *llamav1alpha1.LlamaStackDistribution) {
+// AssertServicePortMatches verifies that a service has the expected port configuration.
+func AssertServicePortMatches(t *testing.T, service *corev1.Service, expectedPort corev1.ServicePort) {
+	t.Helper()
+	require.Len(t, service.Spec.Ports, 1, "Service should have exactly one port")
+	require.Equal(t, expectedPort, service.Spec.Ports[0], "Service port should match expected")
+}
+
+// AssertServiceAndDeploymentPortsAlign verifies that service target port matches deployment container port.
+func AssertServiceAndDeploymentPortsAlign(t *testing.T, service *corev1.Service, deployment *appsv1.Deployment) {
+	t.Helper()
+	require.Len(t, service.Spec.Ports, 1, "Service should have exactly one port")
+	require.Len(t, deployment.Spec.Template.Spec.Containers, 1, "Deployment should have exactly one container")
+	require.Len(t, deployment.Spec.Template.Spec.Containers[0].Ports, 1, "Container should have exactly one port")
+
+	serviceTargetPort := service.Spec.Ports[0].TargetPort.IntVal
+	containerPort := deployment.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
+	require.Equal(t, serviceTargetPort, containerPort, "Service target port should match deployment container port")
+}
+
+// AssertServiceSelectorMatches verifies that a service has the expected selector.
+func AssertServiceSelectorMatches(t *testing.T, service *corev1.Service, expectedSelector map[string]string) {
+	t.Helper()
+	require.Equal(t, expectedSelector, service.Spec.Selector, "Service selector should match expected")
+}
+
+// AssertServiceAndDeploymentSelectorsAlign verifies that service selector matches deployment pod labels.
+func AssertServiceAndDeploymentSelectorsAlign(t *testing.T, service *corev1.Service, deployment *appsv1.Deployment) {
+	t.Helper()
+	require.Equal(t, service.Spec.Selector, deployment.Spec.Template.Labels, "Service selector should match deployment pod labels")
+}
+
+// AssertResourceOwnedBy verifies that a resource has the expected owner reference.
+func AssertResourceOwnedBy(t *testing.T, resource metav1.Object, expectedOwnerUID types.UID) {
+	t.Helper()
+	ownerRefs := resource.GetOwnerReferences()
+	require.Len(t, ownerRefs, 1, "Resource should have exactly one owner reference")
+	require.Equal(t, expectedOwnerUID, ownerRefs[0].UID, "Resource should be owned by expected instance")
+}
+
+// AssertNetworkPolicyTargetsDeploymentPods verifies that network policy targets the same pods as deployment.
+func AssertNetworkPolicyTargetsDeploymentPods(t *testing.T, networkPolicy *networkingv1.NetworkPolicy, deployment *appsv1.Deployment) {
+	t.Helper()
+	require.Equal(t, deployment.Spec.Template.Labels, networkPolicy.Spec.PodSelector.MatchLabels,
+		"NetworkPolicy should target same pods as deployment")
+}
+
+// AssertNetworkPolicyAllowsDeploymentPort verifies that network policy allows traffic on deployment container port.
+func AssertNetworkPolicyAllowsDeploymentPort(t *testing.T, networkPolicy *networkingv1.NetworkPolicy, deployment *appsv1.Deployment) {
+	t.Helper()
+	require.Len(t, deployment.Spec.Template.Spec.Containers, 1, "Deployment should have exactly one container")
+	require.Len(t, deployment.Spec.Template.Spec.Containers[0].Ports, 1, "Container should have exactly one port")
+	require.Len(t, networkPolicy.Spec.Ingress, 2, "NetworkPolicy should have exactly two ingress rules")
+	require.Len(t, networkPolicy.Spec.Ingress[0].Ports, 1, "NetworkPolicy first ingress rule should have exactly one port")
+	require.Len(t, networkPolicy.Spec.Ingress[1].Ports, 1, "NetworkPolicy second ingress rule should have exactly one port")
+
+	containerPort := deployment.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
+	policyPort1 := networkPolicy.Spec.Ingress[0].Ports[0].Port.IntVal
+	require.Equal(t, containerPort, policyPort1, "NetworkPolicy llama-stack components ingress rule should allow traffic on deployment container port")
+	policyPort2 := networkPolicy.Spec.Ingress[1].Ports[0].Port.IntVal
+	require.Equal(t, containerPort, policyPort2, "NetworkPolicy operator namespace ingress rule should allow traffic on deployment container port")
+}
+
+// AssertNetworkPolicyIsIngressOnly verifies that network policy is configured for ingress-only traffic.
+func AssertNetworkPolicyIsIngressOnly(t *testing.T, networkPolicy *networkingv1.NetworkPolicy) {
+	t.Helper()
+	expectedPolicyTypes := []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
+	require.Equal(t, expectedPolicyTypes, networkPolicy.Spec.PolicyTypes, "NetworkPolicy should be ingress-only")
+}
+
+func AssertServiceAccountDeploymentAlign(t *testing.T, deployment *appsv1.Deployment, serviceAccount *corev1.ServiceAccount) {
+	t.Helper()
+	require.Equal(t, serviceAccount.Name, deployment.Spec.Template.Spec.ServiceAccountName,
+		"Deployment should use the created ServiceAccount for pod permissions")
+}
+
+func ReconcileDistribution(t *testing.T, instance *llamav1alpha1.LlamaStackDistribution, enableNetworkPolicy bool) {
 	t.Helper()
 	// Create reconciler and run reconciliation
 	reconciler := createTestReconciler()
+	reconciler.EnableNetworkPolicy = enableNetworkPolicy
 	_, err := reconciler.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{
 			Name:      instance.Name,

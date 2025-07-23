@@ -9,9 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
@@ -108,7 +110,7 @@ func TestStorageConfiguration(t *testing.T) {
 			})
 
 			// act: reconcile the instance
-			ReconcileDistribution(t, instance)
+			ReconcileDistribution(t, instance, false)
 
 			// assert
 			deployment := &appsv1.Deployment{}
@@ -179,7 +181,7 @@ server:
 	require.NoError(t, k8sClient.Create(context.Background(), instance))
 
 	// Reconcile to create initial deployment
-	ReconcileDistribution(t, instance)
+	ReconcileDistribution(t, instance, false)
 
 	// Get the initial deployment and check for ConfigMap hash annotation
 	deployment := &appsv1.Deployment{}
@@ -218,7 +220,7 @@ server:
 	time.Sleep(2 * time.Second)
 
 	// Trigger reconciliation (in real scenarios this would be triggered by the watch)
-	ReconcileDistribution(t, instance)
+	ReconcileDistribution(t, instance, false)
 
 	// Verify the deployment was updated with a new hash
 	waitForResourceWithKeyAndCondition(
@@ -243,4 +245,70 @@ server:
 
 	// Note: In test environment, field indexer might not be set up properly,
 	// so we skip the isConfigMapReferenced checks which rely on field indexing
+}
+
+func TestReconcile(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	// --- arrange ---
+	instanceName := "llamastackdistribution-sample"
+	instancePort := llamav1alpha1.DefaultServerPort
+	expectedSelector := map[string]string{
+		llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
+		"app.kubernetes.io/instance":  instanceName,
+	}
+	expectedPort := corev1.ServicePort{
+		Name:       llamav1alpha1.DefaultServicePortName,
+		Port:       instancePort,
+		TargetPort: intstr.FromInt(int(instancePort)),
+		Protocol:   corev1.ProtocolTCP,
+	}
+	operatorNamespaceName := "test-operator-namespace"
+
+	// set operator namespace to avoid service account file dependency
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespaceName)
+
+	namespace := createTestNamespace(t, operatorNamespaceName)
+	instance := NewDistributionBuilder().
+		WithName(instanceName).
+		WithNamespace(namespace.Name).
+		WithDistribution("starter").
+		WithPort(instancePort).
+		Build()
+	require.NoError(t, k8sClient.Create(context.Background(), instance))
+
+	// --- act ---
+	ReconcileDistribution(t, instance, true)
+
+	service := &corev1.Service{}
+	waitForResource(t, k8sClient, instance.Namespace, instance.Name+"-service", service)
+	deployment := &appsv1.Deployment{}
+	waitForResource(t, k8sClient, instance.Namespace, instance.Name, deployment)
+	networkpolicy := &networkingv1.NetworkPolicy{}
+	waitForResource(t, k8sClient, instance.Namespace, instance.Name+"-network-policy",
+		networkpolicy)
+	serviceAccount := &corev1.ServiceAccount{}
+	waitForResource(t, k8sClient, instance.Namespace, instance.Name+"-sa",
+		serviceAccount)
+
+	// --- assert ---
+	// Service behaviors
+	AssertServicePortMatches(t, service, expectedPort)
+	AssertServiceAndDeploymentPortsAlign(t, service, deployment)
+	AssertServiceSelectorMatches(t, service, expectedSelector)
+	AssertServiceAndDeploymentSelectorsAlign(t, service, deployment)
+
+	// ServiceAccount behaviors
+	AssertServiceAccountDeploymentAlign(t, deployment, serviceAccount)
+
+	// NetworkPolicy behaviors
+	AssertNetworkPolicyTargetsDeploymentPods(t, networkpolicy, deployment)
+	AssertNetworkPolicyAllowsDeploymentPort(t, networkpolicy, deployment)
+	AssertNetworkPolicyIsIngressOnly(t, networkpolicy)
+
+	// Resource ownership behaviors
+	AssertResourceOwnedBy(t, service, instance.UID)
+	AssertResourceOwnedBy(t, deployment, instance.UID)
+	AssertResourceOwnedBy(t, networkpolicy, instance.UID)
+	AssertResourceOwnedBy(t, serviceAccount, instance.UID)
 }
