@@ -19,11 +19,13 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -56,6 +58,9 @@ import (
 const (
 	operatorConfigData = "llama-stack-operator-config"
 	manifestsBasePath  = "manifests/base"
+	defaultCABundleKey = "ca-bundle.crt"
+	// ODH/RHOAI well-known ConfigMap for trusted CA bundles.
+	odhTrustedCABundleConfigMap = "odh-trusted-ca-bundle"
 )
 
 // LlamaStackDistributionReconciler reconciles a LlamaStack object.
@@ -89,6 +94,21 @@ func (r *LlamaStackDistributionReconciler) getUserConfigMapNamespace(instance *l
 	return instance.Namespace
 }
 
+// hasCABundleConfigMap checks if the instance has a valid TLSConfig with CABundle ConfigMapName.
+// Returns true if configured, false otherwise.
+func (r *LlamaStackDistributionReconciler) hasCABundleConfigMap(instance *llamav1alpha1.LlamaStackDistribution) bool {
+	return instance.Spec.Server.TLSConfig != nil && instance.Spec.Server.TLSConfig.CABundle != nil && instance.Spec.Server.TLSConfig.CABundle.ConfigMapName != ""
+}
+
+// getCABundleConfigMapNamespace returns the resolved CA bundle ConfigMap namespace.
+// If ConfigMapNamespace is specified, it returns that; otherwise, it returns the instance's namespace.
+func (r *LlamaStackDistributionReconciler) getCABundleConfigMapNamespace(instance *llamav1alpha1.LlamaStackDistribution) string {
+	if instance.Spec.Server.TLSConfig.CABundle.ConfigMapNamespace != "" {
+		return instance.Spec.Server.TLSConfig.CABundle.ConfigMapNamespace
+	}
+	return instance.Namespace
+}
+
 // hasValidUserConfig is a standalone helper function to check if a LlamaStackDistribution has valid UserConfig.
 // This is used by functions that don't have access to the reconciler receiver.
 func hasValidUserConfig(llsd *llamav1alpha1.LlamaStackDistribution) bool {
@@ -99,6 +119,20 @@ func hasValidUserConfig(llsd *llamav1alpha1.LlamaStackDistribution) bool {
 func getUserConfigMapNamespaceStandalone(llsd *llamav1alpha1.LlamaStackDistribution) string {
 	if llsd.Spec.Server.UserConfig.ConfigMapNamespace != "" {
 		return llsd.Spec.Server.UserConfig.ConfigMapNamespace
+	}
+	return llsd.Namespace
+}
+
+// hasValidCABundleConfig is a standalone helper function to check if a LlamaStackDistribution has valid CA bundle config.
+// This is used by functions that don't have access to the reconciler receiver.
+func hasValidCABundleConfig(llsd *llamav1alpha1.LlamaStackDistribution) bool {
+	return llsd.Spec.Server.TLSConfig != nil && llsd.Spec.Server.TLSConfig.CABundle != nil && llsd.Spec.Server.TLSConfig.CABundle.ConfigMapName != ""
+}
+
+// getCABundleConfigMapNamespaceStandalone returns the resolved CA bundle ConfigMap namespace without needing a receiver.
+func getCABundleConfigMapNamespaceStandalone(llsd *llamav1alpha1.LlamaStackDistribution) string {
+	if llsd.Spec.Server.TLSConfig.CABundle.ConfigMapNamespace != "" {
+		return llsd.Spec.Server.TLSConfig.CABundle.ConfigMapNamespace
 	}
 	return llsd.Namespace
 }
@@ -218,11 +252,14 @@ func (r *LlamaStackDistributionReconciler) reconcileManifestResources(ctx contex
 
 // reconcileResources reconciles all resources for the LlamaStackDistribution instance.
 func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	// Reconcile the ConfigMap if specified by the user
-	if r.hasUserConfigMap(instance) {
-		if err := r.reconcileUserConfigMap(ctx, instance); err != nil {
-			return fmt.Errorf("failed to reconcile user ConfigMap: %w", err)
-		}
+	// Reconcile ConfigMaps
+	if err := r.reconcileConfigMaps(ctx, instance); err != nil {
+		return err
+	}
+
+	// Reconcile storage
+	if err := r.reconcileStorage(ctx, instance); err != nil {
+		return err
 	}
 
 	// Reconcile the NetworkPolicy
@@ -244,6 +281,39 @@ func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Contex
 	if instance.HasPorts() {
 		if err := r.reconcileService(ctx, instance); err != nil {
 			return fmt.Errorf("failed to reconcile service: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (r *LlamaStackDistributionReconciler) reconcileConfigMaps(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	// Reconcile the ConfigMap if specified by the user
+	if r.hasUserConfigMap(instance) {
+		if err := r.reconcileUserConfigMap(ctx, instance); err != nil {
+			return fmt.Errorf("failed to reconcile user ConfigMap: %w", err)
+		}
+	}
+
+	// Reconcile the CA bundle ConfigMap if specified
+	if r.hasCABundleConfigMap(instance) {
+		if err := r.reconcileCABundleConfigMap(ctx, instance); err != nil {
+			return fmt.Errorf("failed to reconcile CA bundle ConfigMap: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (r *LlamaStackDistributionReconciler) reconcileStorage(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	// Reconcile the PVC if storage is configured
+	if instance.Spec.Server.Storage != nil {
+		resMap, err := deploy.RenderManifest(filesys.MakeFsOnDisk(), manifestsBasePath, instance)
+		if err != nil {
+			return fmt.Errorf("failed to render PVC manifests: %w", err)
+		}
+		if err := deploy.ApplyResources(ctx, r.Client, r.Scheme, instance, resMap); err != nil {
+			return fmt.Errorf("failed to apply PVC manifests: %w", err)
 		}
 	}
 
@@ -281,6 +351,7 @@ func (r *LlamaStackDistributionReconciler) SetupWithManager(ctx context.Context,
 // On older Kubernetes versions that don't support custom field labels for custom resources,
 // this will fail gracefully and the operator will fall back to manual searching.
 func (r *LlamaStackDistributionReconciler) createConfigMapFieldIndexer(ctx context.Context, mgr ctrl.Manager) error {
+	// Create index for user config ConfigMaps
 	if err := mgr.GetFieldIndexer().IndexField(
 		ctx,
 		&llamav1alpha1.LlamaStackDistribution{},
@@ -292,6 +363,20 @@ func (r *LlamaStackDistributionReconciler) createConfigMapFieldIndexer(ctx conte
 			"error", err.Error())
 		return nil
 	}
+
+	// Create index for CA bundle ConfigMaps
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&llamav1alpha1.LlamaStackDistribution{},
+		"spec.server.tlsConfig.caBundle.configMapName",
+		r.caBundleConfigMapIndexFunc,
+	); err != nil {
+		// Log warning but don't fail startup - older Kubernetes versions may not support this
+		mgr.GetLogger().Info("Field indexer for CA bundle ConfigMap references not supported, will use manual search fallback",
+			"error", err.Error())
+		return nil
+	}
+
 	mgr.GetLogger().V(1).Info("Successfully created field indexer for ConfigMap references - will use efficient lookups")
 	return nil
 }
@@ -309,6 +394,22 @@ func (r *LlamaStackDistributionReconciler) configMapIndexFunc(rawObj client.Obje
 	// Create index key as "namespace/name" format
 	configMapNamespace := getUserConfigMapNamespaceStandalone(llsd)
 	indexKey := fmt.Sprintf("%s/%s", configMapNamespace, llsd.Spec.Server.UserConfig.ConfigMapName)
+	return []string{indexKey}
+}
+
+// caBundleConfigMapIndexFunc is the indexer function for CA bundle ConfigMap references.
+func (r *LlamaStackDistributionReconciler) caBundleConfigMapIndexFunc(rawObj client.Object) []string {
+	llsd, ok := rawObj.(*llamav1alpha1.LlamaStackDistribution)
+	if !ok {
+		return nil
+	}
+	if !hasValidCABundleConfig(llsd) {
+		return nil
+	}
+
+	// Create index key as "namespace/name" format
+	configMapNamespace := getCABundleConfigMapNamespaceStandalone(llsd)
+	indexKey := fmt.Sprintf("%s/%s", configMapNamespace, llsd.Spec.Server.TLSConfig.CABundle.ConfigMapName)
 	return []string{indexKey}
 }
 
@@ -439,9 +540,9 @@ func (r *LlamaStackDistributionReconciler) isConfigMapReferenced(configMap clien
 	// Use field indexer for efficient lookup - create the same index key format
 	indexKey := fmt.Sprintf("%s/%s", configMap.GetNamespace(), configMap.GetName())
 
-	attachedLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
-
-	err := r.List(context.Background(), &attachedLlamaStacks, client.MatchingFields{"spec.server.userConfig.configMapName": indexKey})
+	// Check for user config ConfigMap references
+	userConfigLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
+	err := r.List(context.Background(), &userConfigLlamaStacks, client.MatchingFields{"spec.server.userConfig.configMapName": indexKey})
 	if err != nil {
 		// Field indexer failed (likely due to older Kubernetes version not supporting custom field labels)
 		// Fall back to a manual check instead of assuming all ConfigMaps are referenced
@@ -449,7 +550,19 @@ func (r *LlamaStackDistributionReconciler) isConfigMapReferenced(configMap clien
 		return r.manuallyCheckConfigMapReference(configMap)
 	}
 
-	found := len(attachedLlamaStacks.Items) > 0
+	found := len(userConfigLlamaStacks.Items) > 0
+
+	// Check for CA bundle ConfigMap references if not found in user config
+	if !found {
+		caBundleLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
+		err := r.List(context.Background(), &caBundleLlamaStacks, client.MatchingFields{"spec.server.tlsConfig.caBundle.configMapName": indexKey})
+		if err != nil {
+			// Field indexer failed for CA bundle, fall back to manual check
+			logger.Info("CA bundle field indexer not supported, falling back to manual ConfigMap reference check", "error", err.Error())
+			return r.manuallyCheckConfigMapReference(configMap)
+		}
+		found = len(caBundleLlamaStacks.Items) > 0
+	}
 
 	if !found {
 		// Fallback: manually check all LlamaStackDistributions
@@ -479,11 +592,22 @@ func (r *LlamaStackDistributionReconciler) manuallyCheckConfigMapReference(confi
 	targetName := configMap.GetName()
 
 	for _, ls := range allLlamaStacks.Items {
+		// Check user config ConfigMap references
 		if hasValidUserConfig(&ls) {
 			configMapNamespace := getUserConfigMapNamespaceStandalone(&ls)
 
 			if configMapNamespace == targetNamespace && ls.Spec.Server.UserConfig.ConfigMapName == targetName {
 				// found a LlamaStackDistribution that references the ConfigMap
+				return true
+			}
+		}
+
+		// Check CA bundle ConfigMap references
+		if hasValidCABundleConfig(&ls) {
+			configMapNamespace := getCABundleConfigMapNamespaceStandalone(&ls)
+
+			if configMapNamespace == targetNamespace && ls.Spec.Server.TLSConfig.CABundle.ConfigMapName == targetName {
+				// found a LlamaStackDistribution that references the CA bundle ConfigMap
 				return true
 			}
 		}
@@ -516,15 +640,30 @@ func (r *LlamaStackDistributionReconciler) tryFieldIndexerLookup(ctx context.Con
 
 	indexKey := fmt.Sprintf("%s/%s", configMap.GetNamespace(), configMap.GetName())
 
-	attachedLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
-	err := r.List(ctx, &attachedLlamaStacks, client.MatchingFields{"spec.server.userConfig.configMapName": indexKey})
+	// Check for user config ConfigMap references
+	userConfigLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
+	err := r.List(ctx, &userConfigLlamaStacks, client.MatchingFields{"spec.server.userConfig.configMapName": indexKey})
 	if err != nil {
 		logger.V(1).Info("Field indexer not supported, will fall back to a manual search for ConfigMap event processing",
 			"indexKey", indexKey, "error", err.Error())
-		return attachedLlamaStacks, false
+		return userConfigLlamaStacks, false
 	}
 
-	return attachedLlamaStacks, len(attachedLlamaStacks.Items) > 0
+	// Check for CA bundle ConfigMap references
+	caBundleLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
+	err = r.List(ctx, &caBundleLlamaStacks, client.MatchingFields{"spec.server.tlsConfig.caBundle.configMapName": indexKey})
+	if err != nil {
+		logger.Info("CA bundle field indexer not supported, will fall back to a manual search for ConfigMap event processing",
+			"indexKey", indexKey, "error", err.Error())
+		return userConfigLlamaStacks, len(userConfigLlamaStacks.Items) > 0
+	}
+
+	// Combine results from both searches
+	combinedLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
+	combinedLlamaStacks.Items = append(combinedLlamaStacks.Items, userConfigLlamaStacks.Items...)
+	combinedLlamaStacks.Items = append(combinedLlamaStacks.Items, caBundleLlamaStacks.Items...)
+
+	return combinedLlamaStacks, len(combinedLlamaStacks.Items) > 0
 }
 
 // performManualSearch performs a manual search and filtering when field indexer returns no results.
@@ -565,12 +704,23 @@ func (r *LlamaStackDistributionReconciler) filterLlamaStacksForConfigMap(llamaSt
 
 // doesLlamaStackReferenceConfigMap checks if a LlamaStackDistribution references the specified ConfigMap.
 func (r *LlamaStackDistributionReconciler) doesLlamaStackReferenceConfigMap(ls llamav1alpha1.LlamaStackDistribution, targetNamespace, targetName string) bool {
-	if !hasValidUserConfig(&ls) {
-		return false
+	// Check user config ConfigMap references
+	if hasValidUserConfig(&ls) {
+		configMapNamespace := getUserConfigMapNamespaceStandalone(&ls)
+		if configMapNamespace == targetNamespace && ls.Spec.Server.UserConfig.ConfigMapName == targetName {
+			return true
+		}
 	}
 
-	configMapNamespace := getUserConfigMapNamespaceStandalone(&ls)
-	return configMapNamespace == targetNamespace && ls.Spec.Server.UserConfig.ConfigMapName == targetName
+	// Check CA bundle ConfigMap references
+	if hasValidCABundleConfig(&ls) {
+		configMapNamespace := getCABundleConfigMapNamespaceStandalone(&ls)
+		if configMapNamespace == targetNamespace && ls.Spec.Server.TLSConfig.CABundle.ConfigMapName == targetName {
+			return true
+		}
+	}
+
+	return false
 }
 
 // convertToReconcileRequests converts LlamaStackDistribution items to reconcile requests.
@@ -603,10 +753,10 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 	}
 
 	// Build container spec
-	container := buildContainerSpec(instance, resolvedImage)
+	container := buildContainerSpec(ctx, r, instance, resolvedImage)
 
 	// Configure storage
-	podSpec := configurePodStorage(instance, container)
+	podSpec := configurePodStorage(ctx, r, instance, container)
 
 	// Set the service acc
 	// Prepare annotations for the pod template
@@ -623,6 +773,20 @@ func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Conte
 			logger.V(1).Info("Added ConfigMap hash annotation to trigger pod restart",
 				"configMapName", instance.Spec.Server.UserConfig.ConfigMapName,
 				"hash", configMapHash)
+		}
+	}
+
+	// Add CA bundle ConfigMap hash to trigger restarts when the CA bundle changes
+	if r.hasCABundleConfigMap(instance) {
+		caBundleHash, err := r.getCABundleConfigMapHash(ctx, instance)
+		if err != nil {
+			return fmt.Errorf("failed to get CA bundle ConfigMap hash for pod restart annotation: %w", err)
+		}
+		if caBundleHash != "" {
+			podAnnotations["configmap.hash/ca-bundle"] = caBundleHash
+			logger.V(1).Info("Added CA bundle ConfigMap hash annotation to trigger pod restart",
+				"configMapName", instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
+				"hash", caBundleHash)
 		}
 	}
 
@@ -1070,6 +1234,99 @@ func (r *LlamaStackDistributionReconciler) reconcileUserConfigMap(ctx context.Co
 	return nil
 }
 
+// isValidPEM validates that the given data contains valid PEM formatted content.
+func isValidPEM(data []byte) bool {
+	// Basic PEM validation using pem.Decode.
+	block, _ := pem.Decode(data)
+	return block != nil
+}
+
+// reconcileCABundleConfigMap validates that the referenced CA bundle ConfigMap exists.
+func (r *LlamaStackDistributionReconciler) reconcileCABundleConfigMap(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	logger := log.FromContext(ctx)
+
+	if !r.hasCABundleConfigMap(instance) {
+		logger.V(1).Info("No CA bundle ConfigMap specified, skipping")
+		return nil
+	}
+
+	// Determine the ConfigMap namespace - default to the same namespace as the LlamaStackDistribution.
+	configMapNamespace := r.getCABundleConfigMapNamespace(instance)
+
+	logger.V(1).Info("Validating referenced CA bundle ConfigMap exists",
+		"configMapName", instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
+		"configMapNamespace", configMapNamespace)
+
+	// Check if the ConfigMap exists
+	configMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
+		Namespace: configMapNamespace,
+	}, configMap)
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			logger.Error(err, "Referenced CA bundle ConfigMap not found",
+				"configMapName", instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
+				"configMapNamespace", configMapNamespace)
+			return fmt.Errorf("failed to find referenced CA bundle ConfigMap %s/%s", configMapNamespace, instance.Spec.Server.TLSConfig.CABundle.ConfigMapName)
+		}
+		return fmt.Errorf("failed to fetch CA bundle ConfigMap %s/%s: %w", configMapNamespace, instance.Spec.Server.TLSConfig.CABundle.ConfigMapName, err)
+	}
+
+	// Validate that the specified keys exist in the ConfigMap
+	var keysToValidate []string
+	if len(instance.Spec.Server.TLSConfig.CABundle.ConfigMapKeys) > 0 {
+		keysToValidate = instance.Spec.Server.TLSConfig.CABundle.ConfigMapKeys
+	} else {
+		specCABundleKey := instance.Spec.Server.TLSConfig.CABundle.ConfigMapKey
+		if specCABundleKey == "" {
+			specCABundleKey = defaultCABundleKey
+		}
+		keysToValidate = []string{specCABundleKey}
+	}
+
+	for _, key := range keysToValidate {
+		if _, exists := configMap.Data[key]; !exists {
+			logger.Error(err, "CA bundle key not found in ConfigMap",
+				"configMapName", instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
+				"configMapNamespace", configMapNamespace,
+				"key", key)
+			return fmt.Errorf("failed to find CA bundle key '%s' in ConfigMap %s/%s", key, configMapNamespace, instance.Spec.Server.TLSConfig.CABundle.ConfigMapName)
+		}
+
+		// Validate that the key contains valid PEM data
+		pemData, exists := configMap.Data[key]
+		if !exists {
+			// This should not happen since we checked above, but just to be safe
+			return fmt.Errorf("failed to find CA bundle key '%s' in ConfigMap %s/%s", key, configMapNamespace, instance.Spec.Server.TLSConfig.CABundle.ConfigMapName)
+		}
+
+		if !isValidPEM([]byte(pemData)) {
+			logger.Error(nil, "CA bundle key contains invalid PEM data",
+				"configMapName", instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
+				"configMapNamespace", configMapNamespace,
+				"key", key)
+			return fmt.Errorf("failed to validate CA bundle key '%s' in ConfigMap %s/%s: contains invalid PEM data",
+				key,
+				configMapNamespace,
+				instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
+			)
+		}
+
+		logger.V(1).Info("CA bundle key contains valid PEM data",
+			"configMapName", instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
+			"configMapNamespace", configMapNamespace,
+			"key", key)
+	}
+
+	logger.V(1).Info("CA bundle ConfigMap found and validated",
+		"configMap", configMap.Name,
+		"namespace", configMap.Namespace,
+		"keys", keysToValidate,
+		"dataKeys", len(configMap.Data))
+	return nil
+}
+
 // getConfigMapHash calculates a hash of the ConfigMap data to detect changes.
 func (r *LlamaStackDistributionReconciler) getConfigMapHash(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) (string, error) {
 	if !r.hasUserConfigMap(instance) {
@@ -1089,6 +1346,89 @@ func (r *LlamaStackDistributionReconciler) getConfigMapHash(ctx context.Context,
 
 	// Create a content-based hash that will change when the ConfigMap data changes
 	return fmt.Sprintf("%s-%s", configMap.ResourceVersion, configMap.Name), nil
+}
+
+// getCABundleConfigMapHash calculates a hash of the CA bundle ConfigMap data to detect changes.
+func (r *LlamaStackDistributionReconciler) getCABundleConfigMapHash(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) (string, error) {
+	if !r.hasCABundleConfigMap(instance) {
+		return "", nil
+	}
+
+	configMapNamespace := r.getCABundleConfigMapNamespace(instance)
+
+	configMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
+		Namespace: configMapNamespace,
+	}, configMap)
+	if err != nil {
+		return "", err
+	}
+
+	// Create a content-based hash that will change when the ConfigMap data changes
+	// Include information about which keys are being used
+	var keyInfo string
+	if len(instance.Spec.Server.TLSConfig.CABundle.ConfigMapKeys) > 0 {
+		keyInfo = fmt.Sprintf("-%s", strings.Join(instance.Spec.Server.TLSConfig.CABundle.ConfigMapKeys, ","))
+	} else {
+		key := instance.Spec.Server.TLSConfig.CABundle.ConfigMapKey
+		if key == "" {
+			key = defaultCABundleKey
+		}
+		keyInfo = fmt.Sprintf("-%s", key)
+	}
+
+	return fmt.Sprintf("%s-%s%s", configMap.ResourceVersion, configMap.Name, keyInfo), nil
+}
+
+// detectODHTrustedCABundle checks if the well-known ODH trusted CA bundle ConfigMap
+// exists in the same namespace as the LlamaStackDistribution and returns its available keys.
+// Returns the ConfigMap and a list of data keys if found, or nil and empty slice if not found.
+func (r *LlamaStackDistributionReconciler) detectODHTrustedCABundle(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) (*corev1.ConfigMap, []string, error) {
+	logger := log.FromContext(ctx)
+
+	configMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      odhTrustedCABundleConfigMap,
+		Namespace: instance.Namespace,
+	}, configMap)
+
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			logger.V(1).Info("ODH trusted CA bundle ConfigMap not found, skipping auto-detection",
+				"configMapName", odhTrustedCABundleConfigMap,
+				"namespace", instance.Namespace)
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("failed to check for ODH trusted CA bundle ConfigMap %s/%s: %w",
+			instance.Namespace, odhTrustedCABundleConfigMap, err)
+	}
+
+	// Extract available data keys and validate they contain valid PEM data
+	keys := make([]string, 0, len(configMap.Data))
+
+	for key, value := range configMap.Data {
+		// Only include keys that contain valid PEM data
+		if isValidPEM([]byte(value)) {
+			keys = append(keys, key)
+			logger.V(1).Info("Auto-detected CA bundle key contains valid PEM data",
+				"configMapName", odhTrustedCABundleConfigMap,
+				"namespace", instance.Namespace,
+				"key", key)
+		} else {
+			logger.V(1).Info("Auto-detected CA bundle key contains invalid PEM data, skipping",
+				"configMapName", odhTrustedCABundleConfigMap,
+				"namespace", instance.Namespace,
+				"key", key)
+		}
+	}
+
+	logger.V(1).Info("ODH trusted CA bundle ConfigMap detected",
+		"configMapName", odhTrustedCABundleConfigMap,
+		"namespace", instance.Namespace,
+		"availableKeys", keys)
+
+	return configMap, keys, nil
 }
 
 // createDefaultConfigMap creates a ConfigMap with default feature flag values.

@@ -17,6 +17,8 @@ limitations under the License.
 package controllers
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
@@ -176,7 +178,7 @@ func TestBuildContainerSpec(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := buildContainerSpec(tc.instance, tc.image)
+			result := buildContainerSpec(context.Background(), nil, tc.instance, tc.image)
 			assert.Equal(t, tc.expectedResult.Name, result.Name)
 			assert.Equal(t, tc.expectedResult.Image, result.Image)
 			assert.Equal(t, tc.expectedResult.Ports, result.Ports)
@@ -267,7 +269,7 @@ func TestConfigurePodStorage(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := configurePodStorage(tc.instance, tc.container)
+			result := configurePodStorage(context.Background(), nil, tc.instance, tc.container)
 
 			// Verify container was added.
 			assert.Len(t, result.Containers, 1)
@@ -564,5 +566,78 @@ func TestPodOverridesWithoutServiceAccount(t *testing.T) {
 	// Verify ServiceAccount name is empty (default ServiceAccountName should be set when not explicitly provided)
 	if deployment.Spec.Template.Spec.ServiceAccountName != instance.Name+"-sa" {
 		t.Errorf("expected default ServiceAccountName when not explicitly provided, got %s", deployment.Spec.Template.Spec.ServiceAccountName)
+	}
+}
+
+func TestValidateConfigMapKeys(t *testing.T) {
+	tests := []struct {
+		name        string
+		keys        []string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "valid keys",
+			keys:        []string{"ca-bundle.crt", "intermediate.pem", "root-ca.cert"},
+			expectError: false,
+		},
+		{
+			name:        "empty key",
+			keys:        []string{""},
+			expectError: true,
+			errorMsg:    "ConfigMap key cannot be empty",
+		},
+		{
+			name:        "command injection attempt",
+			keys:        []string{"valid-key; rm -rf /; echo malicious"},
+			expectError: true,
+			errorMsg:    "contains invalid characters",
+		},
+		{
+			name:        "path traversal attempt",
+			keys:        []string{"../../../etc/passwd"},
+			expectError: true,
+			errorMsg:    "contains invalid characters",
+		},
+		{
+			name:        "shell metacharacters",
+			keys:        []string{"key$(whoami)"},
+			expectError: true,
+			errorMsg:    "contains invalid characters",
+		},
+		{
+			name:        "pipe injection",
+			keys:        []string{"key | cat /etc/passwd"},
+			expectError: true,
+			errorMsg:    "contains invalid characters",
+		},
+		{
+			name:        "too long key",
+			keys:        []string{strings.Repeat("a", 254)},
+			expectError: true,
+			errorMsg:    "too long",
+		},
+		{
+			name:        "valid alphanumeric with allowed chars",
+			keys:        []string{"ca_bundle-v1.2.crt"},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateConfigMapKeys(tt.keys)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("Expected error message to contain '%s', got '%s'", tt.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error but got: %v", err)
+				}
+			}
+		})
 	}
 }

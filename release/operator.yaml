@@ -2010,6 +2010,47 @@ spec:
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
                     type: object
+                  tlsConfig:
+                    description: TLSConfig defines the TLS configuration for the llama-stack
+                      server
+                    properties:
+                      caBundle:
+                        description: CABundle defines the CA bundle configuration
+                          for custom certificates
+                        properties:
+                          configMapKey:
+                            default: ca-bundle.crt
+                            description: |-
+                              ConfigMapKey is the key within the ConfigMap that contains the CA bundle data (defaults to "ca-bundle.crt")
+                              Mutually exclusive with ConfigMapKeys
+                            maxLength: 253
+                            pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                            type: string
+                          configMapKeys:
+                            description: |-
+                              ConfigMapKeys specifies multiple keys within the ConfigMap containing CA bundle data
+                              All certificates from these keys will be concatenated into a single CA bundle file
+                              Mutually exclusive with ConfigMapKey
+                            items:
+                              type: string
+                            maxItems: 50
+                            type: array
+                          configMapName:
+                            description: ConfigMapName is the name of the ConfigMap
+                              containing CA bundle certificates
+                            type: string
+                          configMapNamespace:
+                            description: ConfigMapNamespace is the namespace of the
+                              ConfigMap (defaults to the same namespace as the CR)
+                            type: string
+                        required:
+                        - configMapName
+                        type: object
+                        x-kubernetes-validations:
+                        - message: Only one of configMapKey or configMapKeys can be
+                            specified
+                          rule: '!(has(self.configMapKey) && has(self.configMapKeys))'
+                    type: object
                   userConfig:
                     description: UserConfig defines the user configuration for the
                       llama-stack server
@@ -2179,6 +2220,8 @@ spec:
     selectableFields:
     - jsonPath: .spec.server.userConfig.configMapName
     - jsonPath: .spec.server.userConfig.configMapNamespace
+    - jsonPath: .spec.server.tlsConfig.caBundle.configMapName
+    - jsonPath: .spec.server.tlsConfig.caBundle.configMapNamespace
     served: true
     storage: true
     subresources:

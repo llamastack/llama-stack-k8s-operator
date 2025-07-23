@@ -82,6 +82,9 @@ type ServerSpec struct {
 	// UserConfig defines the user configuration for the llama-stack server
 	// +optional
 	UserConfig *UserConfigSpec `json:"userConfig,omitempty"`
+	// TLSConfig defines the TLS configuration for the llama-stack server
+	// +optional
+	TLSConfig *TLSConfig `json:"tlsConfig,omitempty"`
 }
 
 type UserConfigSpec struct {
@@ -90,6 +93,38 @@ type UserConfigSpec struct {
 	// ConfigMapNamespace is the namespace of the ConfigMap (defaults to the same namespace as the CR)
 	// +optional
 	ConfigMapNamespace string `json:"configMapNamespace,omitempty"`
+}
+
+// TLSConfig defines the TLS configuration for the llama-stack server
+type TLSConfig struct {
+	// CABundle defines the CA bundle configuration for custom certificates
+	// +optional
+	CABundle *CABundleConfig `json:"caBundle,omitempty"`
+}
+
+// CABundleConfig defines the CA bundle configuration for custom certificates
+// +kubebuilder:validation:XValidation:rule="!(has(self.configMapKey) && has(self.configMapKeys))",message="Only one of configMapKey or configMapKeys can be specified"
+type CABundleConfig struct {
+	// ConfigMapName is the name of the ConfigMap containing CA bundle certificates
+	ConfigMapName string `json:"configMapName"`
+	// ConfigMapNamespace is the namespace of the ConfigMap (defaults to the same namespace as the CR)
+	// +optional
+	ConfigMapNamespace string `json:"configMapNamespace,omitempty"`
+	// ConfigMapKey is the key within the ConfigMap that contains the CA bundle data (defaults to "ca-bundle.crt")
+	// Mutually exclusive with ConfigMapKeys
+	// +optional
+	// +kubebuilder:default:="ca-bundle.crt"
+	// +kubebuilder:validation:Pattern="^[a-zA-Z0-9]([a-zA-Z0-9\\-_.]*[a-zA-Z0-9])?$"
+	// +kubebuilder:validation:MaxLength=253
+	ConfigMapKey string `json:"configMapKey,omitempty"`
+	// ConfigMapKeys specifies multiple keys within the ConfigMap containing CA bundle data
+	// All certificates from these keys will be concatenated into a single CA bundle file
+	// Mutually exclusive with ConfigMapKey
+	// +optional
+	// +kubebuilder:validation:MaxItems=50
+	// +kubebuilder:validation:Items:Pattern="^[a-zA-Z0-9]([a-zA-Z0-9\\-_.]*[a-zA-Z0-9])?$"
+	// +kubebuilder:validation:Items:MaxLength=253
+	ConfigMapKeys []string `json:"configMapKeys,omitempty"`
 }
 
 // StorageSpec defines the persistent storage configuration
@@ -190,6 +225,8 @@ type LlamaStackDistributionStatus struct {
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 //+kubebuilder:selectablefield:JSONPath=".spec.server.userConfig.configMapName"
 //+kubebuilder:selectablefield:JSONPath=".spec.server.userConfig.configMapNamespace"
+//+kubebuilder:selectablefield:JSONPath=".spec.server.tlsConfig.caBundle.configMapName"
+//+kubebuilder:selectablefield:JSONPath=".spec.server.tlsConfig.caBundle.configMapNamespace"
 // LlamaStackDistribution is the Schema for the llamastackdistributions API
 
 type LlamaStackDistribution struct {
