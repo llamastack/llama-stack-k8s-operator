@@ -135,7 +135,7 @@ generate_security_context() {
         # For vLLM, use restricted-v2 SCC annotation (do not create new SCC resource)
         SECURITY_CONTEXT_YAML=""
         CONTAINER_SECURITY_CONTEXT_YAML="securityContext:
-            runAsNonRoot: true"
+            runAsNonRoot: false"
 
         # Add annotation for restricted-v2 SCC to deployment
         if kubectl api-resources --api-group=security.openshift.io | grep -iq 'SecurityContextConstraints'; then
