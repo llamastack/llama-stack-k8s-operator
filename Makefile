@@ -144,8 +144,13 @@ test: manifests generate fmt vet envtest ## Run tests. Use TEST_PKGS and TEST_FL
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $(TEST_PKGS) $(TEST_FLAGS)
 
 .PHONY: test-e2e
-test-e2e: ## Run e2e tests
+test-e2e: ## Run e2e tests on a cluster with at least one GPU-enabled node
 	./hack/deploy-quickstart.sh # Deploy Ollama for e2e tests
+	go test -v ./tests/e2e/ -run ^TestE2E -v ${E2E_TEST_FLAGS}
+
+.PHONY: test-e2e-cpu
+test-e2e-cpu: ## Run e2e tests on a cluster with only CPU nodes
+	./hack/deploy-quickstart.sh --provider vllm-cpu # Deploy vllm-cpu for e2e tests
 	go test -v ./tests/e2e/ -run ^TestE2E -v ${E2E_TEST_FLAGS}
 
 GOLANGCI_LINT_TIMEOUT ?= 5m0s

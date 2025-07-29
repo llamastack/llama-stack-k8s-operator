@@ -46,12 +46,12 @@ convert_env_to_yaml() {
 validate_provider() {
     local provider="${1}"
     case "${provider}" in
-        "ollama"|"vllm")
+        "ollama"|"vllm"|"vllm-cpu")
             return 0
             ;;
         *)
             echo "Error: Unsupported provider '${provider}'"
-            echo "Supported providers: ollama, vllm for now"
+            echo "Supported providers: ollama, vllm. vllm-cpu for now"
             return 1
             ;;
     esac
@@ -70,8 +70,12 @@ get_provider_config() {
             echo "HEALTH_PATH=/api/version"
             echo "DEFAULT_ENV_VARS=OLLAMA_KEEP_ALIVE=60m"
             ;;
-        "vllm")
-            echo "IMAGE=vllm/vllm-openai:latest"
+        "vllm" | "vllm-cpu")
+            if [[ "${provider}" == "vllm" ]]; then
+                echo "IMAGE=vllm/vllm-openai:latest"
+            else
+                echo "IMAGE=quay.io/llamastack/vllm-cpu:latest"
+            fi
             echo "INFERENCE_SERVER=vllm"
             echo "COMMAND=[\"/bin/sh\", \"-c\"]"
             echo "DEFAULT_MODEL=meta-llama/Llama-3.2-1B"
