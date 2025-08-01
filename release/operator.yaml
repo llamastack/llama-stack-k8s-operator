@@ -2476,10 +2476,10 @@ spec:
         - /manager
         env:
         - name: OPERATOR_VERSION
-          value: latest
+          value: 0.999.0
         - name: LLAMA_STACK_VERSION
-          value: latest
-        image: quay.io/llamastack/llama-stack-k8s-operator:latest
+          value: 0.2.11
+        image: quay.io/llamastack/llama-stack-k8s-operator:v0.999.0
         livenessProbe:
           httpGet:
             path: /healthz
