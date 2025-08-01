@@ -30,10 +30,14 @@ func ApplyDeployment(ctx context.Context, cli client.Client, scheme *runtime.Sch
 		return fmt.Errorf("failed to fetch deployment: %w", err)
 	}
 
-	// For updates, use server-side apply to preserve annotations and labels
-	// that might have been added by other operators (like OpenTelemetry)
+	// For updates, preserve the existing selector since it's immutable
+	// and use server-side apply for other fields
 	if !reflect.DeepEqual(found.Spec, deployment.Spec) {
 		logger.Info("Updating Deployment", "deployment", deployment.Name)
+
+		// Preserve the existing selector to avoid immutable field error during upgrades
+		deployment.Spec.Selector = found.Spec.Selector
+
 		// Use server-side apply to merge changes properly
 		// Ensure the deployment has proper TypeMeta for server-side apply
 		deployment.SetGroupVersionKind(appsv1.SchemeGroupVersion.WithKind("Deployment"))
