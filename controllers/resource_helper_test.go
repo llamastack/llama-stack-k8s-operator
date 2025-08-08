@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 func TestBuildContainerSpec(t *testing.T) {
@@ -49,9 +50,10 @@ func TestBuildContainerSpec(t *testing.T) {
 			},
 			image: "test-image:latest",
 			expectedResult: corev1.Container{
-				Name:  llamav1alpha1.DefaultContainerName,
-				Image: "test-image:latest",
-				Ports: []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
+				Name:           llamav1alpha1.DefaultContainerName,
+				Image:          "test-image:latest",
+				Ports:          []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
+				ReadinessProbe: newDefaultReadinessProbe(llamav1alpha1.DefaultServerPort),
 				VolumeMounts: []corev1.VolumeMount{{
 					Name:      "lls-storage",
 					MountPath: llamav1alpha1.DefaultMountPath,
@@ -87,9 +89,10 @@ func TestBuildContainerSpec(t *testing.T) {
 			},
 			image: "test-image:latest",
 			expectedResult: corev1.Container{
-				Name:  "custom-container",
-				Image: "test-image:latest",
-				Ports: []corev1.ContainerPort{{ContainerPort: 9000}},
+				Name:           "custom-container",
+				Image:          "test-image:latest",
+				Ports:          []corev1.ContainerPort{{ContainerPort: 9000}},
+				ReadinessProbe: newDefaultReadinessProbe(9000),
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("1"),
@@ -121,11 +124,12 @@ func TestBuildContainerSpec(t *testing.T) {
 			},
 			image: "test-image:latest",
 			expectedResult: corev1.Container{
-				Name:    llamav1alpha1.DefaultContainerName,
-				Image:   "test-image:latest",
-				Command: []string{"/custom/entrypoint.sh"},
-				Args:    []string{"--config", "/etc/config.yaml", "--debug"},
-				Ports:   []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
+				Name:           llamav1alpha1.DefaultContainerName,
+				Image:          "test-image:latest",
+				Command:        []string{"/custom/entrypoint.sh"},
+				Args:           []string{"--config", "/etc/config.yaml", "--debug"},
+				Ports:          []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
+				ReadinessProbe: newDefaultReadinessProbe(llamav1alpha1.DefaultServerPort),
 				VolumeMounts: []corev1.VolumeMount{{
 					Name:      "lls-storage",
 					MountPath: llamav1alpha1.DefaultMountPath,
@@ -156,6 +160,7 @@ func TestBuildContainerSpec(t *testing.T) {
 				Image:           "test-image:latest",
 				ImagePullPolicy: corev1.PullAlways,
 				Ports:           []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
+				ReadinessProbe:  newDefaultReadinessProbe(llamav1alpha1.DefaultServerPort),
 				Command:         []string{"python", "-m", "llama_stack.distribution.server.server"},
 				Args:            []string{"--config", "/etc/llama-stack/run.yaml"},
 				Env: []corev1.EnvVar{
@@ -187,6 +192,7 @@ func TestBuildContainerSpec(t *testing.T) {
 			assert.Equal(t, tc.expectedResult.VolumeMounts, result.VolumeMounts)
 			assert.Equal(t, tc.expectedResult.Command, result.Command)
 			assert.Equal(t, tc.expectedResult.Args, result.Args)
+			assert.Equal(t, tc.expectedResult.ReadinessProbe, result.ReadinessProbe)
 		})
 	}
 }
@@ -639,5 +645,21 @@ func TestValidateConfigMapKeys(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func newDefaultReadinessProbe(port int32) *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path: "/v1/health",
+				Port: intstr.FromInt(int(port)),
+			},
+		},
+		InitialDelaySeconds: readinessProbeInitialDelaySeconds,
+		PeriodSeconds:       readinessProbePeriodSeconds,
+		TimeoutSeconds:      readinessProbeTimeoutSeconds,
+		FailureThreshold:    readinessProbeFailureThreshold,
+		SuccessThreshold:    readinessProbeSuccessThreshold,
 	}
 }

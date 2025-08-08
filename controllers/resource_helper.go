@@ -25,6 +25,7 @@ import (
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -34,6 +35,15 @@ const (
 	// maxConfigMapKeyLength defines the maximum allowed length for ConfigMap keys
 	// based on Kubernetes DNS subdomain name limits.
 	maxConfigMapKeyLength = 253
+)
+
+// Readiness probe configuration.
+const (
+	readinessProbeInitialDelaySeconds = 15 // Time to wait before the first probe
+	readinessProbePeriodSeconds       = 10 // How often to probe
+	readinessProbeTimeoutSeconds      = 5  // When the probe times out
+	readinessProbeFailureThreshold    = 3  // Pod is marked Unhealthy after 3 consecutive failures
+	readinessProbeSuccessThreshold    = 1  // Pod is marked Ready after 1 successful probe
 )
 
 // validConfigMapKeyRegex defines allowed characters for ConfigMap keys.
@@ -70,6 +80,19 @@ func buildContainerSpec(ctx context.Context, r *LlamaStackDistributionReconciler
 		Resources:       instance.Spec.Server.ContainerSpec.Resources,
 		ImagePullPolicy: corev1.PullAlways,
 		Ports:           []corev1.ContainerPort{{ContainerPort: getContainerPort(instance)}},
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/v1/health",
+					Port: intstr.FromInt(int(getContainerPort(instance))),
+				},
+			},
+			InitialDelaySeconds: readinessProbeInitialDelaySeconds,
+			PeriodSeconds:       readinessProbePeriodSeconds,
+			TimeoutSeconds:      readinessProbeTimeoutSeconds,
+			FailureThreshold:    readinessProbeFailureThreshold,
+			SuccessThreshold:    readinessProbeSuccessThreshold,
+		},
 	}
 
 	// Configure environment variables and mounts
