@@ -293,3 +293,60 @@ func TestTransform(t *testing.T) {
 		})
 	}
 }
+
+// TestJsonPointerNilTraversalPanic reproduces the panic when jsonpointer encounters nil intermediate values.
+func TestJsonPointerNilTraversalPanic(t *testing.T) {
+	t.Run("panic when traversing through nil intermediate value", func(t *testing.T) {
+		// create a data structure with nil intermediate value that causes jsonpointer to panic
+		testData := map[string]any{
+			"apiVersion": "v1",
+			"kind":       "TestResource",
+			"metadata": map[string]any{
+				"name": "test-resource",
+			},
+			"spec": map[string]any{
+				"container": map[string]any{
+					"properties": nil, // this nil causes the panic when traversed
+				},
+			},
+		}
+
+		rf := resource.NewFactory(nil)
+		res, err := rf.FromMap(testData)
+		require.NoError(t, err)
+
+		resMap := resmap.New()
+		require.NoError(t, resMap.Append(res))
+
+		// field mapping that attempts to traverse through the nil intermediate value
+		transformer := CreateFieldMutator(FieldMutatorConfig{
+			Mappings: []FieldMapping{
+				{
+					SourceValue:       nil,
+					DefaultValue:      "test-value",
+					TargetField:       "/spec/container/properties/name", // this path goes through nil
+					TargetKind:        "TestResource",
+					CreateIfNotExists: true,
+				},
+			},
+		})
+
+		err = transformer.Transform(resMap)
+		require.NoError(t, err, "Transform should succeed after the fix")
+
+		// nil properties should be replaced with a proper map
+		updatedRes := resMap.GetByIndex(0)
+		resMap2, err := updatedRes.Map()
+		require.NoError(t, err)
+
+		spec, ok := resMap2["spec"].(map[string]any)
+		require.True(t, ok, "spec should be a map")
+		container, ok := spec["container"].(map[string]any)
+		require.True(t, ok, "container should be a map")
+		properties, ok := container["properties"].(map[string]any)
+		require.True(t, ok, "properties should be a map")
+
+		require.Equal(t, "test-value", properties["name"], "name should be set correctly")
+		require.NotNil(t, properties, "properties should no longer be nil")
+	})
+}

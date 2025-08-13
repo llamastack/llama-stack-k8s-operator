@@ -2,18 +2,27 @@ package controllers_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	controllers "github.com/llamastack/llama-stack-k8s-operator/controllers"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
@@ -311,4 +320,190 @@ func TestReconcile(t *testing.T) {
 	AssertResourceOwnedByInstance(t, deployment, instance)
 	AssertResourceOwnedByInstance(t, networkpolicy, instance)
 	AssertResourceOwnedByInstance(t, serviceAccount, instance)
+}
+
+// Define a custom roundtripper type for testing.
+type mockRoundTripper struct {
+	RoundTripFunc func(req *http.Request) (*http.Response, error)
+}
+
+// RoundTrip satisfies the http.RoundTripper interface and calls the mock function.
+func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return m.RoundTripFunc(req)
+}
+
+// newMockAPIResponse is a test helper that takes any data structure,
+// marshals it to JSON, and returns a complete http response.
+func newMockAPIResponse(t *testing.T, data any) *http.Response {
+	t.Helper()
+	jsonBytes, err := json.Marshal(data)
+	require.NoError(t, err)
+
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(string(jsonBytes))),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+}
+
+func TestLlamaStackProviderAndVersionInfo(t *testing.T) {
+	// arrange
+	enableNetworkPolicy := false
+	expectedLlamaStackVersionInfo := "v-test"
+	expectedProviderID := "mock-ollama"
+
+	// define the data structure for the mock providers response
+	providerData := struct {
+		Data []llamav1alpha1.ProviderInfo `json:"data"`
+	}{
+		Data: []llamav1alpha1.ProviderInfo{
+			{
+				ProviderID:   expectedProviderID,
+				ProviderType: "remote::ollama",
+				API:          "inference",
+				Health:       llamav1alpha1.ProviderHealthStatus{Status: "OK", Message: ""},
+				Config:       apiextensionsv1.JSON{Raw: []byte(`{"url": "http://mock.server"}`)},
+			},
+		},
+	}
+
+	// define the data structure for the mock version response
+	versionData := struct {
+		Version string `json:"version"`
+	}{
+		Version: expectedLlamaStackVersionInfo,
+	}
+
+	// create the mock http client that uses our custom roundtripper
+	mockClient := &http.Client{
+		Transport: &mockRoundTripper{
+			// simulate the RoundTrip logic to handle different API paths
+			RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+				if req.URL.Path == "/v1/providers" {
+					return newMockAPIResponse(t, providerData), nil
+				}
+				if req.URL.Path == "/v1/version" {
+					return newMockAPIResponse(t, versionData), nil
+				}
+				return &http.Response{
+					StatusCode: http.StatusNotFound,
+					Body:       io.NopCloser(strings.NewReader("")),
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+				}, nil
+			},
+		},
+	}
+
+	namespace := createTestNamespace(t, "test-status")
+	instance := NewDistributionBuilder().
+		WithName("test-status-instance").
+		WithNamespace(namespace.Name).
+		Build()
+	require.NoError(t, k8sClient.Create(context.Background(), instance))
+
+	testClusterInfo := &cluster.ClusterInfo{
+		DistributionImages: map[string]string{
+			"starter": "docker.io/llamastack/distribution-starter:latest",
+		},
+	}
+
+	reconciler := controllers.NewTestReconciler(
+		k8sClient,
+		scheme.Scheme,
+		testClusterInfo,
+		mockClient,
+		enableNetworkPolicy,
+	)
+
+	// act (part 1)
+	// run the first reconciliation to create the initial resources like the deployment
+	_, err := reconciler.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
+	})
+	require.NoError(t, err)
+
+	// manually update the deployment's status because envtest doesn't run a real deployment controller
+	// this forces the reconciler to proceed to the health check logic on its next run
+	deployment := &appsv1.Deployment{}
+	deploymentKey := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
+	waitForResourceWithKey(t, k8sClient, deploymentKey, deployment)
+
+	deployment.Status.ReadyReplicas = 1
+	deployment.Status.Replicas = 1
+	require.NoError(t, k8sClient.Status().Update(context.Background(), deployment))
+
+	// act (part 2)
+	// run the second reconciliation to trigger the status update logic
+	_, err = reconciler.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
+	})
+	require.NoError(t, err)
+
+	// assert
+	updatedInstance := &llamav1alpha1.LlamaStackDistribution{}
+	waitForResource(t, k8sClient, namespace.Name, instance.Name, updatedInstance)
+
+	// validate provider info
+	require.Len(t, updatedInstance.Status.DistributionConfig.Providers, 1, "should find exactly one provider from the mock server")
+	actualProvider := updatedInstance.Status.DistributionConfig.Providers[0]
+	require.Equal(t, expectedProviderID, actualProvider.ProviderID, "provider ID should match the mock response")
+	require.Equal(t, "OK", actualProvider.Health.Status, "provider health should match the mock response")
+	require.NotEmpty(t, actualProvider.Config, "provider config should be populated")
+	// validate llama stack version
+	require.Equal(t, expectedLlamaStackVersionInfo,
+		updatedInstance.Status.Version.LlamaStackServerVersion,
+		"server version should match the mock response")
+}
+
+func TestNetworkPolicyConfiguration(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, instance *llamav1alpha1.LlamaStackDistribution)
+	}{
+		{
+			name: "enabled then disabled deletes NetworkPolicy",
+			setup: func(t *testing.T, instance *llamav1alpha1.LlamaStackDistribution) {
+				t.Helper()
+				// ensure NetworkPolicy exists by reconciling with feature enabled.
+				ReconcileDistribution(t, instance, true)
+				waitForResource(t, k8sClient, instance.Namespace, instance.Name+"-network-policy", &networkingv1.NetworkPolicy{})
+			},
+		},
+		{
+			name: "disabled from start leaves NetworkPolicy absent",
+			setup: func(t *testing.T, instance *llamav1alpha1.LlamaStackDistribution) {
+				// no setup needed - NetworkPolicy doesn't exist
+				t.Helper()
+			},
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// --- arrange ---
+			operatorNamespaceName := "test-operator-namespace"
+			t.Setenv("OPERATOR_NAMESPACE", operatorNamespaceName)
+
+			namespace := createTestNamespace(t, "test-networkpolicy")
+			instance := NewDistributionBuilder().
+				WithName(fmt.Sprintf("np-config-%d", i)).
+				WithNamespace(namespace.Name).
+				WithDistribution("starter").
+				Build()
+			require.NoError(t, k8sClient.Create(context.Background(), instance))
+			t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), instance) })
+
+			// preconditions for this scenario
+			tt.setup(t, instance)
+
+			// --- act ---
+			ReconcileDistribution(t, instance, false)
+
+			// --- assert ---
+			npKey := types.NamespacedName{Name: instance.Name + "-network-policy", Namespace: instance.Namespace}
+			AssertNetworkPolicyAbsent(t, k8sClient, npKey)
+		})
+	}
 }

@@ -87,6 +87,7 @@ type LlamaStackDistributionReconciler struct {
 	EnableNetworkPolicy bool
 	// Cluster info
 	ClusterInfo *cluster.ClusterInfo
+	httpClient  *http.Client
 }
 
 // hasUserConfigMap checks if the instance has a valid UserConfig with ConfigMapName.
@@ -861,16 +862,12 @@ func (r *LlamaStackDistributionReconciler) checkHealth(ctx context.Context, inst
 func (r *LlamaStackDistributionReconciler) getProviderInfo(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) ([]llamav1alpha1.ProviderInfo, error) {
 	u := r.getServerURL(instance, "/v1/providers")
 
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create providers request: %w", err)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := r.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make providers request: %w", err)
 	}
@@ -899,16 +896,12 @@ func (r *LlamaStackDistributionReconciler) getProviderInfo(ctx context.Context, 
 func (r *LlamaStackDistributionReconciler) getVersionInfo(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) (string, error) {
 	u := r.getServerURL(instance, "/v1/version")
 
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create version request: %w", err)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := r.httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to make version request: %w", err)
 	}
@@ -1483,5 +1476,18 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 		Scheme:              scheme,
 		EnableNetworkPolicy: enableNetworkPolicy,
 		ClusterInfo:         clusterInfo,
+		httpClient:          &http.Client{Timeout: 5 * time.Second},
 	}, nil
+}
+
+// NewTestReconciler creates a reconciler for testing, allowing injection of a custom http client and feature flags.
+func NewTestReconciler(client client.Client, scheme *runtime.Scheme, clusterInfo *cluster.ClusterInfo,
+	httpClient *http.Client, enableNetworkPolicy bool) *LlamaStackDistributionReconciler {
+	return &LlamaStackDistributionReconciler{
+		Client:              client,
+		Scheme:              scheme,
+		ClusterInfo:         clusterInfo,
+		httpClient:          httpClient,
+		EnableNetworkPolicy: enableNetworkPolicy,
+	}
 }

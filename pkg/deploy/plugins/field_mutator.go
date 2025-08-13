@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -126,53 +127,60 @@ func setTargetField(res *resource.Resource, value any, mapping FieldMapping) err
 }
 
 func setWithPathCreation(data any, ptr jsonpointer.Pointer, value any) (any, error) {
-	// try setting value if the path already exists
-	if updatedData, err := ptr.Set(data, value); err == nil {
-		return updatedData, nil
+	// try direct set first
+	if result, err := ptr.Set(data, value); err == nil {
+		return result, nil
 	}
 
-	// otherwise, we need to create the path first
+	// create missing path structure
 	tokens := ptr.DecodedTokens()
 	if len(tokens) == 0 {
 		return value, nil
 	}
-	result := data
 
-	// JSON Pointer Set() fails if intermediate paths don't exist, so we must
-	// build the path incrementally from root to target, creating missing containers
-	for i := 1; i <= len(tokens)-1; i++ {
-		partialPath := "/" + strings.Join(tokens[:i], "/")
-		partialPtr, err := jsonpointer.New(partialPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create partial pointer: %w", err)
+	result := deepCopyData(data)
+
+	// create each missing parent container
+	for i := 0; i < len(tokens)-1; i++ {
+		parentPath := "/" + strings.Join(tokens[:i+1], "/")
+		parentPtr, _ := jsonpointer.New(parentPath)
+
+		// skip if parent already exists and is not nil
+		if parent, _, err := parentPtr.Get(result); err == nil && parent != nil {
+			continue
 		}
-		// Get() is used as existence test - error means path doesn't exist and needs creation
-		_, _, err = partialPtr.Get(result)
-		if err != nil {
-			nextToken := tokens[i]
-			var newContainer any
-			// create array if next token is numeric (e.g., "/ports/0")
-			if isNumericString(nextToken) {
-				newContainer = make([]any, 0)
-			} else {
-				// create map otherwise (e.g., "/spec/strategy")
-				newContainer = make(map[string]any)
-			}
 
-			// create the missing path segment
-			result, err = partialPtr.Set(result, newContainer)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create intermediate path %q: %w", partialPath, err)
-			}
+		// create container based on next token type
+		var container any
+		if isNumericString(tokens[i+1]) {
+			container = make([]any, 0)
+		} else {
+			container = make(map[string]any)
+		}
+
+		// set the container (jsonpointer handles the rest)
+		var err error
+		if result, err = parentPtr.Set(result, container); err != nil {
+			return nil, fmt.Errorf("failed to create path at %q: %w", parentPath, err)
 		}
 	}
 
-	result, err := ptr.Set(result, value)
+	// final set should now succeed
+	return ptr.Set(result, value)
+}
+
+// deepCopyData creates a deep copy of the data structure using JSON marshal/unmarshal.
+func deepCopyData(data any) any {
+	jsonBytes, err := json.Marshal(data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to set final value: %w", err)
+		return data // fallback to original if copy fails
 	}
 
-	return result, nil
+	var result any
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		return data // fallback to original if copy fails
+	}
+	return result
 }
 
 func updateResource(res *resource.Resource, updatedData any) error {

@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -379,6 +380,16 @@ func AssertNetworkPolicyIsIngressOnly(t *testing.T, networkPolicy *networkingv1.
 	t.Helper()
 	expectedPolicyTypes := []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
 	require.Equal(t, expectedPolicyTypes, networkPolicy.Spec.PolicyTypes, "NetworkPolicy should be ingress-only")
+}
+
+// AssertNetworkPolicyAbsent verifies that a NetworkPolicy with the given key does not exist.
+func AssertNetworkPolicyAbsent(t *testing.T, c client.Client, key types.NamespacedName) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		var np networkingv1.NetworkPolicy
+		err := c.Get(context.Background(), key, &np)
+		return apierrors.IsNotFound(err)
+	}, testTimeout, testInterval, "NetworkPolicy %s/%s should not exist", key.Namespace, key.Name)
 }
 
 func AssertServiceAccountDeploymentAlign(t *testing.T, deployment *appsv1.Deployment, serviceAccount *corev1.ServiceAccount) {
