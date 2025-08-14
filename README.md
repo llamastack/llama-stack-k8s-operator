@@ -42,7 +42,7 @@ kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-op
 
 ### Deploying the Llama Stack Server
 
-1. Deploy the inference provider server (ollama, vllm)
+1. Deploy the inference provider server (ollama, vllm, or vllm-cpu)
 
 **Ollama Examples:**
 
@@ -62,7 +62,7 @@ This would require a secret "hf-token-secret" in namespace "vllm-dist" for Huggi
 
 Deploy vLLM with default model (meta-llama/Llama-3.2-1B):
 ```bash
-./hack/deploy-quickstart.sh --provider vllm
+./hack/deploy-quickstart.sh --provider vllm-cpu
 ```
 
 Deploy vLLM with GPU support:
@@ -159,20 +159,50 @@ kubectl apply -f config/samples/example-with-configmap.yaml
 
 ## Running E2E Tests
 
-The operator includes end-to-end (E2E) tests to verify the complete functionality of the operator. To run the E2E tests:
+The operator includes end-to-end (E2E) tests to verify the complete functionality of the operator.
 
-1. Ensure you have a running Kubernetes cluster
-2. Run the E2E tests using one of the following commands:
-   - If you want to deploy the operator and run tests:
-     ```commandline
-     make deploy test-e2e
-     ```
-   - If the operator is already deployed:
-     ```commandline
-     make test-e2e
-     ```
+First, ensure you have a running Kubernetes cluster, then deploy the operator:
 
-The make target will handle prerequisites including deploying ollama server.
+```commandline
+make deploy
+```
+
+The `deploy` make target will handle prerequisites including deploying ollama server.
+
+### GPU E2E Tests
+
+To run the E2E tests on a cluster with at least one **GPU-enabled** node:
+
+1. Ensure your cluster has at least one healthy GPU-enabled node
+
+2. Create a secret for your HuggingFace token in the `vllm-dist` namespace:
+
+    ```commandline
+    kubectl create -n vllm-dist secret generic hf-token-secret \
+    --from-literal=token=hf_XXXXXXX
+    ```
+
+3. Run the E2E tests:
+    ```commandline
+    make test-e2e
+    ```
+
+### CPU-only E2E Tests
+
+To run the E2E tests on a cluster with only CPU nodes:
+
+1. Create a secret for your HuggingFace token in the `vllm-cpu-dist` namespace:
+
+    ```commandline
+    kubectl create -n vllm-dist-cpu secret generic hf-token-secret \
+    --from-literal=token=hf_XXXXXXX
+    ```
+
+2. Run the E2E tests:
+    ```commandline
+    make test-e2e-cpu
+    ```
+
 
 ## API Overview
 

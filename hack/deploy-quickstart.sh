@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo "Options:"
             echo "  --provider NAME     Provider to use (if not set default: ollama)"
-            echo "                      Supported providers: ollama, vllm"
+            echo "                      Supported providers: ollama, vllm, vllm-cpu"
             echo "  --model NAME        Model to run (if not set, default: llama3.2:1b)"
             echo "                      For vllm see all https://docs.vllm.ai/en/latest/models/supported_models.html"
             echo "  --runtime-args ARGS         Additional arguments for the inference server, can include model port host etc"
