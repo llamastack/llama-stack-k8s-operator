@@ -12,7 +12,6 @@ env:
 
 jobs:
   build-latest-vllm-cpu-image:
-    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
