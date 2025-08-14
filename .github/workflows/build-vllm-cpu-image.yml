@@ -47,7 +47,7 @@ jobs:
         run: |
            cd vllm
            podman build --security-opt label=disable -f docker/Dockerfile.cpu --build-arg VLLM_CPU_AVX512BF16=false  --build-arg VLLM_CPU_AVX512VNNI=false --tag ${VLLM_CPU_IMAGE}:latest --target vllm-openai .
-           podman tag ${VLLM_CPU_IMAGE}:${{ steps.get_latest_vllm_release.outputs.tag }}
+           podman tag ${VLLM_CPU_IMAGE}:latest ${VLLM_CPU_IMAGE}:${{ steps.get_latest_vllm_release.outputs.tag }}
            make image-push -e IMG=${VLLM_CPU_IMAGE}:latest
            make image-push -e IMG=${VLLM_CPU_IMAGE}:${{ steps.get_latest_vllm_release.outputs.tag }}
         shell: bash
