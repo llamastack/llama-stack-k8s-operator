@@ -1,7 +1,7 @@
 # Build the manager binary
 ARG GOLANG_VERSION=1.23
 
-FROM registry.access.redhat.com/ubi8/go-toolset:${GOLANG_VERSION} as builder
+FROM registry.access.redhat.com/ubi9/go-toolset:${GOLANG_VERSION} as builder
 ARG TARGETOS=linux
 ARG TARGETARCH
 ARG CGO_ENABLED=0
