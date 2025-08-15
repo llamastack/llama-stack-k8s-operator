@@ -6,6 +6,7 @@ resources:
 - serviceaccount.yaml
 - scc-binding.yaml
 - service.yaml
+- networkpolicy.yaml
 
 labels:
 - includeSelectors: false

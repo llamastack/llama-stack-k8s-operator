@@ -62,6 +62,7 @@ func setupApplyResourcesTest(t *testing.T, ownerName string) (context.Context, s
 
 // TestRenderManifest contains all unit tests for the RenderManifest function.
 func TestRenderManifest(t *testing.T) {
+	t.Setenv("OPERATOR_NAMESPACE", "default")
 	t.Run("should render correctly with a standard layout", func(t *testing.T) {
 		// given an-memory filesystem with a standard kustomize layout
 		fsys := filesys.MakeFsInMemory()

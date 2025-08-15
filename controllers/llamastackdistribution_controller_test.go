@@ -272,8 +272,9 @@ func TestReconcile(t *testing.T) {
 		TargetPort: intstr.FromInt(int(instancePort)),
 		Protocol:   corev1.ProtocolTCP,
 	}
-	operatorNamespaceName := "test-operator-namespace"
+	enableNetworkPolicy := true
 
+	operatorNamespaceName := "test-operator-namespace"
 	// set operator namespace to avoid service account file dependency
 	t.Setenv("OPERATOR_NAMESPACE", operatorNamespaceName)
 
@@ -287,7 +288,7 @@ func TestReconcile(t *testing.T) {
 	require.NoError(t, k8sClient.Create(context.Background(), instance))
 
 	// --- act ---
-	ReconcileDistribution(t, instance, true)
+	ReconcileDistribution(t, instance, enableNetworkPolicy)
 
 	service := &corev1.Service{}
 	waitForResource(t, k8sClient, instance.Namespace, instance.Name+"-service", service)
