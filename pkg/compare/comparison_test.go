@@ -73,7 +73,7 @@ func TestHasUnexpectedServiceChanges(t *testing.T) {
 		{
 			name: "only cluster-managed metadata changed",
 			modifier: func(s *corev1.Service) {
-				s.ObjectMeta.ResourceVersion = "2"
+				s.ResourceVersion = "2"
 			},
 			expectChange: false,
 		},

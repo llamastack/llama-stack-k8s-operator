@@ -151,11 +151,11 @@ test-e2e: ## Run e2e tests
 GOLANGCI_LINT_TIMEOUT ?= 5m0s
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint against code.
-	$(GOLANGCI_LINT) run --timeout=$(GOLANGCI_LINT_TIMEOUT) --sort-results
+	$(GOLANGCI_LINT) run --timeout=$(GOLANGCI_LINT_TIMEOUT)
 
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint fix against code.
-	$(GOLANGCI_LINT) run --fix --sort-results
+	$(GOLANGCI_LINT) run --fix
 
 ##@ Build
 

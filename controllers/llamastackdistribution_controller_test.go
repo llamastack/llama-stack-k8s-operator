@@ -1,7 +1,6 @@
 package controllers_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -111,9 +110,9 @@ func TestStorageConfiguration(t *testing.T) {
 
 			// arrange
 			instance := tt.buildInstance(namespace.Name)
-			require.NoError(t, k8sClient.Create(context.Background(), instance))
+			require.NoError(t, k8sClient.Create(t.Context(), instance))
 			t.Cleanup(func() {
-				if err := k8sClient.Delete(context.Background(), instance); err != nil && !apierrors.IsNotFound(err) {
+				if err := k8sClient.Delete(t.Context(), instance); err != nil && !apierrors.IsNotFound(err) {
 					t.Logf("Failed to delete LlamaStackDistribution instance %s/%s: %v", instance.Namespace, instance.Name, err)
 				}
 			})
@@ -179,7 +178,7 @@ server:
   port: 8321`,
 		},
 	}
-	require.NoError(t, k8sClient.Create(context.Background(), configMap))
+	require.NoError(t, k8sClient.Create(t.Context(), configMap))
 
 	// Create a LlamaStackDistribution that references the ConfigMap
 	instance := NewDistributionBuilder().
@@ -187,7 +186,7 @@ server:
 		WithNamespace(namespace.Name).
 		WithUserConfig(configMap.Name).
 		Build()
-	require.NoError(t, k8sClient.Create(context.Background(), instance))
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
 
 	// Reconcile to create initial deployment
 	ReconcileDistribution(t, instance, false)
@@ -204,7 +203,7 @@ server:
 	require.NotEmpty(t, initialHash, "ConfigMap hash should not be empty")
 
 	// Update the ConfigMap data
-	require.NoError(t, k8sClient.Get(context.Background(),
+	require.NoError(t, k8sClient.Get(t.Context(),
 		types.NamespacedName{Name: configMap.Name, Namespace: configMap.Namespace}, configMap))
 
 	configMap.Data["run.yaml"] = `version: '2'
@@ -223,7 +222,7 @@ models:
     model_type: llm
 server:
   port: 8321`
-	require.NoError(t, k8sClient.Update(context.Background(), configMap))
+	require.NoError(t, k8sClient.Update(t.Context(), configMap))
 
 	// Wait a moment for the watch to trigger
 	time.Sleep(2 * time.Second)
@@ -250,7 +249,7 @@ server:
 			"some-key": "some-value",
 		},
 	}
-	require.NoError(t, k8sClient.Create(context.Background(), unrelatedConfigMap))
+	require.NoError(t, k8sClient.Create(t.Context(), unrelatedConfigMap))
 
 	// Note: In test environment, field indexer might not be set up properly,
 	// so we skip the isConfigMapReferenced checks which rely on field indexing
@@ -284,7 +283,7 @@ func TestReconcile(t *testing.T) {
 		WithDistribution("starter").
 		WithPort(instancePort).
 		Build()
-	require.NoError(t, k8sClient.Create(context.Background(), instance))
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
 
 	// --- act ---
 	ReconcileDistribution(t, instance, true)
@@ -399,7 +398,7 @@ func TestLlamaStackProviderAndVersionInfo(t *testing.T) {
 		WithName("test-status-instance").
 		WithNamespace(namespace.Name).
 		Build()
-	require.NoError(t, k8sClient.Create(context.Background(), instance))
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
 
 	testClusterInfo := &cluster.ClusterInfo{
 		DistributionImages: map[string]string{
@@ -417,7 +416,7 @@ func TestLlamaStackProviderAndVersionInfo(t *testing.T) {
 
 	// act (part 1)
 	// run the first reconciliation to create the initial resources like the deployment
-	_, err := reconciler.Reconcile(context.Background(), ctrl.Request{
+	_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
 	})
 	require.NoError(t, err)
@@ -430,11 +429,11 @@ func TestLlamaStackProviderAndVersionInfo(t *testing.T) {
 
 	deployment.Status.ReadyReplicas = 1
 	deployment.Status.Replicas = 1
-	require.NoError(t, k8sClient.Status().Update(context.Background(), deployment))
+	require.NoError(t, k8sClient.Status().Update(t.Context(), deployment))
 
 	// act (part 2)
 	// run the second reconciliation to trigger the status update logic
-	_, err = reconciler.Reconcile(context.Background(), ctrl.Request{
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
 	})
 	require.NoError(t, err)
@@ -492,8 +491,8 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 				WithNamespace(namespace.Name).
 				WithDistribution("starter").
 				Build()
-			require.NoError(t, k8sClient.Create(context.Background(), instance))
-			t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), instance) })
+			require.NoError(t, k8sClient.Create(t.Context(), instance))
+			t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
 
 			// preconditions for this scenario
 			tt.setup(t, instance)
