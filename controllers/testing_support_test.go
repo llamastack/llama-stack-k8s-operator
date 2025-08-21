@@ -1,7 +1,6 @@
 package controllers_test
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"testing"
@@ -185,7 +184,7 @@ func AssertPVCExists(t *testing.T, client client.Client, namespace, name string)
 	key := types.NamespacedName{Name: name, Namespace: namespace}
 
 	require.Eventually(t, func() bool {
-		return client.Get(context.Background(), key, pvc) == nil
+		return client.Get(t.Context(), key, pvc) == nil
 	}, testTimeout, testInterval, "PVC %s should exist in namespace %s", name, namespace)
 
 	return pvc
@@ -387,7 +386,7 @@ func AssertNetworkPolicyAbsent(t *testing.T, c client.Client, key types.Namespac
 	t.Helper()
 	require.Eventually(t, func() bool {
 		var np networkingv1.NetworkPolicy
-		err := c.Get(context.Background(), key, &np)
+		err := c.Get(t.Context(), key, &np)
 		return apierrors.IsNotFound(err)
 	}, testTimeout, testInterval, "NetworkPolicy %s/%s should not exist", key.Namespace, key.Name)
 }
@@ -403,7 +402,7 @@ func ReconcileDistribution(t *testing.T, instance *llamav1alpha1.LlamaStackDistr
 	// Create reconciler and run reconciliation
 	reconciler := createTestReconciler()
 	reconciler.EnableNetworkPolicy = enableNetworkPolicy
-	_, err := reconciler.Reconcile(context.Background(), ctrl.Request{
+	_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
 		NamespacedName: types.NamespacedName{
 			Name:      instance.Name,
 			Namespace: instance.Namespace,
@@ -470,7 +469,7 @@ func waitForResourceWithKeyAndCondition(t *testing.T, client client.Client, key 
 	t.Helper()
 	// envtest interacts with a real API server, which is eventually consistent.
 	require.Eventually(t, func() bool {
-		err := client.Get(context.Background(), key, resource)
+		err := client.Get(t.Context(), key, resource)
 		if err != nil {
 			return false
 		}
@@ -495,12 +494,12 @@ func createTestNamespace(t *testing.T, namePrefix string) *corev1.Namespace {
 			Name: nsName,
 		},
 	}
-	require.NoError(t, k8sClient.Create(context.Background(), namespace))
+	require.NoError(t, k8sClient.Create(t.Context(), namespace))
 
 	// Attempt to delete the namespace after the test. While envtest might not fully reclaim it,
 	// this is good practice and helps keep the test environment cleaner.
 	t.Cleanup(func() {
-		if err := k8sClient.Delete(context.Background(), namespace); err != nil {
+		if err := k8sClient.Delete(t.Context(), namespace); err != nil {
 			t.Logf("Failed to delete test namespace %s: %v", namespace.Name, err)
 		}
 	})

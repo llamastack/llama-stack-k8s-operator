@@ -17,7 +17,6 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -183,7 +182,7 @@ func TestBuildContainerSpec(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := buildContainerSpec(context.Background(), nil, tc.instance, tc.image)
+			result := buildContainerSpec(t.Context(), nil, tc.instance, tc.image)
 			assert.Equal(t, tc.expectedResult.Name, result.Name)
 			assert.Equal(t, tc.expectedResult.Image, result.Image)
 			assert.Equal(t, tc.expectedResult.Ports, result.Ports)
@@ -275,7 +274,7 @@ func TestConfigurePodStorage(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := configurePodStorage(context.Background(), nil, tc.instance, tc.container)
+			result := configurePodStorage(t.Context(), nil, tc.instance, tc.container)
 
 			// Verify container was added.
 			assert.Len(t, result.Containers, 1)

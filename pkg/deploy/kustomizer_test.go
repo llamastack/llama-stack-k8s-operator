@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy/plugins"
@@ -28,14 +29,15 @@ const manifestBasePath = "manifests/base"
 func setupApplyResourcesTest(t *testing.T, ownerName string) (context.Context, string, *llamav1alpha1.LlamaStackDistribution) {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second) // to avlid client rate limit due to too many test in parallel
 	testNs := "test-apply-" + ownerName
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: testNs},
 	}
 	require.NoError(t, k8sClient.Create(ctx, ns))
 	t.Cleanup(func() {
-		require.NoError(t, k8sClient.Delete(ctx, ns))
+		cancel()
+		require.NoError(t, k8sClient.Delete(context.Background(), ns)) //nolint:usetesting
 	})
 
 	owner := &llamav1alpha1.LlamaStackDistribution{
@@ -50,7 +52,7 @@ func setupApplyResourcesTest(t *testing.T, ownerName string) (context.Context, s
 	}
 	ownerGVK := owner.GroupVersionKind()
 
-	require.NoError(t, k8sClient.Create(context.Background(), owner))
+	require.NoError(t, k8sClient.Create(ctx, owner))
 	require.NotEmpty(t, owner.UID)
 
 	createdOwner := &llamav1alpha1.LlamaStackDistribution{}
@@ -416,7 +418,7 @@ func TestApplyResources(t *testing.T) {
 		require.Empty(t, createdClusterRole.GetOwnerReferences(), "cluster-scoped resource should not have an owner reference from a namespaced owner")
 
 		// cleanup the clusterrole
-		require.NoError(t, k8sClient.Delete(context.Background(), createdClusterRole))
+		require.NoError(t, k8sClient.Delete(t.Context(), createdClusterRole))
 	})
 }
 

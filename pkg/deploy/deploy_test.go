@@ -1,7 +1,6 @@
 package deploy
 
 import (
-	"context"
 	"testing"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
@@ -14,7 +13,7 @@ import (
 )
 
 func TestApplyDeploymentPreservesSelector(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	logger := logf.Log.WithName("test-apply-deployment")
 
 	instance := &llamav1alpha1.LlamaStackDistribution{
