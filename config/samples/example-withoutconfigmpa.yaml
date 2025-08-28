@@ -12,11 +12,9 @@ spec:
       port: 8321
       env:
       - name: OLLAMA_INFERENCE_MODEL
-        value: "llama3.2:3b"
+        value: "llama3.2:1b"
       - name: OLLAMA_URL
         value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
-      - name: ENABLE_OLLAMA
-        value: ollama
     storage:
       size: "10Gi"  # Optional - defaults to 10Gi
       mountPath: "/home/lls/.lls"  # Optional - defaults to /.llama
