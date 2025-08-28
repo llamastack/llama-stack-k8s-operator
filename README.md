@@ -80,9 +80,8 @@ spec:
   replicas: 1
   server:
     distribution:
-      name: ollama
+      name: starter
     containerSpec:
-      port: 8321
       env:
       - name: INFERENCE_MODEL
         value: "llama3.2:1b"
