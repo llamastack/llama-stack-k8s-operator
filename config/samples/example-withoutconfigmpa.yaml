@@ -9,7 +9,6 @@ spec:
     distribution:
       name: starter
     containerSpec:
-      port: 8321
       env:
       - name: OLLAMA_INFERENCE_MODEL
         value: "llama3.2:1b"
