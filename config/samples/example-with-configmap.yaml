@@ -11,20 +11,15 @@ data:
     - inference
     providers:
       inference:
-      - provider_id: ${env.ENABLE_OLLAMA:=__disabled__}
+      - provider_id: ollama
         provider_type: "remote::ollama"
         config:
           url: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
     models:
-      - model_id: "ollama/llama3.2:3b"
+      - model_id: "llama3.2:1b"
         provider_id: ollama
         model_type: llm
-        provider_model_id: llama3.2:3b
-      - embedding_dimension: 384
-        model_id: ${env.ENABLE_OLLAMA:=__disabled__}/${env.OLLAMA_EMBEDDING_MODEL:=__disabled__}
-        provider_id: ${env.ENABLE_OLLAMA:=__disabled__}
-        provider_model_id: ${env.OLLAMA_EMBEDDING_MODEL:=__disabled__}
-        model_type: embedding
+        provider_model_id: llama3.2:1b
     server:
       port: 8321
 ---
@@ -40,10 +35,8 @@ spec:
     containerSpec:
       port: 8321
       env:
-      - name: ENABLE_OLLAMA
-        value: ollama
       - name: OLLAMA_EMBEDDING_MODEL
         value: all-minilm:l6-v2
     userConfig:
-      configMapName: llama-stack-config  # use ConfigMap's data.run.yaml
+      configMapName: llama-stack-config
       # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR
