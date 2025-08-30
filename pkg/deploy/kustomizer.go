@@ -211,6 +211,12 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 		return fmt.Errorf("failed to apply namespace setter plugin: %w", err)
 	}
 
+	operatorNamespace, err := GetOperatorNamespace()
+	if err != nil {
+		// In unit tests or non-cluster contexts, the operator namespace may be unavailable.
+		// Tolerate this and simply skip setting the operator-specific NetworkPolicy field mapping.
+		operatorNamespace = ""
+	}
 	fieldTransformerPlugin := plugins.CreateFieldMutator(plugins.FieldMutatorConfig{
 		Mappings: []plugins.FieldMapping{
 			{
@@ -258,6 +264,41 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 				DefaultValue:      ownerInstance.GetName(),
 				TargetField:       "/spec/selector/app.kubernetes.io~1instance",
 				TargetKind:        "Service",
+				CreateIfNotExists: true,
+			},
+			{
+				SourceValue:       nil,
+				DefaultValue:      llamav1alpha1.DefaultLabelValue,
+				TargetField:       "/spec/podSelector/matchLabels/" + llamav1alpha1.DefaultLabelKey,
+				TargetKind:        "NetworkPolicy",
+				CreateIfNotExists: true,
+			},
+			{
+				SourceValue:       ownerInstance.GetName(),
+				DefaultValue:      nil,
+				TargetField:       "/spec/podSelector/matchLabels/app.kubernetes.io~1instance",
+				TargetKind:        "NetworkPolicy",
+				CreateIfNotExists: false,
+			},
+			{
+				SourceValue:       getServicePort(ownerInstance),
+				DefaultValue:      llamav1alpha1.DefaultServerPort,
+				TargetField:       "/spec/ingress/0/ports/0/port",
+				TargetKind:        "NetworkPolicy",
+				CreateIfNotExists: true,
+			},
+			{
+				SourceValue:       getServicePort(ownerInstance),
+				DefaultValue:      llamav1alpha1.DefaultServerPort,
+				TargetField:       "/spec/ingress/1/ports/0/port",
+				TargetKind:        "NetworkPolicy",
+				CreateIfNotExists: true,
+			},
+			{
+				SourceValue:       operatorNamespace,
+				DefaultValue:      nil,
+				TargetField:       "/spec/ingress/1/from/0/namespaceSelector/matchLabels/kubernetes.io~1metadata.name",
+				TargetKind:        "NetworkPolicy",
 				CreateIfNotExists: true,
 			},
 		},

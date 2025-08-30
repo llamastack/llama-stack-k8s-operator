@@ -42,8 +42,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -240,6 +238,30 @@ func (r *LlamaStackDistributionReconciler) determineKindsToExclude(instance *lla
 	return kinds
 }
 
+// pruneExcludedResources deletes resources of the specified kinds that are owned by the instance.
+// This ensures that when features are disabled, their associated resources are cleaned up.
+func (r *LlamaStackDistributionReconciler) pruneExcludedResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, kindsToExclude []string) error {
+	logger := log.FromContext(ctx)
+
+	// Only NetworkPolicy requires explicit pruning since it was managed separately
+	// PVC and Service are managed through manifests and will be filtered out
+	for _, kind := range kindsToExclude {
+		if kind == "NetworkPolicy" {
+			networkPolicy := &networkingv1.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      instance.Name + "-network-policy",
+					Namespace: instance.Namespace,
+				},
+			}
+			if err := deploy.HandleDisabledNetworkPolicy(ctx, r.Client, networkPolicy, logger); err != nil {
+				return fmt.Errorf("failed to prune NetworkPolicy: %w", err)
+			}
+		}
+	}
+
+	return nil
+}
+
 // reconcileManifestResources applies resources that are managed by the operator
 // based on the instance specification.
 func (r *LlamaStackDistributionReconciler) reconcileManifestResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
@@ -249,6 +271,11 @@ func (r *LlamaStackDistributionReconciler) reconcileManifestResources(ctx contex
 	}
 
 	kindsToExclude := r.determineKindsToExclude(instance)
+
+	if err := r.pruneExcludedResources(ctx, instance, kindsToExclude); err != nil {
+		return fmt.Errorf("failed to prune excluded resources: %w", err)
+	}
+
 	filteredResMap, err := deploy.FilterExcludeKinds(resMap, kindsToExclude)
 	if err != nil {
 		return fmt.Errorf("failed to filter manifests: %w", err)
@@ -276,11 +303,6 @@ func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Contex
 	// Reconcile manifest-based resources
 	if err := r.reconcileManifestResources(ctx, instance); err != nil {
 		return err
-	}
-
-	// Reconcile the NetworkPolicy
-	if err := r.reconcileNetworkPolicy(ctx, instance); err != nil {
-		return fmt.Errorf("failed to reconcile NetworkPolicy: %w", err)
 	}
 
 	// Reconcile the Deployment
@@ -1042,86 +1064,6 @@ func (r *LlamaStackDistributionReconciler) updateDistributionConfig(instance *ll
 		activeDistribution = "custom"
 	}
 	instance.Status.DistributionConfig.ActiveDistribution = activeDistribution
-}
-
-// reconcileNetworkPolicy manages the NetworkPolicy for the LlamaStack server.
-func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	logger := log.FromContext(ctx)
-	networkPolicy := &networkingv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      instance.Name + "-network-policy",
-			Namespace: instance.Namespace,
-		},
-	}
-
-	// If feature is disabled, delete the NetworkPolicy if it exists
-	if !r.EnableNetworkPolicy {
-		return deploy.HandleDisabledNetworkPolicy(ctx, r.Client, networkPolicy, logger)
-	}
-
-	port := deploy.GetServicePort(instance)
-
-	// get operator namespace
-	operatorNamespace, err := deploy.GetOperatorNamespace()
-	if err != nil {
-		return fmt.Errorf("failed to get operator namespace: %w", err)
-	}
-
-	networkPolicy.Spec = networkingv1.NetworkPolicySpec{
-		PodSelector: metav1.LabelSelector{
-			MatchLabels: map[string]string{
-				llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
-				"app.kubernetes.io/instance":  instance.Name,
-			},
-		},
-		PolicyTypes: []networkingv1.PolicyType{
-			networkingv1.PolicyTypeIngress,
-		},
-		Ingress: []networkingv1.NetworkPolicyIngressRule{
-			{
-				From: []networkingv1.NetworkPolicyPeer{
-					{ // to match all pods in all namespaces
-						PodSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"app.kubernetes.io/part-of": llamav1alpha1.DefaultContainerName,
-							},
-						},
-						NamespaceSelector: &metav1.LabelSelector{}, // Empty namespaceSelector to match all namespaces
-					},
-				},
-				Ports: []networkingv1.NetworkPolicyPort{
-					{
-						Protocol: (*corev1.Protocol)(ptr.To("TCP")),
-						Port: &intstr.IntOrString{
-							IntVal: port,
-						},
-					},
-				},
-			},
-			{
-				From: []networkingv1.NetworkPolicyPeer{
-					{ // to match all pods in matched namespace
-						PodSelector: &metav1.LabelSelector{},
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"kubernetes.io/metadata.name": operatorNamespace,
-							},
-						},
-					},
-				},
-				Ports: []networkingv1.NetworkPolicyPort{
-					{
-						Protocol: (*corev1.Protocol)(ptr.To("TCP")),
-						Port: &intstr.IntOrString{
-							IntVal: port,
-						},
-					},
-				},
-			},
-		},
-	}
-
-	return deploy.ApplyNetworkPolicy(ctx, r.Client, r.Scheme, instance, networkPolicy, logger)
 }
 
 // reconcileUserConfigMap validates that the referenced ConfigMap exists.
