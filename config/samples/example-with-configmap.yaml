@@ -19,7 +19,6 @@ data:
       - model_id: "llama3.2:1b"
         provider_id: ollama
         model_type: llm
-        provider_model_id: llama3.2:1b
     server:
       port: 8321
 ---

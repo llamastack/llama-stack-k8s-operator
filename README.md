@@ -83,7 +83,7 @@ spec:
       name: starter
     containerSpec:
       env:
-      - name: INFERENCE_MODEL
+      - name: OLLAMA_INFERENCE_MODEL
         value: "llama3.2:1b"
       - name: OLLAMA_URL
         value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
