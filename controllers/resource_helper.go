@@ -50,6 +50,35 @@ const (
 // Kubernetes ConfigMap keys must be valid DNS subdomain names or data keys.
 var validConfigMapKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$`)
 
+// startupScript is the script that will be used to start the server.
+var startupScript = `
+set -e
+
+    if python -c "
+import sys
+
+try:
+    from importlib.metadata import version
+    from packaging import version as pkg_version
+
+    llama_version = version('llama_stack')
+    print(f'Determined llama-stack version {llama_version}')
+    if pkg_version.parse(llama_version) < pkg_version.parse('0.2.17'):
+        print('llama-stack version is less than 0.2.17 usin old module path llama_stack.distribution.server.server to start the server')
+        sys.exit(0)
+    else:
+        print('llama-stack version is greater than or equal to 0.2.17 using new module path llama_stack.core.server.server to start the server')
+        sys.exit(1)
+except Exception as e:
+    print(f'Failed to determine version: assume newer version if we cannot determine using new module path llama_stack.core.server.server to start the server: {e}')
+    sys.exit(1)
+
+"; then
+    python3 -m llama_stack.distribution.server.server --config /etc/llama-stack/run.yaml
+else
+    python3 -m llama_stack.core.server.server /etc/llama-stack/run.yaml
+fi`
+
 // validateConfigMapKeys validates that all ConfigMap keys contain only safe characters.
 // Note: This function validates key names only. PEM content validation is performed
 // separately in the controller's reconcileCABundleConfigMap function.
@@ -170,8 +199,12 @@ func configureContainerMounts(ctx context.Context, r *LlamaStackDistributionReco
 func configureContainerCommands(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
 	// Override the container entrypoint to use the custom config file if user config is specified
 	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != "" {
-		container.Command = []string{"python", "-m", "llama_stack.distribution.server.server"}
-		container.Args = []string{"--config", "/etc/llama-stack/run.yaml"}
+		// Override the container entrypoint to use the custom config file instead of the default
+		// template. The script will determine the llama-stack version and use the appropriate module
+		// path to start the server.
+
+		container.Command = []string{"/bin/sh", "-c", startupScript}
+		container.Args = []string{}
 	}
 
 	// Apply user-specified command and args (takes precedence)
