@@ -215,10 +215,6 @@ type LlamaStackDistributionStatus struct {
 //+kubebuilder:printcolumn:name="Server Version",type="string",JSONPath=".status.version.llamaStackServerVersion"
 //+kubebuilder:printcolumn:name="Available",type="integer",JSONPath=".status.availableReplicas"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-//+kubebuilder:selectablefield:JSONPath=".spec.server.userConfig.configMapName"
-//+kubebuilder:selectablefield:JSONPath=".spec.server.userConfig.configMapNamespace"
-//+kubebuilder:selectablefield:JSONPath=".spec.server.tlsConfig.caBundle.configMapName"
-//+kubebuilder:selectablefield:JSONPath=".spec.server.tlsConfig.caBundle.configMapNamespace"
 // LlamaStackDistribution is the Schema for the llamastackdistributions API
 
 type LlamaStackDistribution struct {

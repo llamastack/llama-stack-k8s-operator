@@ -252,7 +252,7 @@ ENVTEST_VERSION ?= release-0.19
 GOLANGCI_LINT_VERSION ?= v1.64.4
 YQ_VERSION ?= v4.45.3
 YAMLFMT_VERSION ?= v0.12.0
-CRD_REF_DOCS_VERSION = v0.1.0
+CRD_REF_DOCS_VERSION = v0.2.0
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.

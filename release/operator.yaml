@@ -2205,11 +2205,6 @@ spec:
         required:
         - spec
         type: object
-    selectableFields:
-    - jsonPath: .spec.server.userConfig.configMapName
-    - jsonPath: .spec.server.userConfig.configMapNamespace
-    - jsonPath: .spec.server.tlsConfig.caBundle.configMapName
-    - jsonPath: .spec.server.tlsConfig.caBundle.configMapNamespace
     served: true
     storage: true
     subresources:
