@@ -37,13 +37,12 @@ const (
 	maxConfigMapKeyLength = 253
 )
 
-// Readiness probe configuration.
+// Probes configuration.
 const (
-	readinessProbeInitialDelaySeconds = 15 // Time to wait before the first probe
-	readinessProbePeriodSeconds       = 10 // How often to probe
-	readinessProbeTimeoutSeconds      = 5  // When the probe times out
-	readinessProbeFailureThreshold    = 3  // Pod is marked Unhealthy after 3 consecutive failures
-	readinessProbeSuccessThreshold    = 1  // Pod is marked Ready after 1 successful probe
+	startupProbeInitialDelaySeconds = 15 // Time to wait before the first probe
+	startupProbeTimeoutSeconds      = 30 // When the probe times out
+	startupProbeFailureThreshold    = 3  // Pod is marked Unhealthy after 3 consecutive failures
+	startupProbeSuccessThreshold    = 1  // Pod is marked Ready after 1 successful probe
 )
 
 // validConfigMapKeyRegex defines allowed characters for ConfigMap keys.
@@ -101,6 +100,27 @@ func validateConfigMapKeys(keys []string) error {
 	return nil
 }
 
+// getHealthProbe returns the health probe handler for the container.
+func getHealthProbe(instance *llamav1alpha1.LlamaStackDistribution) corev1.ProbeHandler {
+	return corev1.ProbeHandler{
+		HTTPGet: &corev1.HTTPGetAction{
+			Path: "/v1/health",
+			Port: intstr.FromInt(int(getContainerPort(instance))),
+		},
+	}
+}
+
+// getStartupProbe returns the startup probe for the container.
+func getStartupProbe(instance *llamav1alpha1.LlamaStackDistribution) *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler:        getHealthProbe(instance),
+		InitialDelaySeconds: startupProbeInitialDelaySeconds,
+		TimeoutSeconds:      startupProbeTimeoutSeconds,
+		FailureThreshold:    startupProbeFailureThreshold,
+		SuccessThreshold:    startupProbeSuccessThreshold,
+	}
+}
+
 // buildContainerSpec creates the container specification.
 func buildContainerSpec(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, image string) corev1.Container {
 	container := corev1.Container{
@@ -109,19 +129,7 @@ func buildContainerSpec(ctx context.Context, r *LlamaStackDistributionReconciler
 		Resources:       instance.Spec.Server.ContainerSpec.Resources,
 		ImagePullPolicy: corev1.PullAlways,
 		Ports:           []corev1.ContainerPort{{ContainerPort: getContainerPort(instance)}},
-		ReadinessProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{
-					Path: "/v1/health",
-					Port: intstr.FromInt(int(getContainerPort(instance))),
-				},
-			},
-			InitialDelaySeconds: readinessProbeInitialDelaySeconds,
-			PeriodSeconds:       readinessProbePeriodSeconds,
-			TimeoutSeconds:      readinessProbeTimeoutSeconds,
-			FailureThreshold:    readinessProbeFailureThreshold,
-			SuccessThreshold:    readinessProbeSuccessThreshold,
-		},
+		StartupProbe:    getStartupProbe(instance),
 	}
 
 	// Configure environment variables and mounts
