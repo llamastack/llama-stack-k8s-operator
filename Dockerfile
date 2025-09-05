@@ -36,7 +36,9 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 WORKDIR /
 COPY --from=builder /workspace/manager .
 COPY --from=builder /workspace/controllers/manifests ./manifests/
-RUN microdnf install -y openssl && microdnf clean all
+COPY --from=builder /usr/bin/openssl /usr/bin/openssl
+COPY --from=builder /lib64/libssl.so.3 /lib64/libssl.so.3
+COPY --from=builder /lib64/libcrypto.so.3 /lib64/libcrypto.so.3
 USER 1001
 
 ENTRYPOINT ["/manager"]
