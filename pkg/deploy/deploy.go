@@ -31,17 +31,17 @@ func ApplyDeployment(ctx context.Context, cli client.Client, scheme *runtime.Sch
 	}
 
 	// For updates, preserve the existing selector since it's immutable
-	// and use server-side apply for other fields
+	// and update the deployment spec
 	if !reflect.DeepEqual(found.Spec, deployment.Spec) {
 		logger.Info("Updating Deployment", "deployment", deployment.Name)
 
 		// Preserve the existing selector to avoid immutable field error during upgrades
 		deployment.Spec.Selector = found.Spec.Selector
 
-		// Use server-side apply to merge changes properly
-		// Ensure the deployment has proper TypeMeta for server-side apply
-		deployment.SetGroupVersionKind(appsv1.SchemeGroupVersion.WithKind("Deployment"))
-		return cli.Patch(ctx, deployment, client.Apply, client.ForceOwnership, client.FieldOwner("llama-stack-operator"))
+		// Copy the existing deployment and update its spec
+		// This ensures proper field removal when fields are no longer present
+		found.Spec = deployment.Spec
+		return cli.Update(ctx, found)
 	}
 	return nil
 }

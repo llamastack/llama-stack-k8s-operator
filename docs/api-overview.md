@@ -11,19 +11,6 @@ Package v1alpha1 contains API Schema definitions for the  v1alpha1 API group
 - [LlamaStackDistribution](#llamastackdistribution)
 - [LlamaStackDistributionList](#llamastackdistributionlist)
 
-#### CABundleConfig
-
-CABundleConfig defines the CA bundle configuration for custom certificates
-
-_Appears in:_
-- [TLSConfig](#tlsconfig)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing CA bundle certificates |  |  |
-| `configMapNamespace` _string_ | ConfigMapNamespace is the namespace of the ConfigMap (defaults to the same namespace as the CR) |  |  |
-| `configMapKeys` _string array_ | ConfigMapKeys specifies multiple keys within the ConfigMap containing CA bundle data<br />All certificates from these keys will be concatenated into a single CA bundle file<br />If not specified, defaults to [DefaultCABundleKey] |  | MaxItems: 50 <br /> |
-
 #### ContainerSpec
 
 ContainerSpec defines the llama-stack server container configuration.
@@ -217,17 +204,18 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `caBundle` _[CABundleConfig](#cabundleconfig)_ | CABundle defines the CA bundle configuration for custom certificates |  |  |
+| `caBundle` _string_ | CABundle contains PEM-encoded CA bundle certificates as inline data<br />The operator automatically creates and manages a ConfigMap for mounting into the llama-stack pod |  |  |
 
 #### UserConfigSpec
+
+UserConfigSpec defines the user configuration for the llama-stack server.
 
 _Appears in:_
 - [ServerSpec](#serverspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing user configuration |  |  |
-| `configMapNamespace` _string_ | ConfigMapNamespace is the namespace of the ConfigMap (defaults to the same namespace as the CR) |  |  |
+| `customConfig` _string_ | CustomConfig contains arbitrary text data that represents a user-provided run.yamlconfiguration file<br />The operator automatically creates and manages a ConfigMap for mounting into the llama-stack pod |  |  |
 
 #### VersionInfo
 

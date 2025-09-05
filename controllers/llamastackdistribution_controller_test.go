@@ -7,10 +7,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
-	controllers "github.com/llamastack/llama-stack-k8s-operator/controllers"
+	"github.com/llamastack/llama-stack-k8s-operator/controllers"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -18,7 +17,6 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -147,20 +145,13 @@ func TestStorageConfiguration(t *testing.T) {
 	}
 }
 
-func TestConfigMapWatchingFunctionality(t *testing.T) {
+func TestCustomConfigFunctionality(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
 	// Create a test namespace
-	namespace := createTestNamespace(t, "test-configmap-watch")
+	namespace := createTestNamespace(t, "test-custom-config")
 
-	// Create a ConfigMap
-	configMap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-config",
-			Namespace: namespace.Name,
-		},
-		Data: map[string]string{
-			"run.yaml": `version: '2'
+	customConfig := `version: '2'
 image_name: ollama
 apis:
 - inference
@@ -175,84 +166,76 @@ models:
     provider_id: ollama
     model_type: llm
 server:
-  port: 8321`,
-		},
-	}
-	require.NoError(t, k8sClient.Create(t.Context(), configMap))
+  port: 8321`
 
-	// Create a LlamaStackDistribution that references the ConfigMap
+	// Create a LlamaStackDistribution with inline CustomConfig
 	instance := NewDistributionBuilder().
-		WithName("test-configmap-reference").
+		WithName("test-custom-config").
 		WithNamespace(namespace.Name).
-		WithUserConfig(configMap.Name).
+		WithUserConfig(customConfig).
 		Build()
 	require.NoError(t, k8sClient.Create(t.Context(), instance))
 
-	// Reconcile to create initial deployment
+	// Reconcile to create initial deployment and ConfigMap
 	ReconcileDistribution(t, instance, false)
 
-	// Get the initial deployment and check for ConfigMap hash annotation
+	// Verify that the combined ConfigMap was created with the CustomConfig data
+	configMap := &corev1.ConfigMap{}
+	configMapKey := types.NamespacedName{Name: instance.Name + "-config", Namespace: instance.Namespace}
+	waitForResourceWithKey(t, k8sClient, configMapKey, configMap)
+
+	require.Equal(t, customConfig, configMap.Data["run.yaml"], "Operator-managed ConfigMap should contain the CustomConfig data")
+
+	// Verify that the deployment mounts the ConfigMap
 	deployment := &appsv1.Deployment{}
 	deploymentKey := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
 	waitForResourceWithKey(t, k8sClient, deploymentKey, deployment)
 
-	// Verify the ConfigMap hash annotation exists
-	initialAnnotations := deployment.Spec.Template.Annotations
-	require.Contains(t, initialAnnotations, "configmap.hash/user-config", "ConfigMap hash annotation should be present")
-	initialHash := initialAnnotations["configmap.hash/user-config"]
-	require.NotEmpty(t, initialHash, "ConfigMap hash should not be empty")
+	// Check that the deployment has the combined-config volume
+	combinedConfigVolumeFound := false
+	for _, volume := range deployment.Spec.Template.Spec.Volumes {
+		if volume.Name == controllers.CombinedConfigVolumeName {
+			combinedConfigVolumeFound = true
+			require.NotNil(t, volume.ConfigMap, "combined-config volume should be a ConfigMap volume")
+			require.Equal(t, configMap.Name, volume.ConfigMap.Name, "combined-config volume should reference the created ConfigMap")
+			break
+		}
+	}
+	require.True(t, combinedConfigVolumeFound, "deployment should have combined-config volume")
 
-	// Update the ConfigMap data
-	require.NoError(t, k8sClient.Get(t.Context(),
-		types.NamespacedName{Name: configMap.Name, Namespace: configMap.Namespace}, configMap))
+	// Check that the container has the combined-config volume mount for run.yaml
+	require.NotEmpty(t, deployment.Spec.Template.Spec.Containers, "deployment should have containers")
+	container := deployment.Spec.Template.Spec.Containers[0]
 
-	configMap.Data["run.yaml"] = `version: '2'
-image_name: ollama
-apis:
-- inference
-providers:
-  inference:
-  - provider_id: ollama
-    provider_type: "remote::ollama"
-    config:
-      url: "http://ollama-server:11434"
-models:
-  - model_id: "llama3.2:3b"
-    provider_id: ollama
-    model_type: llm
-server:
-  port: 8321`
-	require.NoError(t, k8sClient.Update(t.Context(), configMap))
+	userConfigMountFound := false
+	for _, mount := range container.VolumeMounts {
+		if mount.Name == controllers.CombinedConfigVolumeName && mount.SubPath == "run.yaml" {
+			userConfigMountFound = true
+			require.Equal(t, "/etc/llama-stack/run.yaml", mount.MountPath, "run.yaml should be mounted at /etc/llama-stack/run.yaml")
+			require.True(t, mount.ReadOnly, "run.yaml mount should be read-only")
+			break
+		}
+	}
+	require.True(t, userConfigMountFound, "container should have combined-config volume mount for run.yaml")
 
-	// Wait a moment for the watch to trigger
-	time.Sleep(2 * time.Second)
+	// Verify that the container command is configured to use the custom config with the startup script
+	require.Equal(t, []string{"/bin/sh", "-c", controllers.StartupScript}, container.Command, "container command should be set for custom config")
+	require.Empty(t, container.Args, "container args should be empty when using startup script")
 
-	// Trigger reconciliation (in real scenarios this would be triggered by the watch)
+	// Test updating the CustomConfig
+	updatedConfig := customConfig + "\n# Updated configuration"
+
+	// Refresh the instance to avoid conflicts
+	require.NoError(t, k8sClient.Get(t.Context(), types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance))
+	instance.Spec.Server.UserConfig.CustomConfig = updatedConfig
+	require.NoError(t, k8sClient.Update(t.Context(), instance))
+
+	// Reconcile again to update the ConfigMap
 	ReconcileDistribution(t, instance, false)
 
-	// Verify the deployment was updated with a new hash
-	waitForResourceWithKeyAndCondition(
-		t, k8sClient, deploymentKey, deployment, func() bool {
-			newHash := deployment.Spec.Template.Annotations["configmap.hash/user-config"]
-			return newHash != initialHash && newHash != ""
-		}, "ConfigMap hash should be updated after ConfigMap data change")
-
-	t.Logf("ConfigMap hash changed from %s to %s", initialHash, deployment.Spec.Template.Annotations["configmap.hash/user-config"])
-
-	// Test that unrelated ConfigMaps don't trigger reconciliation
-	unrelatedConfigMap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "unrelated-config",
-			Namespace: namespace.Name,
-		},
-		Data: map[string]string{
-			"some-key": "some-value",
-		},
-	}
-	require.NoError(t, k8sClient.Create(t.Context(), unrelatedConfigMap))
-
-	// Note: In test environment, field indexer might not be set up properly,
-	// so we skip the isConfigMapReferenced checks which rely on field indexing
+	// Verify the ConfigMap was updated
+	require.NoError(t, k8sClient.Get(t.Context(), configMapKey, configMap))
+	require.Equal(t, updatedConfig, configMap.Data["run.yaml"], "ConfigMap should be updated with new CustomConfig data")
 }
 
 func TestReconcile(t *testing.T) {

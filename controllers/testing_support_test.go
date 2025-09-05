@@ -105,9 +105,9 @@ func (b *DistributionBuilder) WithServiceAccountName(serviceAccountName string) 
 	return b
 }
 
-func (b *DistributionBuilder) WithUserConfig(configMapName string) *DistributionBuilder {
+func (b *DistributionBuilder) WithUserConfig(customConfig string) *DistributionBuilder {
 	b.instance.Spec.Server.UserConfig = &llamav1alpha1.UserConfigSpec{
-		ConfigMapName: configMapName,
+		CustomConfig: customConfig,
 	}
 	return b
 }

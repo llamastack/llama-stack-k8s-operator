@@ -7,31 +7,18 @@ This document explains how to configure custom CA bundles for LlamaStackDistribu
 The CA bundle configuration allows you to:
 - Use self-signed certificates for external LLM API connections
 - Trust custom Certificate Authorities (CAs) for secure communication
-- Mount CA certificates from ConfigMaps into the LlamaStack server pods
+- Provide CA certificates inline in the LlamaStackDistribution spec
 
 ## How It Works
 
 When you configure a CA bundle:
 
-1. **ConfigMap Storage**: CA certificates are stored in a Kubernetes ConfigMap
-2. **Volume Mounting**: The certificates are mounted at `/etc/ssl/certs/` in the container
-3. **Environment Variable**: The `SSL_CERT_FILE` environment variable is set to point to the CA bundle
-4. **Automatic Restarts**: Pods restart automatically when the CA bundle ConfigMap changes
+1. **Inline Storage**: CA certificates are provided directly in the LlamaStackDistribution spec as PEM-encoded data
+2. **Automatic ConfigMap Creation**: The operator automatically creates a ConfigMap containing the CA bundle data
+3. **Volume Mounting**: The certificates are mounted at `/etc/ssl/certs/ca-bundle.crt` in the container
+4. **Automatic Restarts**: Pods restart automatically when the CA bundle data changes
 
-### Single Key vs Multiple Keys
-
-**Single Key (configMapKey):**
-- Direct ConfigMap volume mount
-- Certificate file mounted directly from the ConfigMap key
-- Minimal resource overhead
-
-**Multiple Keys (configMapKeys):**
-- Uses an InitContainer to concatenate multiple keys
-- All certificates from specified keys are combined into a single file
-- Slightly higher resource overhead due to InitContainer, but maintains standard SSL behavior
-- The final consolidated file is always named `ca-bundle.crt` regardless of source key names
-
-## Configuration Options
+## Configuration
 
 ### Basic CA Bundle Configuration
 
@@ -43,15 +30,22 @@ metadata:
 spec:
   server:
     distribution:
-      name: hf-serverless
+      name: remote-vllm
     tlsConfig:
-      caBundle:
-        configMapName: my-ca-bundle
-        # configMapNamespace: default  # Optional - defaults to CR namespace
-        # configMapKey: ca-bundle.crt           # Optional - defaults to "ca-bundle.crt"
+      caBundle: |
+        -----BEGIN CERTIFICATE-----
+        MIIDXTCCAkWgAwIBAgIJAKoK/heBjcOuMA0GCSqGSIb3DQEBBQUAMEUxCzAJBgNV
+        BAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBX
+        aWRnaXRzIFB0eSBMdGQwHhcNMTMwODI3MjM1NDA3WhcNMjMwODI1MjM1NDA3WjBF
+        MQswCQYDVQQGEwJBVTETMBEGA1UECAwKU29tZS1TdGF0ZTEhMB8GA1UECgwYSW50
+        ZXJuZXQgV2lkZ2l0cyBQdHkgTHRkMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB
+        CgKCAQEAwuqTiuGqAXTAM4PLnL6jrOMiTUps8gmI8DnJTtIQN9XgHk7ckY6+8X9s
+        -----END CERTIFICATE-----
 ```
 
-### Multiple CA Bundle Keys Configuration (RHOAI Pattern)
+### Multiple CA Certificates
+
+You can include multiple CA certificates in a single CA bundle:
 
 ```yaml
 apiVersion: llamastack.io/v1alpha1
@@ -61,154 +55,79 @@ metadata:
 spec:
   server:
     distribution:
-      name: hf-serverless
+      name: remote-vllm
     tlsConfig:
-      caBundle:
-        configMapName: odh-trusted-ca-bundle
-        # configMapNamespace: default  # Optional - defaults to CR namespace
-        configMapKeys:                   # Multiple keys from same ConfigMap
-          - ca-bundle.crt                # CNO-injected cluster CAs
-          - odh-ca-bundle.crt           # User-specified custom CAs
+      caBundle: |
+        -----BEGIN CERTIFICATE-----
+        # First CA certificate
+        MIIDXTCCAkWgAwIBAgIJAKoK/heBjcOuMA0GCSqGSIb3DQEBBQUAMEUxCzAJBgNV
+        # ... certificate data ...
+        -----END CERTIFICATE-----
+        -----BEGIN CERTIFICATE-----
+        # Second CA certificate
+        MIIDYTCCAkmgAwIBAgIJALfggjqwGI5jMA0GCSqGSIb3DQEBBQUAMEYxCzAJBgNV
+        # ... certificate data ...
+        -----END CERTIFICATE-----
 ```
-
-### Configuration Fields
-
-- `configMapName` (required): Name of the ConfigMap containing CA certificates
-- `configMapNamespace` (optional): Namespace of the ConfigMap. Defaults to the same namespace as the LlamaStackDistribution
-- `configMapKeys` (optional): Array of keys within the ConfigMap containing CA bundle data. All certificates from these keys will be concatenated into a single CA bundle file. If not specified, defaults to `["ca-bundle.crt"]`
 
 ## Examples
 
-### Example 1: Basic CA Bundle
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: my-ca-bundle
-data:
-  ca-bundle.crt: |
-    -----BEGIN CERTIFICATE-----
-    # ... your CA certificate data here ...
-    -----END CERTIFICATE-----
----
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
-metadata:
-  name: secure-llama-stack
-spec:
-  server:
-    distribution:
-      name: hf-serverless
-    tlsConfig:
-      caBundle:
-        configMapName: my-ca-bundle
-```
-
-### Example 2: Custom Key Name
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: my-ca-bundle
-data:
-  custom-ca.pem: |
-    -----BEGIN CERTIFICATE-----
-    # ... your CA certificate data here ...
-    -----END CERTIFICATE-----
----
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
-metadata:
-  name: secure-llama-stack
-spec:
-  server:
-    distribution:
-      name: hf-serverless
-    tlsConfig:
-      caBundle:
-        configMapName: my-ca-bundle
-        configMapKey: custom-ca.pem
-```
-
-### Example 3: Cross-Namespace CA Bundle
+### Example 1: VLLM with Custom CA
 
 ```yaml
 apiVersion: llamastack.io/v1alpha1
 kind: LlamaStackDistribution
 metadata:
-  name: secure-llama-stack
-  namespace: my-namespace
+  name: secure-vllm-stack
 spec:
+  replicas: 1
   server:
     distribution:
-      name: hf-serverless
+      name: remote-vllm
+    containerSpec:
+      port: 8321
+      env:
+      - name: INFERENCE_MODEL
+        value: "meta-llama/Llama-3.2-1B-Instruct"
+      - name: VLLM_URL
+        value: "https://vllm-server.vllm-dist.svc.cluster.local:8000/v1"
+      - name: VLLM_TLS_VERIFY
+        value: "/etc/ssl/certs/ca-bundle.crt"
     tlsConfig:
-      caBundle:
-        configMapName: global-ca-bundle
-        configMapNamespace: kube-system
+      caBundle: |
+        -----BEGIN CERTIFICATE-----
+        # Your VLLM server's CA certificate
+        MIIDXTCCAkWgAwIBAgIJAKoK/heBjcOuMA0GCSqGSIb3DQEBBQUAMEUxCzAJBgNV
+        # ... certificate data ...
+        -----END CERTIFICATE-----
 ```
 
-### Example 4: RHOAI Pattern with Multiple CA Sources
+### Example 2: Ollama with Custom CA
 
 ```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: odh-trusted-ca-bundle
-  labels:
-    config.openshift.io/inject-trusted-cabundle: "true"
-data:
-  ca-bundle.crt: |
-    # Populated by Cluster Network Operator (CNO)
-    -----BEGIN CERTIFICATE-----
-    # ... cluster-wide CA certificates ...
-    -----END CERTIFICATE-----
-  odh-ca-bundle.crt: |
-    # User-specified custom CAs from DSCInitialization
-    -----BEGIN CERTIFICATE-----
-    # ... custom CA certificate 1 ...
-    -----END CERTIFICATE-----
-    -----BEGIN CERTIFICATE-----
-    # ... custom CA certificate 2 ...
-    -----END CERTIFICATE-----
----
 apiVersion: llamastack.io/v1alpha1
 kind: LlamaStackDistribution
 metadata:
-  name: rhoai-llama-stack
+  name: secure-ollama-stack
 spec:
+  replicas: 1
   server:
     distribution:
-      name: hf-serverless
+      name: ollama
+    containerSpec:
+      port: 8321
+      env:
+      - name: INFERENCE_MODEL
+        value: "llama3.2:1b"
+      - name: OLLAMA_URL
+        value: "https://ollama-server.ollama-dist.svc.cluster.local:11434"
     tlsConfig:
-      caBundle:
-        configMapName: odh-trusted-ca-bundle
-        configMapKeys:
-          - ca-bundle.crt      # Cluster CAs
-          - odh-ca-bundle.crt  # Custom CAs
-```
-
-## Creating CA Bundle ConfigMaps
-
-### From Certificate Files
-
-```bash
-# Create a ConfigMap from a certificate file
-kubectl create configmap my-ca-bundle --from-file=ca-bundle.crt=/path/to/your/ca.crt
-
-# Or create from multiple certificate files
-kubectl create configmap my-ca-bundle \
-  --from-file=ca-bundle.crt=/path/to/your/ca1.crt \
-  --from-file=additional-ca.crt=/path/to/your/ca2.crt
-```
-
-### From Certificate Content
-
-```bash
-# Create a ConfigMap with certificate content
-kubectl create configmap my-ca-bundle --from-literal=ca-bundle.crt="$(cat /path/to/your/ca.crt)"
+      caBundle: |
+        -----BEGIN CERTIFICATE-----
+        # Your Ollama server's CA certificate
+        MIIDXTCCAkWgAwIBAgIJAKoK/heBjcOuMA0GCSqGSIb3DQEBBQUAMEUxCzAJBgNV
+        # ... certificate data ...
+        -----END CERTIFICATE-----
 ```
 
 ## Use Cases
@@ -221,19 +140,19 @@ When using private cloud LLM providers with self-signed certificates:
 spec:
   server:
     distribution:
-      name: hf-serverless
+      name: remote-vllm
     containerSpec:
       env:
-      - name: HF_API_KEY
-        valueFrom:
-          secretKeyRef:
-            name: hf-api-key
-            key: token
-    userConfig:
-      configMapName: llama-stack-config
+      - name: VLLM_URL
+        value: "https://private-llm-api.company.com/v1"
+      - name: VLLM_TLS_VERIFY
+        value: "/etc/ssl/certs/ca-bundle.crt"
     tlsConfig:
-      caBundle:
-        configMapName: private-cloud-ca-bundle
+      caBundle: |
+        -----BEGIN CERTIFICATE-----
+        # Private cloud provider's CA certificate
+        # ... certificate data ...
+        -----END CERTIFICATE-----
 ```
 
 ### 2. Internal Enterprise APIs
@@ -244,11 +163,17 @@ For enterprise environments with internal CAs:
 spec:
   server:
     distribution:
-      name: hf-endpoint
+      name: remote-vllm
     tlsConfig:
-      caBundle:
-        configMapName: enterprise-ca-bundle
-        configMapNamespace: security-system
+      caBundle: |
+        -----BEGIN CERTIFICATE-----
+        # Enterprise root CA certificate
+        # ... certificate data ...
+        -----END CERTIFICATE-----
+        -----BEGIN CERTIFICATE-----
+        # Enterprise intermediate CA certificate
+        # ... certificate data ...
+        -----END CERTIFICATE-----
 ```
 
 ### 3. Development/Testing
@@ -261,52 +186,62 @@ spec:
     distribution:
       name: ollama
     tlsConfig:
-      caBundle:
-        configMapName: dev-ca-bundle
-        configMapKey: development-ca.pem
+      caBundle: |
+        -----BEGIN CERTIFICATE-----
+        # Development self-signed CA certificate
+        # ... certificate data ...
+        -----END CERTIFICATE-----
+```
+
+## Obtaining CA Certificates
+
+### From a Server
+
+```bash
+# Get the CA certificate from a server
+openssl s_client -showcerts -connect your-server.com:443 </dev/null 2>/dev/null | \
+  openssl x509 -outform PEM > ca-certificate.pem
+```
+
+### From a Certificate File
+
+```bash
+# Extract CA certificate from a certificate bundle
+openssl x509 -in certificate-bundle.pem -out ca-certificate.pem
+```
+
+### From Kubernetes Secrets
+
+```bash
+# Extract CA certificate from a Kubernetes secret
+kubectl get secret your-tls-secret -o jsonpath='{.data.ca\.crt}' | base64 -d > ca-certificate.pem
 ```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Certificate Not Found**: Ensure the ConfigMap exists and contains the specified key
-2. **Permission Denied**: Check that the operator has permissions to read the ConfigMap
-3. **Invalid Certificate**: Verify the certificate format is correct (PEM format)
-4. **Pod Not Restarting**: ConfigMap changes trigger automatic pod restarts via annotations
+1. **Invalid Certificate Format**: Ensure the certificate is in PEM format with proper BEGIN/END blocks
+2. **Certificate Validation**: Verify the certificate is valid and not expired
+3. **Pod Not Restarting**: The operator automatically restarts pods when CA bundle data changes
 
 ### Common Error Messages and Solutions
 
-#### "CA bundle key not found in ConfigMap"
-- **Cause**: The specified key doesn't exist in the ConfigMap data
-- **Solution**: Check the key name in your LlamaStackDistribution spec, default is "ca-bundle.crt"
-- **Example**: Verify `kubectl get configmap my-ca-bundle -o yaml` shows your expected key
-
-#### "Invalid CA bundle format"
-- **Cause**: The certificate data is not in valid PEM format or contains invalid certificates
+#### "CA bundle contains invalid PEM data"
+- **Cause**: The certificate data is not in valid PEM format
 - **Solution**: Ensure certificates are properly formatted with BEGIN/END CERTIFICATE blocks
 - **Example**: Valid format starts with `-----BEGIN CERTIFICATE-----`
-
-#### "Referenced CA bundle ConfigMap not found"
-- **Cause**: The ConfigMap specified in tlsConfig.caBundle.configMapName doesn't exist
-- **Solution**: Create the ConfigMap first, then apply the LlamaStackDistribution
-- **Example**: `kubectl create configmap my-ca-bundle --from-file=ca-bundle.crt=my-ca.crt`
-
-#### "No valid certificates found in CA bundle"
-- **Cause**: The ConfigMap contains data but no parseable certificates
-- **Solution**: Verify certificate content and format
-- **Example**: Use `openssl x509 -text -noout -in your-cert.crt` to validate certificates
 
 #### "Failed to parse certificate"
 - **Cause**: Certificate data is corrupted or not a valid X.509 certificate
 - **Solution**: Regenerate the certificate or verify the source
-- **Example**: Check if the certificate was properly base64 encoded
+- **Example**: Use `openssl x509 -text -noout -in your-cert.pem` to validate certificates
 
 ### Debugging
 
 ```bash
-# Check if ConfigMap exists
-kubectl get configmap my-ca-bundle -o yaml
+# Check the automatically created ConfigMap
+kubectl get configmap <llamastack-name>-config -o yaml
 
 # Check pod environment variables
 kubectl describe pod <llama-stack-pod-name>
@@ -314,42 +249,29 @@ kubectl describe pod <llama-stack-pod-name>
 # Check mounted certificates
 kubectl exec <llama-stack-pod-name> -- ls -la /etc/ssl/certs/
 
-# Check SSL_CERT_FILE environment variable
-kubectl exec <llama-stack-pod-name> -- env | grep SSL_CERT_FILE
-
 # Validate certificate format locally
-openssl x509 -text -noout -in ca-bundle.crt
+openssl x509 -text -noout -in ca-certificate.pem
 
 # Check certificate expiration
-openssl x509 -enddate -noout -in ca-bundle.crt
+openssl x509 -enddate -noout -in ca-certificate.pem
 
 # Test certificate chain
-openssl verify -CAfile ca-bundle.crt server.crt
+openssl verify -CAfile ca-certificate.pem server.crt
 ```
 
 ### Validation Checklist
 
 Before deploying a LlamaStackDistribution with CA bundle:
 
-- [ ] ConfigMap exists in the correct namespace
-- [ ] ConfigMap contains the specified key (default: "ca-bundle.crt")
 - [ ] Certificate data is in PEM format
 - [ ] Certificate data contains valid X.509 certificates
-- [ ] Operator has read permissions on the ConfigMap
 - [ ] Certificate is not expired
 - [ ] Certificate contains the expected CA for your external service
+- [ ] Certificate data is properly indented in the YAML (use `|` for multiline strings)
 
 ## Security Considerations
 
-1. **ConfigMap Security**: ConfigMaps are stored in plain text in etcd. Consider using appropriate RBAC policies
-2. **Certificate Rotation**: Update ConfigMaps when certificates expire or are rotated
-3. **Namespace Isolation**: Use appropriate namespaces to isolate CA bundles
-4. **Audit Trail**: Monitor ConfigMap changes in production environments
-5. **Principle of Least Privilege**: Only grant necessary permissions to access CA bundle ConfigMaps
-
-## Limitations
-
-- Only supports PEM format certificates
-- ConfigMap size limits apply (1MB by default)
-- Certificate validation is handled by the underlying Python SSL libraries
-- Cross-namespace ConfigMap access requires appropriate RBAC permissions
+1. **Sensitive Data**: CA certificates are stored in Kubernetes ConfigMaps created by the operator
+2. **RBAC**: Ensure appropriate RBAC policies are in place for accessing the LlamaStackDistribution resources
+3. **Certificate Rotation**: Update the CA bundle in the LlamaStackDistribution spec when certificates are rotated
+4. **Validation**: The operator validates PEM format but doesn't verify certificate validity or expiration

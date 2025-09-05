@@ -148,7 +148,7 @@ func TestBuildContainerSpec(t *testing.T) {
 						},
 						ContainerSpec: llamav1alpha1.ContainerSpec{},
 						UserConfig: &llamav1alpha1.UserConfigSpec{
-							ConfigMapName: "test-config",
+							CustomConfig: "test-config-data",
 						},
 					},
 				},
@@ -160,7 +160,7 @@ func TestBuildContainerSpec(t *testing.T) {
 				ImagePullPolicy: corev1.PullAlways,
 				Ports:           []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
 				StartupProbe:    newDefaultStartupProbe(llamav1alpha1.DefaultServerPort),
-				Command:         []string{"/bin/sh", "-c", startupScript},
+				Command:         []string{"/bin/sh", "-c", StartupScript},
 				Args:            []string{},
 				Env: []corev1.EnvVar{
 					{Name: "HF_HOME", Value: llamav1alpha1.DefaultMountPath},
@@ -171,8 +171,9 @@ func TestBuildContainerSpec(t *testing.T) {
 						MountPath: llamav1alpha1.DefaultMountPath,
 					},
 					{
-						Name:      "user-config",
-						MountPath: "/etc/llama-stack/",
+						Name:      CombinedConfigVolumeName,
+						MountPath: "/etc/llama-stack/run.yaml",
+						SubPath:   "run.yaml",
 						ReadOnly:  true,
 					},
 				},
@@ -182,7 +183,7 @@ func TestBuildContainerSpec(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := buildContainerSpec(t.Context(), nil, tc.instance, tc.image)
+			result := buildContainerSpec(tc.instance, tc.image)
 			assert.Equal(t, tc.expectedResult.Name, result.Name)
 			assert.Equal(t, tc.expectedResult.Image, result.Image)
 			assert.Equal(t, tc.expectedResult.Ports, result.Ports)
@@ -274,7 +275,7 @@ func TestConfigurePodStorage(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := configurePodStorage(t.Context(), nil, tc.instance, tc.container)
+			result := configurePodStorage(tc.instance, tc.container)
 
 			// Verify container was added.
 			assert.Len(t, result.Containers, 1)

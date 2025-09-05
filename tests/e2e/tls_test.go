@@ -19,11 +19,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -67,14 +65,6 @@ func testCreateNamespace(t *testing.T) {
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		require.NoError(t, err)
 	}
-
-	// Create CA bundle configmap in test namespace
-	err = createCABundleConfigMap(t, llsTestNS)
-	require.NoError(t, err)
-
-	// Verify the CA bundle ConfigMap was created correctly
-	err = verifyCABundleConfigMap(t, llsTestNS)
-	require.NoError(t, err)
 }
 
 func testLlamaStackWithCABundle(t *testing.T) {
@@ -82,14 +72,6 @@ func testLlamaStackWithCABundle(t *testing.T) {
 
 	// Deploy LlamaStackDistribution with CA bundle
 	err := deployLlamaStackWithCABundle(t)
-	require.NoError(t, err)
-
-	// The YAML file creates a placeholder ConfigMap, so we need to update it with the actual CA bundle
-	err = updateCABundleConfigMap(t, llsTestNS)
-	require.NoError(t, err)
-
-	// Verify the CA bundle ConfigMap has the correct content after update
-	err = verifyCABundleConfigMap(t, llsTestNS)
 	require.NoError(t, err)
 
 	// Verify the LlamaStack distribution is configured with TLS
@@ -160,98 +142,6 @@ func generateCertificates(t *testing.T) {
 	t.Log("Certificates generated successfully")
 }
 
-func createCABundleConfigMap(t *testing.T, targetNS string) error {
-	t.Helper()
-
-	// Get the project root path
-	projectRoot, err := filepath.Abs("../..")
-	if err != nil {
-		return fmt.Errorf("failed to get project root: %w", err)
-	}
-
-	// Read CA bundle
-	caBundle, err := os.ReadFile(filepath.Join(projectRoot, "config", "samples", "vllm-ca-certs", controllers.DefaultCABundleKey))
-	if err != nil {
-		return fmt.Errorf("failed to read CA bundle: %w", err)
-	}
-
-	caBundleConfigMap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "custom-ca-bundle",
-			Namespace: targetNS,
-		},
-		Data: map[string]string{
-			controllers.DefaultCABundleKey: string(caBundle),
-		},
-	}
-
-	// Try to create, if it exists, update it
-	err = TestEnv.Client.Create(TestEnv.Ctx, caBundleConfigMap)
-	if err != nil {
-		if k8serrors.IsAlreadyExists(err) {
-			// ConfigMap exists, update it
-			existingConfigMap := &corev1.ConfigMap{}
-			err = TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
-				Namespace: targetNS,
-				Name:      "custom-ca-bundle",
-			}, existingConfigMap)
-			if err != nil {
-				return fmt.Errorf("failed to get existing ConfigMap: %w", err)
-			}
-
-			existingConfigMap.Data[controllers.DefaultCABundleKey] = string(caBundle)
-			err = TestEnv.Client.Update(TestEnv.Ctx, existingConfigMap)
-			if err != nil {
-				return fmt.Errorf("failed to update existing ConfigMap: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to create CA bundle configmap: %w", err)
-		}
-	} else {
-		t.Logf("Created CA bundle ConfigMap with %d bytes", len(caBundle))
-	}
-
-	return nil
-}
-
-func verifyCABundleConfigMap(t *testing.T, targetNS string) error {
-	t.Helper()
-
-	// Get the ConfigMap
-	configMap := &corev1.ConfigMap{}
-	err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
-		Namespace: targetNS,
-		Name:      "custom-ca-bundle",
-	}, configMap)
-	if err != nil {
-		return fmt.Errorf("failed to get CA bundle ConfigMap: %w", err)
-	}
-
-	// Verify the CA bundle content exists
-	caBundle, exists := configMap.Data[controllers.DefaultCABundleKey]
-	if !exists {
-		return fmt.Errorf("failed to find %s CA bundle key in ConfigMap", controllers.DefaultCABundleKey)
-	}
-
-	if len(caBundle) == 0 {
-		return fmt.Errorf("failed to find any keys in CA bundle ConfigMap %s", controllers.DefaultCABundleKey)
-	}
-
-	// Check if CA bundle appears to be a placeholder
-	if len(caBundle) < 100 || !strings.Contains(caBundle, "BEGIN CERTIFICATE") {
-		t.Logf("WARNING: CA bundle appears to be a placeholder or invalid")
-		t.Logf("CA bundle content: %s", caBundle)
-
-		// Try to update the ConfigMap with the actual CA bundle from the file
-		err := updateCABundleConfigMap(t, targetNS)
-		if err != nil {
-			t.Logf("Failed to update CA bundle ConfigMap: %v", err)
-		}
-	}
-
-	return nil
-}
-
 func verifyLlamaStackTLSConfig(t *testing.T, namespace, name string) error {
 	t.Helper()
 
@@ -270,44 +160,8 @@ func verifyLlamaStackTLSConfig(t *testing.T, namespace, name string) error {
 		return errors.New("LlamaStack distribution does not have TLS config")
 	}
 
-	if distribution.Spec.Server.TLSConfig.CABundle == nil {
+	if distribution.Spec.Server.TLSConfig.CABundle == "" {
 		return errors.New("LlamaStack distribution TLS config does not have CA bundle")
-	}
-
-	return nil
-}
-
-func updateCABundleConfigMap(t *testing.T, targetNS string) error {
-	t.Helper()
-
-	// Get the project root path
-	projectRoot, err := filepath.Abs("../..")
-	if err != nil {
-		return fmt.Errorf("failed to get project root: %w", err)
-	}
-
-	// Read the actual CA bundle from the file
-	actualCABundle, err := os.ReadFile(filepath.Join(projectRoot, "config", "samples", "vllm-ca-certs", controllers.DefaultCABundleKey))
-	if err != nil {
-		return fmt.Errorf("failed to read CA bundle file: %w", err)
-	}
-
-	// Get the existing ConfigMap
-	configMap := &corev1.ConfigMap{}
-	err = TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
-		Namespace: targetNS,
-		Name:      "custom-ca-bundle",
-	}, configMap)
-	if err != nil {
-		return fmt.Errorf("failed to get ConfigMap: %w", err)
-	}
-
-	// Update the ConfigMap with the actual CA bundle
-	configMap.Data[controllers.DefaultCABundleKey] = string(actualCABundle)
-
-	err = TestEnv.Client.Update(TestEnv.Ctx, configMap)
-	if err != nil {
-		return fmt.Errorf("failed to update ConfigMap: %w", err)
 	}
 
 	return nil
@@ -316,34 +170,76 @@ func updateCABundleConfigMap(t *testing.T, targetNS string) error {
 func deployLlamaStackWithCABundle(t *testing.T) error {
 	t.Helper()
 
-	// Read LlamaStack TLS test configuration
+	// Read the generated CA certificate
 	projectRoot, err := filepath.Abs("../..")
 	if err != nil {
 		return fmt.Errorf("failed to get project root: %w", err)
 	}
 
-	llamaStackConfigPath := filepath.Join(projectRoot, "config", "samples", "example-with-ca-bundle.yaml")
-	llamaStackConfigData, err := os.ReadFile(llamaStackConfigPath)
+	caCertPath := filepath.Join(projectRoot, "ca.crt")
+	caCertData, err := os.ReadFile(caCertPath)
 	if err != nil {
-		return fmt.Errorf("failed to read LlamaStack config: %w", err)
+		return fmt.Errorf("failed to read CA certificate: %w", err)
 	}
 
-	// Apply LlamaStack configuration
-	objects, err := parseKubernetesYAML(llamaStackConfigData)
-	if err != nil {
-		return fmt.Errorf("failed to parse LlamaStack config: %w", err)
+	// Create the LlamaStackDistribution directly instead of using YAML template
+	llsd := &v1alpha1.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llamastack-with-config",
+			Namespace: llsTestNS,
+		},
+		Spec: v1alpha1.LlamaStackDistributionSpec{
+			Replicas: 1,
+			Server: v1alpha1.ServerSpec{
+				Distribution: v1alpha1.DistributionType{
+					Name: "remote-vllm",
+				},
+				ContainerSpec: v1alpha1.ContainerSpec{
+					Port: 8321,
+					Env: []corev1.EnvVar{
+						{
+							Name:  "INFERENCE_MODEL",
+							Value: "meta-llama/Llama-3.2-1B-Instruct",
+						},
+						{
+							Name:  "VLLM_URL",
+							Value: "https://vllm-server.vllm-dist.svc.cluster.local:8000/v1",
+						},
+						{
+							Name:  "VLLM_TLS_VERIFY",
+							Value: "/etc/ssl/certs/ca-bundle.crt",
+						},
+					},
+				},
+				UserConfig: &v1alpha1.UserConfigSpec{
+					CustomConfig: `# Llama Stack Configuration
+version: '2'
+image_name: remote-vllm
+apis:
+- inference
+providers:
+  inference:
+  - provider_id: vllm
+    provider_type: "remote::vllm"
+    config:
+      url: "https://vllm-server.vllm-dist.svc.cluster.local:8000/v1"
+models:
+  - model_id: "meta-llama/Llama-3.2-1B-Instruct"
+    provider_id: vllm
+    model_type: llm
+server:
+  port: 8321`,
+				},
+				TLSConfig: &v1alpha1.TLSConfig{
+					CABundle: string(caCertData),
+				},
+			},
+		},
 	}
 
-	for _, obj := range objects {
-		// Set the namespace for namespaced resources
-		if obj.GetNamespace() == "" {
-			obj.SetNamespace(llsTestNS)
-		}
-
-		err = TestEnv.Client.Create(TestEnv.Ctx, obj)
-		if err != nil && !k8serrors.IsAlreadyExists(err) {
-			return fmt.Errorf("failed to create LlamaStack resource: %w", err)
-		}
+	err = TestEnv.Client.Create(TestEnv.Ctx, llsd)
+	if err != nil && !k8serrors.IsAlreadyExists(err) {
+		return fmt.Errorf("failed to create LlamaStack resource: %w", err)
 	}
 
 	return nil
@@ -377,7 +273,7 @@ func verifyCertificateMounts(t *testing.T, namespace, name string) error {
 
 func hasCABundleVolume(volumes []corev1.Volume) bool {
 	for _, volume := range volumes {
-		if volume.ConfigMap != nil && volume.ConfigMap.Name == "custom-ca-bundle" {
+		if volume.ConfigMap != nil && volume.Name == controllers.CombinedConfigVolumeName {
 			return true
 		}
 	}
@@ -396,6 +292,7 @@ func hasCABundleMount(containers []corev1.Container) bool {
 func hasCABundleMountInContainer(mounts []corev1.VolumeMount) bool {
 	for _, mount := range mounts {
 		if mount.MountPath == controllers.CABundleMountPath ||
+			mount.Name == controllers.CombinedConfigVolumeName ||
 			strings.Contains(mount.MountPath, "ca-bundle") {
 			return true
 		}
@@ -440,57 +337,6 @@ func verifyEnvironmentVariables(t *testing.T, namespace, name string) error {
 	}
 
 	return nil
-}
-
-func parseKubernetesYAML(data []byte) ([]client.Object, error) {
-	// Split YAML documents
-	docs := yamlSplit(data)
-
-	// Pre-allocate slice with expected capacity
-	objects := make([]client.Object, 0, len(docs))
-
-	for _, doc := range docs {
-		if len(doc) == 0 {
-			continue
-		}
-
-		obj := &unstructured.Unstructured{}
-		err := yaml.Unmarshal(doc, obj)
-		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
-		}
-
-		if obj.GetKind() == "" {
-			continue
-		}
-
-		objects = append(objects, obj)
-	}
-
-	return objects, nil
-}
-
-func yamlSplit(data []byte) [][]byte {
-	var docs [][]byte
-	var currentDoc []byte
-
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "---" {
-			if len(currentDoc) > 0 {
-				docs = append(docs, currentDoc)
-				currentDoc = nil
-			}
-		} else {
-			currentDoc = append(currentDoc, []byte(line+"\n")...)
-		}
-	}
-
-	if len(currentDoc) > 0 {
-		docs = append(docs, currentDoc)
-	}
-
-	return docs
 }
 
 func waitForDeploymentCreation(t *testing.T, namespace, name string, timeout time.Duration) error {

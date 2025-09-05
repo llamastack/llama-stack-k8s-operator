@@ -87,36 +87,20 @@ type ServerSpec struct {
 	TLSConfig *TLSConfig `json:"tlsConfig,omitempty"`
 }
 
+// UserConfigSpec defines the user configuration for the llama-stack server.
 type UserConfigSpec struct {
-	// ConfigMapName is the name of the ConfigMap containing user configuration
-	ConfigMapName string `json:"configMapName"`
-	// ConfigMapNamespace is the namespace of the ConfigMap (defaults to the same namespace as the CR)
+	// CustomConfig contains arbitrary text data that represents a user-provided run.yamlconfiguration file
+	// The operator automatically creates and manages a ConfigMap for mounting into the llama-stack pod
 	// +optional
-	ConfigMapNamespace string `json:"configMapNamespace,omitempty"`
+	CustomConfig string `json:"customConfig,omitempty"`
 }
 
 // TLSConfig defines the TLS configuration for the llama-stack server
 type TLSConfig struct {
-	// CABundle defines the CA bundle configuration for custom certificates
+	// CABundle contains PEM-encoded CA bundle certificates as inline data
+	// The operator automatically creates and manages a ConfigMap for mounting into the llama-stack pod
 	// +optional
-	CABundle *CABundleConfig `json:"caBundle,omitempty"`
-}
-
-// CABundleConfig defines the CA bundle configuration for custom certificates
-type CABundleConfig struct {
-	// ConfigMapName is the name of the ConfigMap containing CA bundle certificates
-	ConfigMapName string `json:"configMapName"`
-	// ConfigMapNamespace is the namespace of the ConfigMap (defaults to the same namespace as the CR)
-	// +optional
-	ConfigMapNamespace string `json:"configMapNamespace,omitempty"`
-	// ConfigMapKeys specifies multiple keys within the ConfigMap containing CA bundle data
-	// All certificates from these keys will be concatenated into a single CA bundle file
-	// If not specified, defaults to [DefaultCABundleKey]
-	// +optional
-	// +kubebuilder:validation:MaxItems=50
-	// +kubebuilder:validation:Items:Pattern="^[a-zA-Z0-9]([a-zA-Z0-9\\-_.]*[a-zA-Z0-9])?$"
-	// +kubebuilder:validation:Items:MaxLength=253
-	ConfigMapKeys []string `json:"configMapKeys,omitempty"`
+	CABundle string `json:"caBundle,omitempty"`
 }
 
 // StorageSpec defines the persistent storage configuration
@@ -215,10 +199,6 @@ type LlamaStackDistributionStatus struct {
 //+kubebuilder:printcolumn:name="Server Version",type="string",JSONPath=".status.version.llamaStackServerVersion"
 //+kubebuilder:printcolumn:name="Available",type="integer",JSONPath=".status.availableReplicas"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-//+kubebuilder:selectablefield:JSONPath=".spec.server.userConfig.configMapName"
-//+kubebuilder:selectablefield:JSONPath=".spec.server.userConfig.configMapNamespace"
-//+kubebuilder:selectablefield:JSONPath=".spec.server.tlsConfig.caBundle.configMapName"
-//+kubebuilder:selectablefield:JSONPath=".spec.server.tlsConfig.caBundle.configMapNamespace"
 // LlamaStackDistribution is the Schema for the llamastackdistributions API
 
 type LlamaStackDistribution struct {

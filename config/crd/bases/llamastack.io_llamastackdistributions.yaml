@@ -2006,44 +2006,20 @@ spec:
                       server
                     properties:
                       caBundle:
-                        description: CABundle defines the CA bundle configuration
-                          for custom certificates
-                        properties:
-                          configMapKeys:
-                            description: |-
-                              ConfigMapKeys specifies multiple keys within the ConfigMap containing CA bundle data
-                              All certificates from these keys will be concatenated into a single CA bundle file
-                              If not specified, defaults to [DefaultCABundleKey]
-                            items:
-                              type: string
-                            maxItems: 50
-                            type: array
-                          configMapName:
-                            description: ConfigMapName is the name of the ConfigMap
-                              containing CA bundle certificates
-                            type: string
-                          configMapNamespace:
-                            description: ConfigMapNamespace is the namespace of the
-                              ConfigMap (defaults to the same namespace as the CR)
-                            type: string
-                        required:
-                        - configMapName
-                        type: object
+                        description: |-
+                          CABundle contains PEM-encoded CA bundle certificates as inline data
+                          The operator automatically creates and manages a ConfigMap for mounting into the llama-stack pod
+                        type: string
                     type: object
                   userConfig:
                     description: UserConfig defines the user configuration for the
                       llama-stack server
                     properties:
-                      configMapName:
-                        description: ConfigMapName is the name of the ConfigMap containing
-                          user configuration
+                      customConfig:
+                        description: |-
+                          CustomConfig contains arbitrary text data that represents a user-provided run.yamlconfiguration file
+                          The operator automatically creates and manages a ConfigMap for mounting into the llama-stack pod
                         type: string
-                      configMapNamespace:
-                        description: ConfigMapNamespace is the namespace of the ConfigMap
-                          (defaults to the same namespace as the CR)
-                        type: string
-                    required:
-                    - configMapName
                     type: object
                 required:
                 - distribution
@@ -2196,11 +2172,6 @@ spec:
         required:
         - spec
         type: object
-    selectableFields:
-    - jsonPath: .spec.server.userConfig.configMapName
-    - jsonPath: .spec.server.userConfig.configMapNamespace
-    - jsonPath: .spec.server.tlsConfig.caBundle.configMapName
-    - jsonPath: .spec.server.tlsConfig.caBundle.configMapNamespace
     served: true
     storage: true
     subresources:

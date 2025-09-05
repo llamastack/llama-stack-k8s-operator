@@ -17,7 +17,6 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -27,18 +26,17 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// Constants for validation limits.
 const (
+	// Constants for validation limits.
 	// maxConfigMapKeyLength defines the maximum allowed length for ConfigMap keys
 	// based on Kubernetes DNS subdomain name limits.
 	maxConfigMapKeyLength = 253
-)
-
-// Probes configuration.
-const (
+	// Constants for volume and ConfigMap names.
+	// CombinedConfigVolumeName is the name used for the combined configuration volume.
+	CombinedConfigVolumeName = "combined-config"
+	// Probes configuration.
 	startupProbeInitialDelaySeconds = 15 // Time to wait before the first probe
 	startupProbeTimeoutSeconds      = 30 // When the probe times out
 	startupProbeFailureThreshold    = 3  // Pod is marked Unhealthy after 3 consecutive failures
@@ -49,8 +47,8 @@ const (
 // Kubernetes ConfigMap keys must be valid DNS subdomain names or data keys.
 var validConfigMapKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$`)
 
-// startupScript is the script that will be used to start the server.
-var startupScript = `
+// StartupScript is the script that will be used to start the server.
+var StartupScript = `
 set -e
 
     if python -c "
@@ -122,7 +120,7 @@ func getStartupProbe(instance *llamav1alpha1.LlamaStackDistribution) *corev1.Pro
 }
 
 // buildContainerSpec creates the container specification.
-func buildContainerSpec(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, image string) corev1.Container {
+func buildContainerSpec(instance *llamav1alpha1.LlamaStackDistribution, image string) corev1.Container {
 	container := corev1.Container{
 		Name:            getContainerName(instance),
 		Image:           image,
@@ -133,8 +131,8 @@ func buildContainerSpec(ctx context.Context, r *LlamaStackDistributionReconciler
 	}
 
 	// Configure environment variables and mounts
-	configureContainerEnvironment(ctx, r, instance, &container)
-	configureContainerMounts(ctx, r, instance, &container)
+	configureContainerEnvironment(instance, &container)
+	configureContainerMounts(instance, &container)
 	configureContainerCommands(instance, &container)
 
 	return container
@@ -157,7 +155,7 @@ func getContainerPort(instance *llamav1alpha1.LlamaStackDistribution) int32 {
 }
 
 // configureContainerEnvironment sets up environment variables for the container.
-func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
+func configureContainerEnvironment(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
 	mountPath := getMountPath(instance)
 
 	// Add HF_HOME variable to our mount path so that downloaded models and datasets are stored
@@ -170,21 +168,12 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 	})
 
 	// Add CA bundle environment variable if TLS config is specified
-	if instance.Spec.Server.TLSConfig != nil && instance.Spec.Server.TLSConfig.CABundle != nil {
+	if instance.Spec.Server.TLSConfig != nil && instance.Spec.Server.TLSConfig.CABundle != "" {
 		// Set SSL_CERT_FILE to point to the specific CA bundle file
 		container.Env = append(container.Env, corev1.EnvVar{
 			Name:  "SSL_CERT_FILE",
 			Value: CABundleMountPath,
 		})
-	} else if r != nil {
-		// Check for auto-detected ODH trusted CA bundle
-		if _, keys, err := r.detectODHTrustedCABundle(ctx, instance); err == nil && len(keys) > 0 {
-			// Set SSL_CERT_FILE to point to the auto-detected consolidated CA bundle
-			container.Env = append(container.Env, corev1.EnvVar{
-				Name:  "SSL_CERT_FILE",
-				Value: CABundleMountPath,
-			})
-		}
 	}
 
 	// Finally, add the user provided env vars
@@ -192,26 +181,26 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 }
 
 // configureContainerMounts sets up volume mounts for the container.
-func configureContainerMounts(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
+func configureContainerMounts(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
 	// Add volume mount for storage
 	addStorageVolumeMount(instance, container)
 
 	// Add ConfigMap volume mount if user config is specified
 	addUserConfigVolumeMount(instance, container)
 
-	// Add CA bundle volume mount if TLS config is specified or auto-detected
-	addCABundleVolumeMount(ctx, r, instance, container)
+	// Add CA bundle volume mount if TLS config is specified
+	addCABundleVolumeMount(instance, container)
 }
 
 // configureContainerCommands sets up container commands and args.
 func configureContainerCommands(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
 	// Override the container entrypoint to use the custom config file if user config is specified
-	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != "" {
+	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.CustomConfig != "" {
 		// Override the container entrypoint to use the custom config file instead of the default
 		// template. The script will determine the llama-stack version and use the appropriate module
 		// path to start the server.
 
-		container.Command = []string{"/bin/sh", "-c", startupScript}
+		container.Command = []string{"/bin/sh", "-c", StartupScript}
 		container.Args = []string{}
 	}
 
@@ -244,138 +233,47 @@ func addStorageVolumeMount(instance *llamav1alpha1.LlamaStackDistribution, conta
 
 // addUserConfigVolumeMount adds the user config volume mount to the container if specified.
 func addUserConfigVolumeMount(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
-	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != "" {
+	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.CustomConfig != "" {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-			Name:      "user-config",
-			MountPath: "/etc/llama-stack/",
+			Name:      CombinedConfigVolumeName,
+			MountPath: "/etc/llama-stack/run.yaml",
+			SubPath:   "run.yaml",
 			ReadOnly:  true,
 		})
 	}
 }
 
 // addCABundleVolumeMount adds the CA bundle volume mount to the container if TLS config is specified.
-// For multiple keys: the init container writes DefaultCABundleKey to the root of the emptyDir volume,
-// and the main container mounts it with SubPath to CABundleMountPath.
-// For single key: the main container directly mounts the ConfigMap key.
-// Also handles auto-detected ODH trusted CA bundle ConfigMaps.
-func addCABundleVolumeMount(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
-	if instance.Spec.Server.TLSConfig != nil && instance.Spec.Server.TLSConfig.CABundle != nil {
+// Mounts the combined ConfigMap created from inline PEM data.
+func addCABundleVolumeMount(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
+	if instance.Spec.Server.TLSConfig != nil && instance.Spec.Server.TLSConfig.CABundle != "" {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-			Name:      CABundleVolumeName,
+			Name:      CombinedConfigVolumeName,
 			MountPath: CABundleMountPath,
 			SubPath:   DefaultCABundleKey,
 			ReadOnly:  true,
 		})
-	} else if r != nil {
-		// Check for auto-detected ODH trusted CA bundle
-		if _, keys, err := r.detectODHTrustedCABundle(ctx, instance); err == nil && len(keys) > 0 {
-			// Mount the auto-detected consolidated CA bundle
-			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-				Name:      CABundleVolumeName,
-				MountPath: CABundleMountPath,
-				SubPath:   DefaultCABundleKey,
-				ReadOnly:  true,
-			})
-		}
 	}
 }
 
-// createCABundleVolume creates the appropriate volume configuration for CA bundles.
-// For single key: uses direct ConfigMap volume.
-// For multiple keys: uses emptyDir volume with InitContainer to concatenate keys.
-func createCABundleVolume(caBundleConfig *llamav1alpha1.CABundleConfig) corev1.Volume {
-	// For multiple keys, we'll use an emptyDir that gets populated by an InitContainer
-	if len(caBundleConfig.ConfigMapKeys) > 0 {
-		return corev1.Volume{
-			Name: CABundleVolumeName,
-			VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{},
-			},
-		}
-	}
-
-	// For single key (legacy behavior), use direct ConfigMap volume
+// createCombinedConfigVolume creates the volume configuration for the operator-managed ConfigMap.
+// Used when either user config or CA bundle (or both) are specified.
+func createCombinedConfigVolume(instance *llamav1alpha1.LlamaStackDistribution) corev1.Volume {
+	configMapName := instance.Name + "-config"
 	return corev1.Volume{
-		Name: CABundleVolumeName,
+		Name: CombinedConfigVolumeName,
 		VolumeSource: corev1.VolumeSource{
 			ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{
-					Name: caBundleConfig.ConfigMapName,
+					Name: configMapName,
 				},
 			},
 		},
 	}
 }
 
-// createCABundleInitContainer creates an InitContainer that concatenates multiple CA bundle keys
-// from a ConfigMap into a single file in the shared ca-bundle volume.
-func createCABundleInitContainer(caBundleConfig *llamav1alpha1.CABundleConfig) (corev1.Container, error) {
-	// Validate ConfigMap keys for security
-	if err := validateConfigMapKeys(caBundleConfig.ConfigMapKeys); err != nil {
-		return corev1.Container{}, fmt.Errorf("failed to validate ConfigMap keys: %w", err)
-	}
-
-	// Build the file list as a shell array embedded in the script
-	// This ensures the arguments are properly passed to the script
-	var fileListBuilder strings.Builder
-	for i, key := range caBundleConfig.ConfigMapKeys {
-		if i > 0 {
-			fileListBuilder.WriteString(" ")
-		}
-		// Quote each key to handle any special characters safely
-		fileListBuilder.WriteString(fmt.Sprintf("%q", key))
-	}
-	fileList := fileListBuilder.String()
-
-	// Use a secure script approach that embeds the file list directly
-	// This eliminates the issue with arguments not being passed to sh -c
-	script := fmt.Sprintf(`#!/bin/sh
-set -e
-output_file="%s"
-source_dir="%s"
-
-# Clear the output file
-> "$output_file"
-
-# Process each validated key file (keys are pre-validated)
-for key in %s; do
-    file_path="$source_dir/$key"
-    if [ -f "$file_path" ]; then
-        cat "$file_path" >> "$output_file"
-        echo >> "$output_file"  # Add newline between certificates
-    else
-        echo "Warning: Certificate file $file_path not found" >&2
-    fi
-done`, CABundleTempPath, CABundleSourceDir, fileList)
-
-	return corev1.Container{
-		Name:    CABundleInitName,
-		Image:   "registry.access.redhat.com/ubi9/ubi-minimal:latest",
-		Command: []string{"/bin/sh", "-c", script},
-		// No Args needed since we embed the file list in the script
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      CABundleSourceVolName,
-				MountPath: CABundleSourceDir,
-				ReadOnly:  true,
-			},
-			{
-				Name:      CABundleVolumeName,
-				MountPath: CABundleTempDir,
-			},
-		},
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: &[]bool{false}[0],
-			RunAsNonRoot:             &[]bool{false}[0],
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-		},
-	}, nil
-}
-
 // configurePodStorage configures the pod storage and returns the complete pod spec.
-func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container corev1.Container) corev1.PodSpec {
+func configurePodStorage(instance *llamav1alpha1.LlamaStackDistribution, container corev1.Container) corev1.PodSpec {
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container},
 	}
@@ -383,8 +281,8 @@ func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconcile
 	// Configure storage volumes and init containers
 	configureStorage(instance, &podSpec)
 
-	// Configure TLS CA bundle (with auto-detection support)
-	configureTLSCABundle(ctx, r, instance, &podSpec)
+	// Configure TLS CA bundle
+	configureTLSCABundle(instance, &podSpec)
 
 	// Configure user config
 	configureUserConfig(instance, &podSpec)
@@ -465,130 +363,47 @@ func configureEmptyDirStorage(podSpec *corev1.PodSpec) {
 }
 
 // configureTLSCABundle handles TLS CA bundle configuration.
-// For multiple keys: adds a ca-bundle-init init container that concatenates all keys into a single file
-// in a shared emptyDir volume, which the main container then mounts via SubPath.
-// For single key: uses a direct ConfigMap volume mount.
-// If no explicit CA bundle is configured, it checks for the well-known ODH trusted CA bundle ConfigMap.
-func configureTLSCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+// Adds the combined ConfigMap volume if CA bundle is explicitly configured.
+func configureTLSCABundle(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
 	tlsConfig := instance.Spec.Server.TLSConfig
 
-	// Handle explicit CA bundle configuration first
-	if tlsConfig != nil && tlsConfig.CABundle != nil {
-		addExplicitCABundle(ctx, tlsConfig.CABundle, podSpec)
-		return
-	}
-
-	// If no explicit CA bundle is configured, check for ODH trusted CA bundle auto-detection
-	if r != nil {
-		addAutoDetectedCABundle(ctx, r, instance, podSpec)
+	// Handle explicit CA bundle configuration
+	if tlsConfig != nil && tlsConfig.CABundle != "" {
+		addExplicitCABundle(instance, podSpec)
 	}
 }
 
 // addExplicitCABundle handles explicitly configured CA bundles.
-func addExplicitCABundle(ctx context.Context, caBundleConfig *llamav1alpha1.CABundleConfig, podSpec *corev1.PodSpec) {
-	// Add CA bundle InitContainer if multiple keys are specified
-	if len(caBundleConfig.ConfigMapKeys) > 0 {
-		caBundleInitContainer, err := createCABundleInitContainer(caBundleConfig)
-		if err != nil {
-			log.FromContext(ctx).Error(err, "Failed to create CA bundle init container")
-			return
-		}
-		podSpec.InitContainers = append(podSpec.InitContainers, caBundleInitContainer)
+func addExplicitCABundle(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+	// Add combined ConfigMap volume if not already added
+	if !hasVolumeWithName(podSpec, CombinedConfigVolumeName) {
+		volume := createCombinedConfigVolume(instance)
+		podSpec.Volumes = append(podSpec.Volumes, volume)
 	}
-
-	// Add CA bundle ConfigMap volume
-	volume := createCABundleVolume(caBundleConfig)
-	podSpec.Volumes = append(podSpec.Volumes, volume)
-
-	// Add source ConfigMap volume for multiple keys scenario
-	if len(caBundleConfig.ConfigMapKeys) > 0 {
-		sourceVolume := corev1.Volume{
-			Name: CABundleSourceVolName,
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: caBundleConfig.ConfigMapName,
-					},
-				},
-			},
-		}
-		podSpec.Volumes = append(podSpec.Volumes, sourceVolume)
-	}
-}
-
-// addAutoDetectedCABundle handles auto-detection of ODH trusted CA bundle ConfigMap.
-func addAutoDetectedCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
-	if r == nil {
-		return
-	}
-
-	configMap, keys, err := r.detectODHTrustedCABundle(ctx, instance)
-	if err != nil {
-		// Log error but don't fail the reconciliation
-		log.FromContext(ctx).Error(err, "Failed to detect ODH trusted CA bundle ConfigMap")
-		return
-	}
-
-	if configMap == nil || len(keys) == 0 {
-		// No ODH trusted CA bundle found or no keys available
-		return
-	}
-
-	// Create a virtual CA bundle config for auto-detected ConfigMap
-	autoCaBundleConfig := &llamav1alpha1.CABundleConfig{
-		ConfigMapName: configMap.Name,
-		ConfigMapKeys: keys, // Use all available keys
-	}
-
-	// Use the same logic as explicit configuration
-	caBundleInitContainer, err := createCABundleInitContainer(autoCaBundleConfig)
-	if err != nil {
-		// Log error and skip auto-detected CA bundle configuration
-		log.FromContext(ctx).Error(err, "Failed to create CA bundle init container for auto-detected ConfigMap")
-		return
-	}
-	podSpec.InitContainers = append(podSpec.InitContainers, caBundleInitContainer)
-
-	// Add CA bundle emptyDir volume for auto-detected ConfigMap
-	volume := createCABundleVolume(autoCaBundleConfig)
-	podSpec.Volumes = append(podSpec.Volumes, volume)
-
-	// Add source ConfigMap volume for auto-detected ConfigMap
-	sourceVolume := corev1.Volume{
-		Name: CABundleSourceVolName,
-		VolumeSource: corev1.VolumeSource{
-			ConfigMap: &corev1.ConfigMapVolumeSource{
-				LocalObjectReference: corev1.LocalObjectReference{
-					Name: configMap.Name,
-				},
-			},
-		},
-	}
-	podSpec.Volumes = append(podSpec.Volumes, sourceVolume)
-
-	log.FromContext(ctx).Info("Auto-configured ODH trusted CA bundle",
-		"configMapName", configMap.Name,
-		"keys", keys)
 }
 
 // configureUserConfig handles user configuration setup.
 func configureUserConfig(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
 	userConfig := instance.Spec.Server.UserConfig
-	if userConfig == nil || userConfig.ConfigMapName == "" {
+	if userConfig == nil || userConfig.CustomConfig == "" {
 		return
 	}
 
-	// Add ConfigMap volume if user config is specified
-	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
-		Name: "user-config",
-		VolumeSource: corev1.VolumeSource{
-			ConfigMap: &corev1.ConfigMapVolumeSource{
-				LocalObjectReference: corev1.LocalObjectReference{
-					Name: userConfig.ConfigMapName,
-				},
-			},
-		},
-	})
+	// Add combined ConfigMap volume if not already added
+	if !hasVolumeWithName(podSpec, CombinedConfigVolumeName) {
+		volume := createCombinedConfigVolume(instance)
+		podSpec.Volumes = append(podSpec.Volumes, volume)
+	}
+}
+
+// hasVolumeWithName checks if a pod spec already has a volume with the given name.
+func hasVolumeWithName(podSpec *corev1.PodSpec, volumeName string) bool {
+	for _, volume := range podSpec.Volumes {
+		if volume.Name == volumeName {
+			return true
+		}
+	}
+	return false
 }
 
 // configurePodOverrides applies pod-level overrides from the LlamaStackDistribution spec.
