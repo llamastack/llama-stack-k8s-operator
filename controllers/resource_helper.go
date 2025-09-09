@@ -124,12 +124,11 @@ func getStartupProbe(instance *llamav1alpha1.LlamaStackDistribution) *corev1.Pro
 // buildContainerSpec creates the container specification.
 func buildContainerSpec(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, image string) corev1.Container {
 	container := corev1.Container{
-		Name:            getContainerName(instance),
-		Image:           image,
-		Resources:       instance.Spec.Server.ContainerSpec.Resources,
-		ImagePullPolicy: corev1.PullAlways,
-		Ports:           []corev1.ContainerPort{{ContainerPort: getContainerPort(instance)}},
-		StartupProbe:    getStartupProbe(instance),
+		Name:         getContainerName(instance),
+		Image:        image,
+		Resources:    instance.Spec.Server.ContainerSpec.Resources,
+		Ports:        []corev1.ContainerPort{{ContainerPort: getContainerPort(instance)}},
+		StartupProbe: getStartupProbe(instance),
 	}
 
 	// Configure environment variables and mounts
@@ -309,7 +308,7 @@ func createCABundleVolume(caBundleConfig *llamav1alpha1.CABundleConfig) corev1.V
 
 // createCABundleInitContainer creates an InitContainer that concatenates multiple CA bundle keys
 // from a ConfigMap into a single file in the shared ca-bundle volume.
-func createCABundleInitContainer(caBundleConfig *llamav1alpha1.CABundleConfig) (corev1.Container, error) {
+func createCABundleInitContainer(caBundleConfig *llamav1alpha1.CABundleConfig, image string) (corev1.Container, error) {
 	// Validate ConfigMap keys for security
 	if err := validateConfigMapKeys(caBundleConfig.ConfigMapKeys); err != nil {
 		return corev1.Container{}, fmt.Errorf("failed to validate ConfigMap keys: %w", err)
@@ -349,9 +348,10 @@ for key in %s; do
 done`, CABundleTempPath, CABundleSourceDir, fileList)
 
 	return corev1.Container{
-		Name:    CABundleInitName,
-		Image:   "registry.access.redhat.com/ubi9/ubi-minimal:latest",
-		Command: []string{"/bin/sh", "-c", script},
+		Name:            CABundleInitName,
+		Image:           image,
+		ImagePullPolicy: corev1.PullAlways,
+		Command:         []string{"/bin/sh", "-c", script},
 		// No Args needed since we embed the file list in the script
 		VolumeMounts: []corev1.VolumeMount{
 			{
@@ -381,10 +381,10 @@ func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconcile
 	}
 
 	// Configure storage volumes and init containers
-	configureStorage(instance, &podSpec)
+	configureStorage(instance, &podSpec, container.Image)
 
 	// Configure TLS CA bundle (with auto-detection support)
-	configureTLSCABundle(ctx, r, instance, &podSpec)
+	configureTLSCABundle(ctx, r, instance, &podSpec, container.Image)
 
 	// Configure user config
 	configureUserConfig(instance, &podSpec)
@@ -396,16 +396,16 @@ func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconcile
 }
 
 // configureStorage handles storage volume configuration.
-func configureStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+func configureStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec, image string) {
 	if instance.Spec.Server.Storage != nil {
-		configurePersistentStorage(instance, podSpec)
+		configurePersistentStorage(instance, podSpec, image)
 	} else {
 		configureEmptyDirStorage(podSpec)
 	}
 }
 
 // configurePersistentStorage sets up PVC-based storage with init container for permissions.
-func configurePersistentStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+func configurePersistentStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec, image string) {
 	// Use PVC for persistent storage
 	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
 		Name: "lls-storage",
@@ -430,8 +430,9 @@ func configurePersistentStorage(instance *llamav1alpha1.LlamaStackDistribution, 
 	command := strings.Join(commands, " && ")
 
 	initContainer := corev1.Container{
-		Name:  "update-pvc-permissions",
-		Image: "registry.access.redhat.com/ubi9/ubi-minimal:latest",
+		Name:            "update-pvc-permissions",
+		Image:           image,
+		ImagePullPolicy: corev1.PullAlways,
 		Command: []string{
 			"/bin/sh",
 			"-c",
@@ -469,26 +470,26 @@ func configureEmptyDirStorage(podSpec *corev1.PodSpec) {
 // in a shared emptyDir volume, which the main container then mounts via SubPath.
 // For single key: uses a direct ConfigMap volume mount.
 // If no explicit CA bundle is configured, it checks for the well-known ODH trusted CA bundle ConfigMap.
-func configureTLSCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+func configureTLSCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec, image string) {
 	tlsConfig := instance.Spec.Server.TLSConfig
 
 	// Handle explicit CA bundle configuration first
 	if tlsConfig != nil && tlsConfig.CABundle != nil {
-		addExplicitCABundle(ctx, tlsConfig.CABundle, podSpec)
+		addExplicitCABundle(ctx, tlsConfig.CABundle, podSpec, image)
 		return
 	}
 
 	// If no explicit CA bundle is configured, check for ODH trusted CA bundle auto-detection
 	if r != nil {
-		addAutoDetectedCABundle(ctx, r, instance, podSpec)
+		addAutoDetectedCABundle(ctx, r, instance, podSpec, image)
 	}
 }
 
 // addExplicitCABundle handles explicitly configured CA bundles.
-func addExplicitCABundle(ctx context.Context, caBundleConfig *llamav1alpha1.CABundleConfig, podSpec *corev1.PodSpec) {
+func addExplicitCABundle(ctx context.Context, caBundleConfig *llamav1alpha1.CABundleConfig, podSpec *corev1.PodSpec, image string) {
 	// Add CA bundle InitContainer if multiple keys are specified
 	if len(caBundleConfig.ConfigMapKeys) > 0 {
-		caBundleInitContainer, err := createCABundleInitContainer(caBundleConfig)
+		caBundleInitContainer, err := createCABundleInitContainer(caBundleConfig, image)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "Failed to create CA bundle init container")
 			return
@@ -517,7 +518,7 @@ func addExplicitCABundle(ctx context.Context, caBundleConfig *llamav1alpha1.CABu
 }
 
 // addAutoDetectedCABundle handles auto-detection of ODH trusted CA bundle ConfigMap.
-func addAutoDetectedCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+func addAutoDetectedCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec, image string) {
 	if r == nil {
 		return
 	}
@@ -541,7 +542,7 @@ func addAutoDetectedCABundle(ctx context.Context, r *LlamaStackDistributionRecon
 	}
 
 	// Use the same logic as explicit configuration
-	caBundleInitContainer, err := createCABundleInitContainer(autoCaBundleConfig)
+	caBundleInitContainer, err := createCABundleInitContainer(autoCaBundleConfig, image)
 	if err != nil {
 		// Log error and skip auto-detected CA bundle configuration
 		log.FromContext(ctx).Error(err, "Failed to create CA bundle init container for auto-detected ConfigMap")
