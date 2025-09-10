@@ -7,24 +7,15 @@ import (
 	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func TestDeletionSuite(t *testing.T) {
-	if TestOpts.SkipDeletion {
-		t.Skip("Skipping deletion test suite")
-	}
+// runDeletionTests runs deletion tests for a specific distribution
+func runDeletionTests(t *testing.T, instance *v1alpha1.LlamaStackDistribution) {
+	t.Helper()
 
 	t.Run("should delete LlamaStackDistribution CR and cleanup resources", func(t *testing.T) {
-		instance := &v1alpha1.LlamaStackDistribution{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "llamastackdistribution-sample",
-				Namespace: "llama-stack-test",
-			},
-		}
-
 		// Delete the instance
 		err := TestEnv.Client.Delete(TestEnv.Ctx, instance)
 		require.NoError(t, err)
