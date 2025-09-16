@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// runDeletionTests runs deletion tests for a specific distribution
+// runDeletionTests runs deletion tests for a specific distribution.
 func runDeletionTests(t *testing.T, instance *v1alpha1.LlamaStackDistribution) {
 	t.Helper()
 

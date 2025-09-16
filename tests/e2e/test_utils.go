@@ -28,6 +28,7 @@ import (
 )
 
 const (
+	starterDistType      = "starter"
 	ollamaNS             = "ollama-dist"
 	pollInterval         = 10 * time.Second
 	ResourceReadyTimeout = 5 * time.Minute
@@ -162,8 +163,8 @@ func registerSchemes() {
 	}
 }
 
-// GetSampleCR returns a LlamaStackDistribution from the sample YAML file.
-func GetSampleCR(t *testing.T) *v1alpha1.LlamaStackDistribution {
+// GetSampleCRForDistribution returns a LlamaStackDistribution configured for the specified distribution type.
+func GetSampleCRForDistribution(t *testing.T, distType string) *v1alpha1.LlamaStackDistribution {
 	t.Helper()
 	// Get the absolute path of the project root
 	projectRoot, err := filepath.Abs("../..")
@@ -180,6 +181,15 @@ func GetSampleCR(t *testing.T) *v1alpha1.LlamaStackDistribution {
 	distribution := &v1alpha1.LlamaStackDistribution{}
 	err = yaml.Unmarshal(yamlFile, distribution)
 	require.NoError(t, err)
+
+	// Modify the distribution based on the type
+	switch distType {
+	case starterDistType:
+		distribution.Spec.Server.Distribution.Name = starterDistType
+		distribution.ObjectMeta.Name = "llamastackdistribution-" + starterDistType + "-sample"
+	default:
+		t.Fatalf("Unknown distribution type: %s", distType)
+	}
 
 	return distribution
 }

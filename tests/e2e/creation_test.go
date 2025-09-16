@@ -21,7 +21,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func TestCreationSuite(t *testing.T) {
+// runCreationTestsForDistribution runs creation tests for a specific distribution type.
+func runCreationTestsForDistribution(t *testing.T, distType string) *v1alpha1.LlamaStackDistribution {
+	t.Helper()
 	if TestOpts.SkipCreation {
 		t.Skip("Skipping creation test suite")
 	}
@@ -29,7 +31,7 @@ func TestCreationSuite(t *testing.T) {
 	var llsdistributionCR *v1alpha1.LlamaStackDistribution
 
 	t.Run("should create LlamaStackDistribution", func(t *testing.T) {
-		llsdistributionCR = testCreateDistribution(t)
+		llsdistributionCR = testCreateDistributionForType(t, distType)
 	})
 
 	t.Run("should create PVC if storage is configured", func(t *testing.T) {
@@ -55,9 +57,11 @@ func TestCreationSuite(t *testing.T) {
 	t.Run("should use custom ServiceAccount from PodOverrides", func(t *testing.T) {
 		testServiceAccountOverride(t, llsdistributionCR)
 	})
+
+	return llsdistributionCR
 }
 
-func testCreateDistribution(t *testing.T) *v1alpha1.LlamaStackDistribution {
+func testCreateDistributionForType(t *testing.T, distType string) *v1alpha1.LlamaStackDistribution {
 	t.Helper()
 	// Create test namespace
 	ns := &corev1.Namespace{
@@ -70,9 +74,11 @@ func testCreateDistribution(t *testing.T) *v1alpha1.LlamaStackDistribution {
 		require.NoError(t, err)
 	}
 
-	// Get sample CR
-	llsdistributionCR := GetSampleCR(t)
+	// Get sample CR for the specific distribution type
+	llsdistributionCR := GetSampleCRForDistribution(t, distType)
 	llsdistributionCR.Namespace = ns.Name
+
+	t.Logf("Creating %s distribution with name: %s", distType, llsdistributionCR.Name)
 
 	err = TestEnv.Client.Create(TestEnv.Ctx, llsdistributionCR)
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
@@ -372,8 +378,8 @@ func validateProviders(t *testing.T, distribution *v1alpha1.LlamaStackDistributi
 		require.NotEmpty(t, provider.ProviderID, "Provider should have ProviderID info")
 		require.NotEmpty(t, provider.ProviderType, "Provider should have ProviderType info")
 		require.NotNil(t, provider.Config, "Provider should have config info")
-		// If Ollama test it returns OK status
-		if provider.ProviderID == "ollama" {
+		// If starter test it returns OK status
+		if provider.ProviderID == "starter" {
 			require.Equal(t, "OK", provider.Health.Status, "Provider should have OK health status")
 		}
 		// Check that status is one of the allowed values

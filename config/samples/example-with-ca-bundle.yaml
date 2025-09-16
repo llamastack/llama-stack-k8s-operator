@@ -6,7 +6,7 @@ data:
   run.yaml: |
     # Llama Stack Configuration
     version: '2'
-    image_name: remote-vllm
+    image_name: starter
     apis:
     - inference
     providers:
@@ -30,7 +30,7 @@ spec:
   replicas: 1
   server:
     distribution:
-      name: remote-vllm
+      name: starter
     containerSpec:
       port: 8321
       env:

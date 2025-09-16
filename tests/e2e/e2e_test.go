@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestE2E(t *testing.T) {
@@ -13,8 +12,16 @@ func TestE2E(t *testing.T) {
 	// Run validation tests
 	t.Run("validation", TestValidationSuite)
 
-	// Run combined creation and deletion tests
-	t.Run("creation-deletion", TestCreationDeletionSuite)
+	// Run combined creation and deletion tests for multiple distributions
+	// starter: newer image currently being actively updated
+	distributions := []string{"starter"}
+	for _, dist := range distributions {
+		t.Run("creation-deletion-"+dist, func(t *testing.T) {
+			// Set distribution type for this test run
+			t.Logf("Testing distribution: %s", dist)
+			runCreationDeletionSuiteForDistribution(t, dist)
+		})
+	}
 
 	// Run TLS tests
 	t.Run("tls", func(t *testing.T) {
@@ -22,32 +29,26 @@ func TestE2E(t *testing.T) {
 	})
 }
 
-// TestCreationDeletionSuite runs creation tests followed by deletion tests
-// This allows for complete lifecycle testing with different distribution images
-func TestCreationDeletionSuite(t *testing.T) {
+// runCreationDeletionSuiteForDistribution runs creation tests followed by deletion tests for a specific distribution.
+func runCreationDeletionSuiteForDistribution(t *testing.T, distType string) {
+	t.Helper()
 	if TestOpts.SkipCreation {
 		t.Skip("Skipping creation-deletion test suite")
 	}
 
 	var creationFailed bool
+	var createdDistribution *v1alpha1.LlamaStackDistribution
 
 	// Run all creation tests
 	t.Run("creation", func(t *testing.T) {
-		TestCreationSuite(t)
+		createdDistribution = runCreationTestsForDistribution(t, distType)
 		creationFailed = t.Failed()
 	})
 
 	// Run deletion tests only if creation passed
-	if !creationFailed && !TestOpts.SkipDeletion {
+	if !creationFailed && !TestOpts.SkipDeletion && createdDistribution != nil {
 		t.Run("deletion", func(t *testing.T) {
-			// Create distribution instance for deletion
-			instance := &v1alpha1.LlamaStackDistribution{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "llamastackdistribution-sample",
-					Namespace: "llama-stack-test",
-				},
-			}
-			runDeletionTests(t, instance)
+			runDeletionTests(t, createdDistribution)
 		})
 	} else {
 		if TestOpts.SkipDeletion {

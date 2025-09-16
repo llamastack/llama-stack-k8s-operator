@@ -13,7 +13,7 @@ spec:
           value: 'http://ollama-server-service.ollama-dist.svc.cluster.local:11434'
       name: llama-stack
     distribution:
-      name: ollama
+      name: starter
     # Uncomment the storage section to use persistent storage
     # storage: {}  # Will use default size of 10Gi and default mount path of /.llama
     # Or specify custom values:
