@@ -139,6 +139,7 @@ _Appears in:_
 | `distributionConfig` _[DistributionConfig](#distributionconfig)_ | DistributionConfig contains the configuration information from the providers endpoint |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta) array_ | Conditions represent the latest available observations of the distribution's current state |  |  |
 | `availableReplicas` _integer_ | AvailableReplicas is the number of available replicas |  |  |
+| `serviceURL` _string_ | ServiceURL is the internal Kubernetes service URL where the distribution is exposed |  |  |
 
 #### PodOverrides
 

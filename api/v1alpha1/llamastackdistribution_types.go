@@ -205,6 +205,8 @@ type LlamaStackDistributionStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// AvailableReplicas is the number of available replicas
 	AvailableReplicas int32 `json:"availableReplicas,omitempty"`
+	// ServiceURL is the internal Kubernetes service URL where the distribution is exposed
+	ServiceURL string `json:"serviceURL,omitempty"`
 }
 
 //+kubebuilder:object:root=true

@@ -2183,6 +2183,10 @@ spec:
                 - Failed
                 - Terminating
                 type: string
+              serviceURL:
+                description: ServiceURL is the internal Kubernetes service URL where
+                  the distribution is exposed
+                type: string
               version:
                 description: Version contains version information for both operator
                   and deployment
