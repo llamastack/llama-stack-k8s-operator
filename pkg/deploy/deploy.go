@@ -8,7 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -23,7 +23,7 @@ func ApplyDeployment(ctx context.Context, cli client.Client, scheme *runtime.Sch
 
 	found := &appsv1.Deployment{}
 	err := cli.Get(ctx, client.ObjectKeyFromObject(deployment), found)
-	if err != nil && errors.IsNotFound(err) {
+	if err != nil && k8serrors.IsNotFound(err) {
 		logger.Info("Creating Deployment", "deployment", deployment.Name)
 		return cli.Create(ctx, deployment)
 	} else if err != nil {

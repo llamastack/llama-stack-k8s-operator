@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      # app: llama-stack
+      # app.kubernetes.io/instance: llamastackdistribution-sample
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: llama-stack
+      namespaceSelector: {}
+    ports:
+    - protocol: TCP
+  - from:
+    - podSelector: {}
+      namespaceSelector: {}
+    ports:
+    - protocol: TCP
