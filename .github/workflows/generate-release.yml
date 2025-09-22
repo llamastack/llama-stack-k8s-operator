@@ -253,7 +253,7 @@ jobs:
           make image-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
 
       - name: Log in to Quay.io
-        uses: docker/login-action@a26af69be951a213d495a4c3e4e4022e16d87065
+        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
         with:
           registry: quay.io
           username: ${{ secrets.APP_QUAY_USERNAME }}
