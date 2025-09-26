@@ -672,7 +672,7 @@ func (r *LlamaStackDistributionReconciler) resolveImage(distribution llamav1alph
 	}
 }
 
-// addExternalConfigMapEnvVars adds environment variables from external ConfigMaps
+// addExternalConfigMapEnvVars adds environment variables from external ConfigMaps.
 func addExternalConfigMapEnvVars(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) error {
 	if len(instance.Spec.Server.EnvFromExternalConfigMaps) == 0 {
 		return nil
@@ -681,7 +681,6 @@ func addExternalConfigMapEnvVars(ctx context.Context, r *LlamaStackDistributionR
 	logger := log.FromContext(ctx)
 
 	for _, extConfigMap := range instance.Spec.Server.EnvFromExternalConfigMaps {
-		// Fetch the external ConfigMap
 		configMap := &corev1.ConfigMap{}
 		err := r.Get(ctx, types.NamespacedName{
 			Name:      extConfigMap.Name,
@@ -699,7 +698,6 @@ func addExternalConfigMapEnvVars(ctx context.Context, r *LlamaStackDistributionR
 				extConfigMap.Namespace, extConfigMap.Name, err)
 		}
 
-		// Process the mapping and add environment variables
 		for configMapKey, envVarName := range extConfigMap.Mapping {
 			if value, exists := configMap.Data[configMapKey]; exists {
 				container.Env = append(container.Env, corev1.EnvVar{
