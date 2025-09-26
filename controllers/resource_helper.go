@@ -25,6 +25,8 @@ import (
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -184,6 +186,13 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 				Value: CABundleMountPath,
 			})
 		}
+	}
+
+	// Add environment variables from external ConfigMaps
+	if err := addExternalConfigMapEnvVars(ctx, r, instance, container); err != nil {
+		// Log error but don't fail deployment - allows graceful degradation
+		logger := log.FromContext(ctx)
+		logger.Error(err, "Failed to add external ConfigMap environment variables")
 	}
 
 	// Finally, add the user provided env vars
@@ -661,4 +670,55 @@ func (r *LlamaStackDistributionReconciler) resolveImage(distribution llamav1alph
 	default:
 		return "", errors.New("failed to validate distribution: either distribution.name or distribution.image must be set")
 	}
+}
+
+// addExternalConfigMapEnvVars adds environment variables from external ConfigMaps
+func addExternalConfigMapEnvVars(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) error {
+	if len(instance.Spec.Server.EnvFromExternalConfigMaps) == 0 {
+		return nil
+	}
+
+	logger := log.FromContext(ctx)
+
+	for _, extConfigMap := range instance.Spec.Server.EnvFromExternalConfigMaps {
+		// Fetch the external ConfigMap
+		configMap := &corev1.ConfigMap{}
+		err := r.Get(ctx, types.NamespacedName{
+			Name:      extConfigMap.Name,
+			Namespace: extConfigMap.Namespace,
+		}, configMap)
+		
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				logger.Info("External ConfigMap not found, skipping",
+					"configMapName", extConfigMap.Name,
+					"configMapNamespace", extConfigMap.Namespace)
+				continue
+			}
+			return fmt.Errorf("failed to get external ConfigMap %s/%s: %w", 
+				extConfigMap.Namespace, extConfigMap.Name, err)
+		}
+
+		// Process the mapping and add environment variables
+		for configMapKey, envVarName := range extConfigMap.Mapping {
+			if value, exists := configMap.Data[configMapKey]; exists {
+				container.Env = append(container.Env, corev1.EnvVar{
+					Name:  envVarName,
+					Value: value,
+				})
+				logger.V(1).Info("Added environment variable from external ConfigMap",
+					"configMapName", extConfigMap.Name,
+					"configMapNamespace", extConfigMap.Namespace,
+					"configMapKey", configMapKey,
+					"envVarName", envVarName)
+			} else {
+				logger.Info("ConfigMap key not found, skipping",
+					"configMapName", extConfigMap.Name,
+					"configMapNamespace", extConfigMap.Namespace,
+					"configMapKey", configMapKey)
+			}
+		}
+	}
+
+	return nil
 }
