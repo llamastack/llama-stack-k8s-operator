@@ -85,6 +85,10 @@ const (
 // When a ConfigMap's data changes, it automatically triggers reconciliation of the referencing
 // LlamaStackDistribution, which recalculates a content-based hash and updates the deployment's
 // pod template annotations. This causes Kubernetes to restart the pods with the updated configuration.
+//
+// Operator ConfigMap Watching Feature:
+// This reconciler also watches for changes to the operator configuration ConfigMap. When the operator
+// config changes, it triggers reconciliation of all LlamaStackDistribution resources.
 type LlamaStackDistributionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -678,6 +682,21 @@ func (r *LlamaStackDistributionReconciler) configMapUpdatePredicate(e event.Upda
 		return false
 	}
 
+	// Parse the feature flags if the operator config ConfigMap has changed
+	operatorNamespace, err := deploy.GetOperatorNamespace()
+	if err != nil {
+		return false
+	}
+	if newConfigMap.Name == operatorConfigData && newConfigMap.Namespace == operatorNamespace {
+		EnableNetworkPolicy, err := parseFeatureFlags(newConfigMap.Data)
+		if err != nil {
+			log.FromContext(context.Background()).Error(err, "Failed to parse feature flags")
+		} else {
+			r.EnableNetworkPolicy = EnableNetworkPolicy
+		}
+		return true
+	}
+
 	// Only proceed if this ConfigMap is referenced by any LlamaStackDistribution
 	if !r.isConfigMapReferenced(newConfigMap) {
 		return false
@@ -843,6 +862,27 @@ func (r *LlamaStackDistributionReconciler) manuallyCheckConfigMapReference(confi
 
 // findLlamaStackDistributionsForConfigMap maps ConfigMap changes to LlamaStackDistribution reconcile requests.
 func (r *LlamaStackDistributionReconciler) findLlamaStackDistributionsForConfigMap(ctx context.Context, configMap client.Object) []reconcile.Request {
+	logger := log.FromContext(ctx).WithValues(
+		"configMapName", configMap.GetName(),
+		"configMapNamespace", configMap.GetNamespace())
+
+	operatorNamespace, err := deploy.GetOperatorNamespace()
+	if err != nil {
+		log.FromContext(context.Background()).Error(err, "Failed to get operator namespace for config map event processing")
+		return nil
+	}
+	// If the operator config was changed, we reconcile all LlamaStackDistributions
+	if configMap.GetName() == operatorConfigData && configMap.GetNamespace() == operatorNamespace {
+		// List all LlamaStackDistribution resources across all namespaces
+		allLlamaStacks := llamav1alpha1.LlamaStackDistributionList{}
+		err = r.List(ctx, &allLlamaStacks)
+		if err != nil {
+			logger.Error(err, "Failed to list all LlamaStackDistributions for operator config change")
+			return nil
+		}
+		return r.convertToReconcileRequests(allLlamaStacks)
+	}
+
 	// Try field indexer lookup first
 	attachedLlamaStacks, found := r.tryFieldIndexerLookup(ctx, configMap)
 	if !found {
