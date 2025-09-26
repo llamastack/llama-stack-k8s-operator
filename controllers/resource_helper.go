@@ -687,7 +687,7 @@ func addExternalConfigMapEnvVars(ctx context.Context, r *LlamaStackDistributionR
 			Name:      extConfigMap.Name,
 			Namespace: extConfigMap.Namespace,
 		}, configMap)
-		
+
 		if err != nil {
 			if k8serrors.IsNotFound(err) {
 				logger.Info("External ConfigMap not found, skipping",
@@ -695,7 +695,7 @@ func addExternalConfigMapEnvVars(ctx context.Context, r *LlamaStackDistributionR
 					"configMapNamespace", extConfigMap.Namespace)
 				continue
 			}
-			return fmt.Errorf("failed to get external ConfigMap %s/%s: %w", 
+			return fmt.Errorf("failed to get external ConfigMap %s/%s: %w",
 				extConfigMap.Namespace, extConfigMap.Name, err)
 		}
 
