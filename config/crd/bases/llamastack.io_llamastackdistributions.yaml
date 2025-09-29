@@ -192,6 +192,44 @@ spec:
                       port:
                         format: int32
                         type: integer
+                      remoteEnv:
+                        items:
+                          description: RemoteEnv is an opinionated version of the
+                            k8s native EnvVar, allowing for the use of configmaps
+                            from different namespaces
+                          properties:
+                            name:
+                              description: The Name of the environment variable to
+                                be created
+                              type: string
+                            valueFrom:
+                              description: ValueFrom defines the source of the environment
+                                variable's value - this must be a remote configmap
+                              properties:
+                                configMapKeyRef:
+                                  description: ConfigMapKeyRef defines the remote
+                                    ConfigMap to be used and which key to select
+                                  properties:
+                                    key:
+                                      description: The Key to select
+                                      type: string
+                                    name:
+                                      description: Name of the configmap
+                                      type: string
+                                    namespace:
+                                      description: The Namespace of the remote configmap
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  - namespace
+                                  type: object
+                              type: object
+                          required:
+                          - name
+                          - valueFrom
+                          type: object
+                        type: array
                       resources:
                         description: ResourceRequirements describes the compute resource
                           requirements.

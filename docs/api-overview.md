@@ -37,6 +37,7 @@ _Appears in:_
 | `port` _integer_ |  |  |  |
 | `resources` _[ResourceRequirements](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#resourcerequirements-v1-core)_ |  |  |  |
 | `env` _[EnvVar](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#envvar-v1-core) array_ |  |  |  |
+| `remoteEnv` _[RemoteEnv](#remoteenv) array_ |  |  |  |
 | `command` _string array_ |  |  |  |
 | `args` _string array_ |  |  |  |
 
@@ -180,6 +181,42 @@ _Appears in:_
 | `provider_type` _string_ |  |  |  |
 | `config` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ |  |  |  |
 | `health` _[ProviderHealthStatus](#providerhealthstatus)_ |  |  |  |
+
+#### RemoteConfigMapKeySelector
+
+RemoteValueFrom is an opinionated version of the k8s native ConfigMapKeySelector, allowing for use of configmaps in different namespaces
+
+_Appears in:_
+- [RemoteValueFrom](#remotevaluefrom)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name of the configmap |  |  |
+| `key` _string_ | The Key to select |  |  |
+| `namespace` _string_ | The Namespace of the remote configmap |  |  |
+
+#### RemoteEnv
+
+RemoteEnv is an opinionated version of the k8s native EnvVar, allowing for the use of configmaps from different namespaces
+
+_Appears in:_
+- [ContainerSpec](#containerspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | The Name of the environment variable to be created |  |  |
+| `valueFrom` _[RemoteValueFrom](#remotevaluefrom)_ | ValueFrom defines the source of the environment variable's value - this must be a remote configmap |  |  |
+
+#### RemoteValueFrom
+
+RemoteValueFrom is an opinionated version of the k8s native EnvVarSource, allowing for use of configmaps in different namespaces
+
+_Appears in:_
+- [RemoteEnv](#remoteenv)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `configMapKeyRef` _[RemoteConfigMapKeySelector](#remoteconfigmapkeyselector)_ | ConfigMapKeyRef defines the remote ConfigMap to be used and which key to select |  |  |
 
 #### ServerSpec
 

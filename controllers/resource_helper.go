@@ -25,6 +25,7 @@ import (
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -186,8 +187,49 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 		}
 	}
 
-	// Finally, add the user provided env vars
+	// add the user provided env vars
 	container.Env = append(container.Env, instance.Spec.Server.ContainerSpec.Env...)
+
+	// add env vars from remote namespaces
+	if len(instance.Spec.Server.ContainerSpec.RemoteEnv) > 0 {
+		remoteEnvVars := configureRemoteEnvironmentVariables(ctx, r, instance.Spec.Server.ContainerSpec.RemoteEnv)
+		container.Env = append(container.Env, remoteEnvVars...)
+	}
+}
+
+// configureRemoteEnvironmentVariables defines environment variables from configmaps in remote namespaces. Configmaps
+// that cannot be read will log an error and will be skipped.
+func configureRemoteEnvironmentVariables(ctx context.Context, r *LlamaStackDistributionReconciler, remoteEnvs []llamav1alpha1.RemoteEnv) []corev1.EnvVar {
+	var envs = make([]corev1.EnvVar, 0)
+
+	// iterate through the remote environments array
+	for _, remoteEnv := range remoteEnvs {
+		// attempt to load the configmap
+		configMap := &corev1.ConfigMap{}
+		err := r.Get(ctx, types.NamespacedName{Name: remoteEnv.ValueFrom.ConfigMapKeyRef.Name, Namespace: remoteEnv.ValueFrom.ConfigMapKeyRef.Namespace}, configMap)
+		if err != nil {
+			// log error and move on
+			log.FromContext(ctx).Error(err, "Could not read remote configmap",
+				"name", remoteEnv.ValueFrom.ConfigMapKeyRef.Name,
+				"namespace", remoteEnv.ValueFrom.ConfigMapKeyRef.Namespace)
+			continue
+		}
+
+		// read the key provided in the remoteEnv
+		if v, ok := configMap.Data[remoteEnv.ValueFrom.ConfigMapKeyRef.Key]; ok {
+			envs = append(envs, corev1.EnvVar{
+				Name:  remoteEnv.Name,
+				Value: v,
+			})
+		} else {
+			log.FromContext(ctx).Info(
+				"ConfigMap key not found",
+				"configMap", remoteEnv.ValueFrom.ConfigMapKeyRef.Name,
+				"namespace", remoteEnv.ValueFrom.ConfigMapKeyRef.Namespace,
+				"key", remoteEnv.ValueFrom.ConfigMapKeyRef.Key)
+		}
+	}
+	return envs
 }
 
 // configureContainerMounts sets up volume mounts for the container.
@@ -198,7 +240,7 @@ func configureContainerMounts(ctx context.Context, r *LlamaStackDistributionReco
 	// Add ConfigMap volume mount if user config is specified
 	addUserConfigVolumeMount(instance, container)
 
-	// Add CA bundle volume mount if TLS config is specified or auto-detected
+	// Add CA bundle volume mount if TLS config is specified or awuto-detected
 	addCABundleVolumeMount(ctx, r, instance, container)
 }
 

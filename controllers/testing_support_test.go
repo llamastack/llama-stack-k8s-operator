@@ -112,6 +112,14 @@ func (b *DistributionBuilder) WithUserConfig(configMapName string) *Distribution
 	return b
 }
 
+func (b *DistributionBuilder) WithRemoteEnv(remoteEnv llamav1alpha1.RemoteEnv) *DistributionBuilder {
+	if b.instance.Spec.Server.ContainerSpec.RemoteEnv == nil {
+		b.instance.Spec.Server.ContainerSpec.RemoteEnv = make([]llamav1alpha1.RemoteEnv, 0)
+	}
+	b.instance.Spec.Server.ContainerSpec.RemoteEnv = append(b.instance.Spec.Server.ContainerSpec.RemoteEnv, remoteEnv)
+	return b
+}
+
 func (b *DistributionBuilder) Build() *llamav1alpha1.LlamaStackDistribution {
 	return b.instance.DeepCopy()
 }

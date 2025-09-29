@@ -512,3 +512,89 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoteEnvIntegration(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	// Create a test namespace
+	namespace := createTestNamespace(t, "test-remoteenv")
+
+	// Create a ConfigMap in the test namespace with a key/value
+	keyValue := "value"
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "remote-env-config",
+			Namespace: namespace.Name,
+		},
+		Data: map[string]string{
+			"KEY": keyValue,
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), configMap))
+
+	// Create a LlamaStackDistribution that uses RemoteEnv to reference the ConfigMap key
+	instance := NewDistributionBuilder().
+		WithName("test-remoteenv").
+		WithNamespace(namespace.Name).
+		WithRemoteEnv(llamav1alpha1.RemoteEnv{
+			Name: "ENV_EXISTS",
+			ValueFrom: llamav1alpha1.RemoteValueFrom{
+				ConfigMapKeyRef: llamav1alpha1.RemoteConfigMapKeySelector{
+					Name:      configMap.Name,
+					Key:       "KEY",
+					Namespace: configMap.Namespace,
+				},
+			},
+		}).
+		WithRemoteEnv(llamav1alpha1.RemoteEnv{
+			Name: "ENV_MISSING_KEY",
+			ValueFrom: llamav1alpha1.RemoteValueFrom{
+				ConfigMapKeyRef: llamav1alpha1.RemoteConfigMapKeySelector{
+					Name:      configMap.Name,
+					Key:       "does-not-exist",
+					Namespace: configMap.Namespace,
+				},
+			},
+		}).
+		WithRemoteEnv(llamav1alpha1.RemoteEnv{
+			Name: "ENV_MISSING_CONFIGMAP",
+			ValueFrom: llamav1alpha1.RemoteValueFrom{
+				ConfigMapKeyRef: llamav1alpha1.RemoteConfigMapKeySelector{
+					Name:      "does-not-exist",
+					Key:       "KEY",
+					Namespace: configMap.Namespace,
+				},
+			},
+		}).
+		Build()
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+	t.Cleanup(func() {
+		_ = k8sClient.Delete(t.Context(), instance)
+		_ = k8sClient.Delete(t.Context(), configMap)
+	})
+
+	// Reconcile to create the deployment
+	ReconcileDistribution(t, instance, false)
+
+	// Get the deployment and check for the remote env var
+	deployment := &appsv1.Deployment{}
+	waitForResource(t, k8sClient, instance.Namespace, instance.Name, deployment)
+
+	foundVar1 := false
+	foundVar2 := false
+	foundVar3 := false
+	for _, env := range deployment.Spec.Template.Spec.Containers[0].Env {
+		if env.Name == "ENV_EXISTS" && env.Value == keyValue {
+			foundVar1 = true
+		}
+		if env.Name == "ENV_MISSING_KEY" {
+			foundVar2 = true
+		}
+		if env.Name == "ENV_MISSING_CONFIGMAP" {
+			foundVar3 = true
+		}
+	}
+	require.True(t, foundVar1, "Expected remote env var ENV_EXISTS with value 'value' in deployment")
+	require.False(t, foundVar2, "Expected remote env var ENV_MISSING_KEY to not exist in deployment")
+	require.False(t, foundVar3, "Expected remote env var ENV_MISSING_CONFIGMAP to not exist in deployment")
+}

@@ -127,6 +127,30 @@ type StorageSpec struct {
 	MountPath string `json:"mountPath,omitempty"`
 }
 
+// RemoteEnv is an opinionated version of the k8s native EnvVar, allowing for the use of configmaps from different namespaces
+type RemoteEnv struct {
+	// The Name of the environment variable to be created
+	Name string `json:"name"`
+	// ValueFrom defines the source of the environment variable's value - this must be a remote configmap
+	ValueFrom RemoteValueFrom `json:"valueFrom"`
+}
+
+// RemoteValueFrom is an opinionated version of the k8s native EnvVarSource, allowing for use of configmaps in different namespaces
+type RemoteValueFrom struct {
+	// ConfigMapKeyRef defines the remote ConfigMap to be used and which key to select
+	ConfigMapKeyRef RemoteConfigMapKeySelector `json:"configMapKeyRef,omitempty"`
+}
+
+// RemoteValueFrom is an opinionated version of the k8s native ConfigMapKeySelector, allowing for use of configmaps in different namespaces
+type RemoteConfigMapKeySelector struct {
+	// Name of the configmap
+	Name string `json:"name"`
+	// The Key to select
+	Key string `json:"key"`
+	// The Namespace of the remote configmap
+	Namespace string `json:"namespace"`
+}
+
 // ContainerSpec defines the llama-stack server container configuration.
 type ContainerSpec struct {
 	// +kubebuilder:default:="llama-stack"
@@ -134,6 +158,7 @@ type ContainerSpec struct {
 	Port      int32                       `json:"port,omitempty"` // Defaults to 8321 if unset
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 	Env       []corev1.EnvVar             `json:"env,omitempty"` // Runtime env vars (e.g., INFERENCE_MODEL)
+	RemoteEnv []RemoteEnv                 `json:"remoteEnv,omitempty"`
 	Command   []string                    `json:"command,omitempty"`
 	Args      []string                    `json:"args,omitempty"`
 }
