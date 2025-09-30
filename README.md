@@ -104,6 +104,47 @@ Example to create a run.yaml ConfigMap, and a LlamaStackDistribution that refere
 kubectl apply -f config/samples/example-with-configmap.yaml
 ```
 
+## Image Mapping Overrides
+
+The operator supports ConfigMap-driven image updates for LLS Distribution images. This allows independent patching for security fixes or bug fixes without requiring a new operator version.
+
+### Configuration
+
+Create or update the operator ConfigMap with an `image-overrides` key:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llama-stack-operator-config
+  namespace: llama-stack-k8s-operator-system
+data:
+  image-overrides: |
+    rh-dev-2.25: quay.io/rhoai/rhoai-fbc-fragment:rhoai-2.25@sha256:3bc98555
+```
+
+### Symbolic Name Format
+
+Use the format `rh-dev-<major>-<minor>` for symbolic names that correspond to RHOAI versions. The operator will automatically detect the current RHOAI version and apply the appropriate override.
+
+### How It Works
+
+1. The operator reads image overrides from the `image-overrides` key in the operator ConfigMap
+2. Overrides are parsed as YAML with version-to-image mappings
+3. When deploying a LlamaStackDistribution, the operator checks for overrides matching the current RHOAI version
+4. If an override exists, it uses the specified image instead of the default distribution image
+5. Changes to the ConfigMap automatically trigger reconciliation of all LlamaStackDistribution resources
+
+### Example Usage
+
+To update the LLS Distribution image for RHOAI 2.25:
+
+```bash
+kubectl patch configmap llama-stack-operator-config -n llama-stack-k8s-operator-system --type merge -p '{"data":{"image-overrides":"rh-dev-2.25: quay.io/opendatahub/llama-stack:latest"}}'
+```
+
+This will cause all LlamaStackDistribution resources using the `rh-dev` name to restart with the new image while using RHOAI version 2.25.Z, once RHOAI is upgraded to another version then the distribution will revert back to the default for that version.
+
 ## Developer Guide
 
 ### Prerequisites
