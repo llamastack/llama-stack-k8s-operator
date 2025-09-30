@@ -58,6 +58,10 @@ func runCreationTestsForDistribution(t *testing.T, distType string) *v1alpha1.Ll
 		testServiceAccountOverride(t, llsdistributionCR)
 	})
 
+	t.Run("should apply image mapping overrides from ConfigMap", func(t *testing.T) {
+		testImageMappingOverrides(t, llsdistributionCR)
+	})
+
 	return llsdistributionCR
 }
 
@@ -407,4 +411,106 @@ func validateProviders(t *testing.T, distribution *v1alpha1.LlamaStackDistributi
 		}
 		require.NotEmpty(t, provider.Config, "Provider config should not be empty")
 	}
+}
+
+func testImageMappingOverrides(t *testing.T, distribution *v1alpha1.LlamaStackDistribution) {
+	t.Helper()
+
+	// Get the current deployment to save the original image
+	deployment := &appsv1.Deployment{}
+	require.NoError(t, TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
+		Namespace: distribution.Namespace,
+		Name:      distribution.Name,
+	}, deployment))
+	originalImage := deployment.Spec.Template.Spec.Containers[0].Image
+
+	// Get the operator ConfigMap
+	operatorConfigMap := &corev1.ConfigMap{}
+	require.NoError(t, TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
+		Namespace: TestOpts.OperatorNS,
+		Name:      "llama-stack-operator-config",
+	}, operatorConfigMap))
+
+	// Add image override for the distribution type
+	testOverrideImage := "quay.io/test/llama-stack:override-test"
+	if operatorConfigMap.Data == nil {
+		operatorConfigMap.Data = make(map[string]string)
+	}
+	operatorConfigMap.Data["image-overrides"] = distribution.Spec.Server.Distribution.Name + ": " + testOverrideImage
+
+	// Update the ConfigMap
+	require.NoError(t, TestEnv.Client.Update(TestEnv.Ctx, operatorConfigMap),
+		"Failed to update operator ConfigMap with image overrides")
+
+	// Wait for the operator to reconcile and update the deployment
+	// The ConfigMap change should trigger reconciliation of all distributions
+	err := wait.PollUntilContextTimeout(TestEnv.Ctx, 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		getErr := TestEnv.Client.Get(ctx, client.ObjectKey{
+			Namespace: distribution.Namespace,
+			Name:      distribution.Name,
+		}, deployment)
+		if getErr != nil {
+			return false, getErr
+		}
+		currentImage := deployment.Spec.Template.Spec.Containers[0].Image
+		t.Logf("Current deployment image: %s (waiting for: %s)", currentImage, testOverrideImage)
+		return currentImage == testOverrideImage, nil
+	})
+	requireNoErrorWithDebugging(t, TestEnv, err,
+		"Deployment should be updated with override image from ConfigMap",
+		distribution.Namespace, distribution.Name)
+
+	// Verify the deployment is using the override image
+	require.NoError(t, TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
+		Namespace: distribution.Namespace,
+		Name:      distribution.Name,
+	}, deployment))
+	assert.Equal(t, testOverrideImage, deployment.Spec.Template.Spec.Containers[0].Image,
+		"Deployment should use image from ConfigMap override")
+
+	// Test updating the override to a different image
+	updatedOverrideImage := "quay.io/test/llama-stack:override-test-v2"
+	operatorConfigMap.Data["image-overrides"] = distribution.Spec.Server.Distribution.Name + ": " + updatedOverrideImage
+	require.NoError(t, TestEnv.Client.Update(TestEnv.Ctx, operatorConfigMap),
+		"Failed to update operator ConfigMap with new image override")
+
+	// Wait for the deployment to update with the new override
+	err = wait.PollUntilContextTimeout(TestEnv.Ctx, 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		getErr := TestEnv.Client.Get(ctx, client.ObjectKey{
+			Namespace: distribution.Namespace,
+			Name:      distribution.Name,
+		}, deployment)
+		if getErr != nil {
+			return false, getErr
+		}
+		currentImage := deployment.Spec.Template.Spec.Containers[0].Image
+		t.Logf("Current deployment image: %s (waiting for updated override: %s)", currentImage, updatedOverrideImage)
+		return currentImage == updatedOverrideImage, nil
+	})
+	requireNoErrorWithDebugging(t, TestEnv, err,
+		"Deployment should be updated with new override image from ConfigMap",
+		distribution.Namespace, distribution.Name)
+
+	// Clean up - remove the image-overrides entry from the ConfigMap
+	delete(operatorConfigMap.Data, "image-overrides")
+
+	require.NoError(t, TestEnv.Client.Update(TestEnv.Ctx, operatorConfigMap),
+		"Failed to restore operator ConfigMap")
+
+	// Wait for the deployment to revert to the original image
+	err = wait.PollUntilContextTimeout(TestEnv.Ctx, 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		getErr := TestEnv.Client.Get(ctx, client.ObjectKey{
+			Namespace: distribution.Namespace,
+			Name:      distribution.Name,
+		}, deployment)
+		if getErr != nil {
+			return false, getErr
+		}
+		currentImage := deployment.Spec.Template.Spec.Containers[0].Image
+		t.Logf("Current deployment image: %s (waiting for original: %s)", currentImage, originalImage)
+		return currentImage == originalImage, nil
+	})
+	requireNoErrorWithDebugging(t, TestEnv, err,
+		"Deployment should revert to original image after removing override",
+		distribution.Namespace, distribution.Name)
 }
