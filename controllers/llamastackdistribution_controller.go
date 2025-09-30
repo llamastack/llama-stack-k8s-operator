@@ -42,8 +42,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -240,10 +238,16 @@ func (r *LlamaStackDistributionReconciler) determineKindsToExclude(instance *lla
 	return kinds
 }
 
-// reconcileManifestResources applies resources that are managed by the operator
-// based on the instance specification.
-func (r *LlamaStackDistributionReconciler) reconcileManifestResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	resMap, err := deploy.RenderManifest(filesys.MakeFsOnDisk(), manifestsBasePath, instance)
+// reconcileAllManifestResources applies all manifest-based resources using kustomize
+func (r *LlamaStackDistributionReconciler) reconcileAllManifestResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	// Build manifest context for Deployment
+	manifestCtx, err := r.buildManifestContext(ctx, instance)
+	if err != nil {
+		return fmt.Errorf("failed to build manifest context: %w", err)
+	}
+
+	// Render manifests with context
+	resMap, err := deploy.RenderManifestWithContext(filesys.MakeFsOnDisk(), manifestsBasePath, instance, manifestCtx)
 	if err != nil {
 		return fmt.Errorf("failed to render manifests: %w", err)
 	}
@@ -254,6 +258,7 @@ func (r *LlamaStackDistributionReconciler) reconcileManifestResources(ctx contex
 		return fmt.Errorf("failed to filter manifests: %w", err)
 	}
 
+	// Apply resources to cluster
 	if err := deploy.ApplyResources(ctx, r.Client, r.Scheme, instance, filteredResMap); err != nil {
 		return fmt.Errorf("failed to apply manifests: %w", err)
 	}
@@ -261,31 +266,64 @@ func (r *LlamaStackDistributionReconciler) reconcileManifestResources(ctx contex
 	return nil
 }
 
+// buildManifestContext creates the manifest context for Deployment using existing helper functions.
+func (r *LlamaStackDistributionReconciler) buildManifestContext(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) (*deploy.ManifestContext, error) {
+	// Validate distribution configuration
+	if err := r.validateDistribution(instance); err != nil {
+		return nil, err
+	}
+
+	resolvedImage, err := r.resolveImage(instance.Spec.Server.Distribution)
+	if err != nil {
+		return nil, err
+	}
+
+	container := buildContainerSpec(ctx, r, instance, resolvedImage)
+	podSpec := configurePodStorage(ctx, r, instance, container)
+
+	// Get UserConfigMap hash if needed
+	var configMapHash string
+	if r.hasUserConfigMap(instance) {
+		hash, err := r.getConfigMapHash(ctx, instance)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get ConfigMap hash: %w", err)
+		}
+		configMapHash = hash
+	}
+
+	// Get CA bundle hash if needed
+	var caBundleHash string
+	if r.hasCABundleConfigMap(instance) {
+		hash, err := r.getCABundleConfigMapHash(ctx, instance)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get CA bundle ConfigMap hash: %w", err)
+		}
+		caBundleHash = hash
+	}
+
+	podSpecMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&podSpec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert pod spec to map: %w", err)
+	}
+
+	return &deploy.ManifestContext{
+		ResolvedImage: resolvedImage,
+		ConfigMapHash: configMapHash,
+		CABundleHash:  caBundleHash,
+		PodSpec:       podSpecMap,
+	}, nil
+}
+
 // reconcileResources reconciles all resources for the LlamaStackDistribution instance.
 func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	// Reconcile ConfigMaps
+	// Reconcile ConfigMaps first
 	if err := r.reconcileConfigMaps(ctx, instance); err != nil {
 		return err
 	}
 
-	// Reconcile storage
-	if err := r.reconcileStorage(ctx, instance); err != nil {
+	// Reconcile all manifest-based resources including Deployment: PVC, ServiceAccount, Service, NetworkPolicy, Deployment
+	if err := r.reconcileAllManifestResources(ctx, instance); err != nil {
 		return err
-	}
-
-	// Reconcile manifest-based resources
-	if err := r.reconcileManifestResources(ctx, instance); err != nil {
-		return err
-	}
-
-	// Reconcile the NetworkPolicy
-	if err := r.reconcileNetworkPolicy(ctx, instance); err != nil {
-		return fmt.Errorf("failed to reconcile NetworkPolicy: %w", err)
-	}
-
-	// Reconcile the Deployment
-	if err := r.reconcileDeployment(ctx, instance); err != nil {
-		return fmt.Errorf("failed to reconcile Deployment: %w", err)
 	}
 
 	return nil
@@ -303,21 +341,6 @@ func (r *LlamaStackDistributionReconciler) reconcileConfigMaps(ctx context.Conte
 	if r.hasCABundleConfigMap(instance) {
 		if err := r.reconcileCABundleConfigMap(ctx, instance); err != nil {
 			return fmt.Errorf("failed to reconcile CA bundle ConfigMap: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func (r *LlamaStackDistributionReconciler) reconcileStorage(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	// Reconcile the PVC if storage is configured
-	if instance.Spec.Server.Storage != nil {
-		resMap, err := deploy.RenderManifest(filesys.MakeFsOnDisk(), manifestsBasePath, instance)
-		if err != nil {
-			return fmt.Errorf("failed to render PVC manifests: %w", err)
-		}
-		if err := deploy.ApplyResources(ctx, r.Client, r.Scheme, instance, resMap); err != nil {
-			return fmt.Errorf("failed to apply PVC manifests: %w", err)
 		}
 	}
 
@@ -741,89 +764,6 @@ func (r *LlamaStackDistributionReconciler) convertToReconcileRequests(attachedLl
 	return requests
 }
 
-// reconcileDeployment manages the Deployment for the LlamaStack server.
-func (r *LlamaStackDistributionReconciler) reconcileDeployment(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	logger := log.FromContext(ctx)
-
-	// Validate distribution configuration
-	if err := r.validateDistribution(instance); err != nil {
-		return err
-	}
-
-	// Get the image either from the map or direct reference
-	resolvedImage, err := r.resolveImage(instance.Spec.Server.Distribution)
-	if err != nil {
-		return err
-	}
-
-	// Build container spec
-	container := buildContainerSpec(ctx, r, instance, resolvedImage)
-
-	// Configure storage
-	podSpec := configurePodStorage(ctx, r, instance, container)
-
-	// Set the service acc
-	// Prepare annotations for the pod template
-	podAnnotations := make(map[string]string)
-
-	// Add ConfigMap hash to trigger restarts when the ConfigMap changes
-	if r.hasUserConfigMap(instance) {
-		configMapHash, err := r.getConfigMapHash(ctx, instance)
-		if err != nil {
-			return fmt.Errorf("failed to get ConfigMap hash for pod restart annotation: %w", err)
-		}
-		if configMapHash != "" {
-			podAnnotations["configmap.hash/user-config"] = configMapHash
-			logger.V(1).Info("Added ConfigMap hash annotation to trigger pod restart",
-				"configMapName", instance.Spec.Server.UserConfig.ConfigMapName,
-				"hash", configMapHash)
-		}
-	}
-
-	// Add CA bundle ConfigMap hash to trigger restarts when the CA bundle changes
-	if r.hasCABundleConfigMap(instance) {
-		caBundleHash, err := r.getCABundleConfigMapHash(ctx, instance)
-		if err != nil {
-			return fmt.Errorf("failed to get CA bundle ConfigMap hash for pod restart annotation: %w", err)
-		}
-		if caBundleHash != "" {
-			podAnnotations["configmap.hash/ca-bundle"] = caBundleHash
-			logger.V(1).Info("Added CA bundle ConfigMap hash annotation to trigger pod restart",
-				"configMapName", instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
-				"hash", caBundleHash)
-		}
-	}
-
-	// Create deployment object
-	deployment := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      instance.Name,
-			Namespace: instance.Namespace,
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: &instance.Spec.Replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
-					"app.kubernetes.io/instance":  instance.Name,
-				},
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
-						"app.kubernetes.io/instance":  instance.Name,
-					},
-					Annotations: podAnnotations,
-				},
-				Spec: podSpec,
-			},
-		},
-	}
-
-	return deploy.ApplyDeployment(ctx, r.Client, r.Scheme, instance, deployment, logger)
-}
-
 // getServerURL returns the URL for the LlamaStack server.
 func (r *LlamaStackDistributionReconciler) getServerURL(instance *llamav1alpha1.LlamaStackDistribution, path string) *url.URL {
 	serviceName := deploy.GetServiceName(instance)
@@ -1047,86 +987,6 @@ func (r *LlamaStackDistributionReconciler) updateDistributionConfig(instance *ll
 		activeDistribution = "custom"
 	}
 	instance.Status.DistributionConfig.ActiveDistribution = activeDistribution
-}
-
-// reconcileNetworkPolicy manages the NetworkPolicy for the LlamaStack server.
-func (r *LlamaStackDistributionReconciler) reconcileNetworkPolicy(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	logger := log.FromContext(ctx)
-	networkPolicy := &networkingv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      instance.Name + "-network-policy",
-			Namespace: instance.Namespace,
-		},
-	}
-
-	// If feature is disabled, delete the NetworkPolicy if it exists
-	if !r.EnableNetworkPolicy {
-		return deploy.HandleDisabledNetworkPolicy(ctx, r.Client, networkPolicy, logger)
-	}
-
-	port := deploy.GetServicePort(instance)
-
-	// get operator namespace
-	operatorNamespace, err := deploy.GetOperatorNamespace()
-	if err != nil {
-		return fmt.Errorf("failed to get operator namespace: %w", err)
-	}
-
-	networkPolicy.Spec = networkingv1.NetworkPolicySpec{
-		PodSelector: metav1.LabelSelector{
-			MatchLabels: map[string]string{
-				llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
-				"app.kubernetes.io/instance":  instance.Name,
-			},
-		},
-		PolicyTypes: []networkingv1.PolicyType{
-			networkingv1.PolicyTypeIngress,
-		},
-		Ingress: []networkingv1.NetworkPolicyIngressRule{
-			{
-				From: []networkingv1.NetworkPolicyPeer{
-					{ // to match all pods in all namespaces
-						PodSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"app.kubernetes.io/part-of": llamav1alpha1.DefaultContainerName,
-							},
-						},
-						NamespaceSelector: &metav1.LabelSelector{}, // Empty namespaceSelector to match all namespaces
-					},
-				},
-				Ports: []networkingv1.NetworkPolicyPort{
-					{
-						Protocol: (*corev1.Protocol)(ptr.To("TCP")),
-						Port: &intstr.IntOrString{
-							IntVal: port,
-						},
-					},
-				},
-			},
-			{
-				From: []networkingv1.NetworkPolicyPeer{
-					{ // to match all pods in matched namespace
-						PodSelector: &metav1.LabelSelector{},
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"kubernetes.io/metadata.name": operatorNamespace,
-							},
-						},
-					},
-				},
-				Ports: []networkingv1.NetworkPolicyPort{
-					{
-						Protocol: (*corev1.Protocol)(ptr.To("TCP")),
-						Port: &intstr.IntOrString{
-							IntVal: port,
-						},
-					},
-				},
-			},
-		},
-	}
-
-	return deploy.ApplyNetworkPolicy(ctx, r.Client, r.Scheme, instance, networkPolicy, logger)
 }
 
 // reconcileUserConfigMap validates that the referenced ConfigMap exists.
