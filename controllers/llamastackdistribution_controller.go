@@ -88,6 +88,8 @@ type LlamaStackDistributionReconciler struct {
 	Scheme *runtime.Scheme
 	// Feature flags
 	EnableNetworkPolicy bool
+	// Image mapping overrides
+	ImageMappingOverrides map[string]string
 	// Cluster info
 	ClusterInfo *cluster.ClusterInfo
 	httpClient  *http.Client
@@ -536,21 +538,40 @@ func (r *LlamaStackDistributionReconciler) configMapUpdatePredicate(e event.Upda
 		return false
 	}
 
-	// Parse the feature flags if the operator config ConfigMap has changed
+	// Check if this is the operator config ConfigMap
+	if r.handleOperatorConfigUpdate(newConfigMap) {
+		return true
+	}
+
+	// Handle referenced ConfigMap updates
+	return r.handleReferencedConfigMapUpdate(oldConfigMap, newConfigMap)
+}
+
+// handleOperatorConfigUpdate processes updates to the operator config ConfigMap.
+func (r *LlamaStackDistributionReconciler) handleOperatorConfigUpdate(configMap *corev1.ConfigMap) bool {
 	operatorNamespace, err := deploy.GetOperatorNamespace()
 	if err != nil {
 		return false
 	}
-	if newConfigMap.Name == operatorConfigData && newConfigMap.Namespace == operatorNamespace {
-		EnableNetworkPolicy, err := parseFeatureFlags(newConfigMap.Data)
-		if err != nil {
-			log.FromContext(context.Background()).Error(err, "Failed to parse feature flags")
-		} else {
-			r.EnableNetworkPolicy = EnableNetworkPolicy
-		}
-		return true
+
+	if configMap.Name != operatorConfigData || configMap.Namespace != operatorNamespace {
+		return false
 	}
 
+	// Update feature flags
+	EnableNetworkPolicy, err := parseFeatureFlags(configMap.Data)
+	if err != nil {
+		log.FromContext(context.Background()).Error(err, "Failed to parse feature flags")
+	} else {
+		r.EnableNetworkPolicy = EnableNetworkPolicy
+	}
+
+	r.ImageMappingOverrides = ParseImageMappingOverrides(configMap.Data)
+	return true
+}
+
+// handleReferencedConfigMapUpdate processes updates to referenced ConfigMaps.
+func (r *LlamaStackDistributionReconciler) handleReferencedConfigMapUpdate(oldConfigMap, newConfigMap *corev1.ConfigMap) bool {
 	// Only proceed if this ConfigMap is referenced by any LlamaStackDistribution
 	if !r.isConfigMapReferenced(newConfigMap) {
 		return false
@@ -1360,29 +1381,10 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 		return nil, fmt.Errorf("failed to get operator namespace: %w", err)
 	}
 
-	// Get the ConfigMap
-	// If the ConfigMap doesn't exist, create it with default feature flags
-	// If the ConfigMap exists, parse the feature flags from the Configmap
-	configMap := &corev1.ConfigMap{}
-	configMapName := types.NamespacedName{
-		Name:      operatorConfigData,
-		Namespace: operatorNamespace,
-	}
-
-	if err = client.Get(ctx, configMapName, configMap); err != nil {
-		if !k8serrors.IsNotFound(err) {
-			return nil, fmt.Errorf("failed to get ConfigMap: %w", err)
-		}
-
-		// ConfigMap doesn't exist, create it with defaults
-		configMap, err = createDefaultConfigMap(configMapName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate default configMap: %w", err)
-		}
-
-		if err = client.Create(ctx, configMap); err != nil {
-			return nil, fmt.Errorf("failed to create ConfigMap: %w", err)
-		}
+	// Initialize operator config ConfigMap
+	configMap, err := initializeOperatorConfigMap(ctx, client, operatorNamespace)
+	if err != nil {
+		return nil, err
 	}
 
 	// Parse feature flags from ConfigMap
@@ -1390,23 +1392,81 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse feature flags: %w", err)
 	}
+
+	// Parse image mapping overrides from ConfigMap
+	imageMappingOverrides := ParseImageMappingOverrides(configMap.Data)
+
 	return &LlamaStackDistributionReconciler{
-		Client:              client,
-		Scheme:              scheme,
-		EnableNetworkPolicy: enableNetworkPolicy,
-		ClusterInfo:         clusterInfo,
-		httpClient:          &http.Client{Timeout: 5 * time.Second},
+		Client:                client,
+		Scheme:                scheme,
+		EnableNetworkPolicy:   enableNetworkPolicy,
+		ImageMappingOverrides: imageMappingOverrides,
+		ClusterInfo:           clusterInfo,
+		httpClient:            &http.Client{Timeout: 5 * time.Second},
 	}, nil
+}
+
+// initializeOperatorConfigMap gets or creates the operator config ConfigMap.
+func initializeOperatorConfigMap(ctx context.Context, c client.Client, operatorNamespace string) (*corev1.ConfigMap, error) {
+	configMap := &corev1.ConfigMap{}
+	configMapName := types.NamespacedName{
+		Name:      operatorConfigData,
+		Namespace: operatorNamespace,
+	}
+
+	err := c.Get(ctx, configMapName, configMap)
+	if err == nil {
+		return configMap, nil
+	}
+
+	if !k8serrors.IsNotFound(err) {
+		return nil, fmt.Errorf("failed to get ConfigMap: %w", err)
+	}
+
+	// ConfigMap doesn't exist, create it with defaults
+	configMap, err = createDefaultConfigMap(configMapName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate default configMap: %w", err)
+	}
+
+	if err = c.Create(ctx, configMap); err != nil {
+		return nil, fmt.Errorf("failed to create ConfigMap: %w", err)
+	}
+
+	return configMap, nil
+}
+
+func ParseImageMappingOverrides(configMapData map[string]string) map[string]string {
+	imageMappingOverrides := make(map[string]string)
+
+	// Look for the image-overrides key in the ConfigMap data
+	if overridesYAML, exists := configMapData["image-overrides"]; exists {
+		// Parse the YAML content
+		var overrides map[string]string
+		if err := yaml.Unmarshal([]byte(overridesYAML), &overrides); err != nil {
+			// Log error but continue with empty overrides
+			fmt.Printf("failed to parse image-overrides YAML: %v\n", err)
+			return imageMappingOverrides
+		}
+
+		// Copy the parsed overrides to our result map
+		for version, image := range overrides {
+			imageMappingOverrides[version] = image
+		}
+	}
+
+	return imageMappingOverrides
 }
 
 // NewTestReconciler creates a reconciler for testing, allowing injection of a custom http client and feature flags.
 func NewTestReconciler(client client.Client, scheme *runtime.Scheme, clusterInfo *cluster.ClusterInfo,
 	httpClient *http.Client, enableNetworkPolicy bool) *LlamaStackDistributionReconciler {
 	return &LlamaStackDistributionReconciler{
-		Client:              client,
-		Scheme:              scheme,
-		ClusterInfo:         clusterInfo,
-		httpClient:          httpClient,
-		EnableNetworkPolicy: enableNetworkPolicy,
+		Client:                client,
+		Scheme:                scheme,
+		ClusterInfo:           clusterInfo,
+		httpClient:            httpClient,
+		EnableNetworkPolicy:   enableNetworkPolicy,
+		ImageMappingOverrides: make(map[string]string),
 	}
 }
