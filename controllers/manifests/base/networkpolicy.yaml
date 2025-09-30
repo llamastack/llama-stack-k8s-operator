@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: llama-stack
+      app.kubernetes.io/instance: ""
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: llama-stack
+      namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8321
+  - from:
+    - podSelector: {}
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ""  # Will be set to operator namespace
+    ports:
+    - protocol: TCP
+      port: 8321

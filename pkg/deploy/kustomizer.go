@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -224,7 +225,7 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 	return nil
 }
 
-// getFieldMappings returns essential field mappings for kustomize transformation
+// getFieldMappings returns essential field mappings for kustomize transformation.
 func getFieldMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plugins.FieldMapping {
 	return []plugins.FieldMapping{
 		// PVC storage size
@@ -359,9 +360,12 @@ type ManifestContext struct {
 }
 
 // RenderManifestWithContext renders manifests and enhances the Deployment with complex specs.
-func RenderManifestWithContext(fs filesys.FileSystem, manifestsPath string,
-	ownerInstance *llamav1alpha1.LlamaStackDistribution, manifestCtx *ManifestContext) (*resmap.ResMap, error) {
-
+func RenderManifestWithContext(
+	fs filesys.FileSystem,
+	manifestsPath string,
+	ownerInstance *llamav1alpha1.LlamaStackDistribution,
+	manifestCtx *ManifestContext,
+) (*resmap.ResMap, error) {
 	// First, render the base manifests
 	resMap, err := RenderManifest(fs, manifestsPath, ownerInstance)
 	if err != nil {
@@ -392,31 +396,16 @@ func updateDeploymentSpec(res *resource.Resource, manifestCtx *ManifestContext) 
 	// Parse the deployment YAML
 	data, err := parseDeploymentYAML(res)
 	if err != nil {
-		return fmt.Errorf("failed to get YAML: %w", err)
+		return err
 	}
 
-	var data map[string]any
-	if err := yamlpkg.Unmarshal(yamlBytes, &data); err != nil {
-		return fmt.Errorf("failed to unmarshal YAML: %w", err)
+	// Navigate to template spec
+	templateSpec, err := getDeploymentTemplateSpec(data)
+	if err != nil {
+		return err
 	}
 
-	// Navigate to the pod spec
-	spec, ok := data["spec"].(map[string]any)
-	if !ok {
-		return fmt.Errorf("deployment spec not found")
-	}
-
-	template, ok := spec["template"].(map[string]any)
-	if !ok {
-		return fmt.Errorf("deployment template not found")
-	}
-
-	templateSpec, ok := template["spec"].(map[string]any)
-	if !ok {
-		return fmt.Errorf("deployment template spec not found")
-	}
-
-	// Set the enhanced pod spec
+	// Apply pod spec enhancements
 	if manifestCtx.PodSpec != nil {
 		for key, value := range manifestCtx.PodSpec {
 			templateSpec[key] = value
@@ -498,13 +487,16 @@ func addConfigMapAnnotations(data map[string]any, manifestCtx *ManifestContext) 
 		annotations["configmap.hash/ca-bundle"] = manifestCtx.CABundleHash
 	}
 
-	// Update the resource
+	return nil
+}
+
+// updateResourceFromData updates the resource with the modified data.
+func updateResourceFromData(res *resource.Resource, data map[string]any) error {
 	updatedJSON, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("failed to marshal updated data: %w", err)
 	}
 
-	// Convert JSON to YAML for resource creation
 	updatedYAML, err := yamlpkg.JSONToYAML(updatedJSON)
 	if err != nil {
 		return fmt.Errorf("failed to convert JSON to YAML: %w", err)

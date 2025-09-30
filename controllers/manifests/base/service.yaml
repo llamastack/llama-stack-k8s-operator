@@ -4,7 +4,9 @@ metadata:
   name: service
 spec:
   type: ClusterIP
-  selector: {}
+  selector:
+    app: llama-stack
+    app.kubernetes.io/instance: ""  # Will be set by field transformation
   ports:
   - name: http
     protocol: TCP

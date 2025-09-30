@@ -140,7 +140,7 @@ resources:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: my-app`
+  name: deployment`
 		require.NoError(t, fsys.WriteFile(filepath.Join(defaultPath, "deployment.yaml"), []byte(deploymentContent)))
 
 		owner := &llamav1alpha1.LlamaStackDistribution{
@@ -158,7 +158,7 @@ metadata:
 		require.Equal(t, 1, (*resMap).Size())
 		res := (*resMap).Resources()[0]
 		require.Equal(t, "Deployment", res.GetKind())
-		require.Equal(t, "test-instance-my-app", res.GetName())
+		require.Equal(t, "test-instance", res.GetName())
 		assert.Equal(t, "test-fallback-ns", res.GetNamespace(), "Deployment should have the correct namespace set by plugin")
 	})
 

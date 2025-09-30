@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -238,7 +239,7 @@ func (r *LlamaStackDistributionReconciler) determineKindsToExclude(instance *lla
 	return kinds
 }
 
-// reconcileAllManifestResources applies all manifest-based resources using kustomize
+// reconcileAllManifestResources applies all manifest-based resources using kustomize.
 func (r *LlamaStackDistributionReconciler) reconcileAllManifestResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
 	// Build manifest context for Deployment
 	manifestCtx, err := r.buildManifestContext(ctx, instance)
@@ -258,9 +259,61 @@ func (r *LlamaStackDistributionReconciler) reconcileAllManifestResources(ctx con
 		return fmt.Errorf("failed to filter manifests: %w", err)
 	}
 
+	// Delete excluded resources that might exist from previous reconciliations
+	if err := r.deleteExcludedResources(ctx, instance, kindsToExclude); err != nil {
+		return fmt.Errorf("failed to delete excluded resources: %w", err)
+	}
+
 	// Apply resources to cluster
 	if err := deploy.ApplyResources(ctx, r.Client, r.Scheme, instance, filteredResMap); err != nil {
 		return fmt.Errorf("failed to apply manifests: %w", err)
+	}
+
+	return nil
+}
+
+// deleteExcludedResources deletes resources that are excluded from the current reconciliation
+// but might exist from previous reconciliations.
+func (r *LlamaStackDistributionReconciler) deleteExcludedResources(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, kindsToExclude []string) error {
+	logger := log.FromContext(ctx)
+
+	if slices.Contains(kindsToExclude, "NetworkPolicy") {
+		if err := r.deleteNetworkPolicyIfExists(ctx, instance); err != nil {
+			logger.Error(err, "Failed to delete NetworkPolicy")
+			return err
+		}
+	}
+
+	return nil
+}
+
+// deleteNetworkPolicyIfExists deletes the NetworkPolicy if it exists.
+func (r *LlamaStackDistributionReconciler) deleteNetworkPolicyIfExists(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	logger := log.FromContext(ctx)
+
+	networkPolicy := &networkingv1.NetworkPolicy{}
+	networkPolicyName := instance.Name + "-network-policy"
+	key := types.NamespacedName{Name: networkPolicyName, Namespace: instance.Namespace}
+
+	err := r.Get(ctx, key, networkPolicy)
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			// NetworkPolicy doesn't exist, nothing to delete
+			return nil
+		}
+		return fmt.Errorf("failed to get NetworkPolicy: %w", err)
+	}
+
+	// Check if this NetworkPolicy is owned by our instance
+	if !metav1.IsControlledBy(networkPolicy, instance) {
+		logger.V(1).Info("NetworkPolicy not owned by this instance, skipping deletion",
+			"networkPolicy", networkPolicyName)
+		return nil
+	}
+
+	logger.Info("Deleting NetworkPolicy as feature is disabled", "networkPolicy", networkPolicyName)
+	if err := r.Delete(ctx, networkPolicy); err != nil {
+		return fmt.Errorf("failed to delete NetworkPolicy: %w", err)
 	}
 
 	return nil
@@ -284,21 +337,19 @@ func (r *LlamaStackDistributionReconciler) buildManifestContext(ctx context.Cont
 	// Get UserConfigMap hash if needed
 	var configMapHash string
 	if r.hasUserConfigMap(instance) {
-		hash, err := r.getConfigMapHash(ctx, instance)
+		configMapHash, err = r.getConfigMapHash(ctx, instance)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get ConfigMap hash: %w", err)
 		}
-		configMapHash = hash
 	}
 
 	// Get CA bundle hash if needed
 	var caBundleHash string
 	if r.hasCABundleConfigMap(instance) {
-		hash, err := r.getCABundleConfigMapHash(ctx, instance)
+		caBundleHash, err = r.getCABundleConfigMapHash(ctx, instance)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get CA bundle ConfigMap hash: %w", err)
 		}
-		caBundleHash = hash
 	}
 
 	podSpecMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&podSpec)
