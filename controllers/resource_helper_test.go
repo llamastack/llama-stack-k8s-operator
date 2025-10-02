@@ -28,7 +28,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestBuildContainerSpec(t *testing.T) {
@@ -662,5 +665,148 @@ func newDefaultStartupProbe(port int32) *corev1.Probe {
 		TimeoutSeconds:      startupProbeTimeoutSeconds,
 		FailureThreshold:    startupProbeFailureThreshold,
 		SuccessThreshold:    startupProbeSuccessThreshold,
+	}
+}
+
+func TestAddExternalConfigMapEnvVars(t *testing.T) {
+	testCases := []struct {
+		name               string
+		instance           *llamav1alpha1.LlamaStackDistribution
+		existingConfigMaps []corev1.ConfigMap
+		expectedEnvVars    []corev1.EnvVar
+		expectError        bool
+	}{
+		{
+			name: "no external configmaps configured",
+			instance: &llamav1alpha1.LlamaStackDistribution{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test",
+					Namespace: "test-ns",
+				},
+				Spec: llamav1alpha1.LlamaStackDistributionSpec{
+					Server: llamav1alpha1.ServerSpec{
+						EnvFromExternalConfigMaps: nil,
+					},
+				},
+			},
+			existingConfigMaps: []corev1.ConfigMap{},
+			expectedEnvVars:    []corev1.EnvVar{},
+			expectError:        false,
+		},
+		{
+			name: "single external configmap with mapping",
+			instance: &llamav1alpha1.LlamaStackDistribution{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test",
+					Namespace: "test-ns",
+				},
+				Spec: llamav1alpha1.LlamaStackDistributionSpec{
+					Server: llamav1alpha1.ServerSpec{
+						EnvFromExternalConfigMaps: []llamav1alpha1.ExternalConfigMapSpec{
+							{
+								Name:      "trustyai-config",
+								Namespace: "redhat-ods-applications",
+								Mapping: map[string]string{
+									"ragas-provider-image": "RAGAS_PROVIDER_IMAGE",
+									"garak-provider-image": "GARAK_PROVIDER_IMAGE",
+								},
+							},
+						},
+					},
+				},
+			},
+			existingConfigMaps: []corev1.ConfigMap{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "trustyai-config",
+						Namespace: "redhat-ods-applications",
+					},
+					Data: map[string]string{
+						"ragas-provider-image": "quay.io/trustyai/ragas:v1.2.3-konflux-abc123",
+						"garak-provider-image": "quay.io/trustyai/garak:v1.2.3-konflux-def456",
+						"other-config":         "should-be-ignored",
+					},
+				},
+			},
+			expectedEnvVars: []corev1.EnvVar{
+				{Name: "RAGAS_PROVIDER_IMAGE", Value: "quay.io/trustyai/ragas:v1.2.3-konflux-abc123"},
+				{Name: "GARAK_PROVIDER_IMAGE", Value: "quay.io/trustyai/garak:v1.2.3-konflux-def456"},
+			},
+			expectError: false,
+		},
+		{
+			name: "configmap not found - should not error but skip",
+			instance: &llamav1alpha1.LlamaStackDistribution{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test",
+					Namespace: "test-ns",
+				},
+				Spec: llamav1alpha1.LlamaStackDistributionSpec{
+					Server: llamav1alpha1.ServerSpec{
+						EnvFromExternalConfigMaps: []llamav1alpha1.ExternalConfigMapSpec{
+							{
+								Name:      "missing-config",
+								Namespace: "redhat-ods-applications",
+								Mapping: map[string]string{
+									"some-key": "SOME_ENV",
+								},
+							},
+						},
+					},
+				},
+			},
+			existingConfigMaps: []corev1.ConfigMap{},
+			expectedEnvVars:    []corev1.EnvVar{},
+			expectError:        false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			require.NoError(t, corev1.AddToScheme(scheme))
+			require.NoError(t, llamav1alpha1.AddToScheme(scheme))
+
+			objs := make([]client.Object, len(tc.existingConfigMaps))
+			for i := range tc.existingConfigMaps {
+				objs[i] = &tc.existingConfigMaps[i]
+			}
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(objs...).
+				Build()
+
+			reconciler := &LlamaStackDistributionReconciler{
+				Client: fakeClient,
+			}
+
+			container := &corev1.Container{
+				Name:  "test-container",
+				Image: "test-image",
+				Env:   []corev1.EnvVar{}, // Start with empty env vars
+			}
+
+			err := addExternalConfigMapEnvVars(t.Context(), reconciler, tc.instance, container)
+
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+
+				for _, expectedEnv := range tc.expectedEnvVars {
+					found := false
+					for _, actualEnv := range container.Env {
+						if actualEnv.Name == expectedEnv.Name && actualEnv.Value == expectedEnv.Value {
+							found = true
+							break
+						}
+					}
+					assert.True(t, found, "Expected env var %s=%s not found in container env vars", expectedEnv.Name, expectedEnv.Value)
+				}
+
+				assert.Len(t, container.Env, len(tc.expectedEnvVars), "Unexpected number of env vars added")
+			}
+		})
 	}
 }
