@@ -53,30 +53,39 @@ var validConfigMapKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a
 var startupScript = `
 set -e
 
-    if python -c "
+# Determine which CLI to use based on llama-stack version
+VERSION_CODE=$(python -c "
 import sys
+from importlib.metadata import version
+from packaging import version as pkg_version
 
 try:
-    from importlib.metadata import version
-    from packaging import version as pkg_version
-
     llama_version = version('llama_stack')
-    print(f'Determined llama-stack version {llama_version}')
-    if pkg_version.parse(llama_version) < pkg_version.parse('0.2.17'):
-        print('llama-stack version is less than 0.2.17 usin old module path llama_stack.distribution.server.server to start the server')
-        sys.exit(0)
-    else:
-        print('llama-stack version is greater than or equal to 0.2.17 using new module path llama_stack.core.server.server to start the server')
-        sys.exit(1)
-except Exception as e:
-    print(f'Failed to determine version: assume newer version if we cannot determine using new module path llama_stack.core.server.server to start the server: {e}')
-    sys.exit(1)
+    print(f'Detected llama-stack version: {llama_version}', file=sys.stderr)
 
-"; then
-    python3 -m llama_stack.distribution.server.server --config /etc/llama-stack/run.yaml
-else
-    python3 -m llama_stack.core.server.server /etc/llama-stack/run.yaml
-fi`
+    v = pkg_version.parse(llama_version)
+
+    if v < pkg_version.parse('0.2.17'):
+        print('Using legacy module path (llama_stack.distribution.server.server)', file=sys.stderr)
+        print(0)
+    elif v < pkg_version.parse('0.3.0'):
+        print('Using core module path (llama_stack.core.server.server)', file=sys.stderr)
+        print(1)
+    else:
+        print('Using new CLI command (llama stack run)', file=sys.stderr)
+        print(2)
+except Exception as e:
+    print(f'Version detection failed, defaulting to new CLI: {e}', file=sys.stderr)
+    print(2)
+")
+
+# Execute the appropriate CLI based on version
+case $VERSION_CODE in
+    0) python3 -m llama_stack.distribution.server.server --config /etc/llama-stack/run.yaml ;;
+    1) python3 -m llama_stack.core.server.server /etc/llama-stack/run.yaml ;;
+    2) llama stack run /etc/llama-stack/run.yaml ;;
+    *) echo "Invalid version code: $VERSION_CODE, using new CLI"; llama stack run /etc/llama-stack/run.yaml ;;
+esac`
 
 // validateConfigMapKeys validates that all ConfigMap keys contain only safe characters.
 // Note: This function validates key names only. PEM content validation is performed
