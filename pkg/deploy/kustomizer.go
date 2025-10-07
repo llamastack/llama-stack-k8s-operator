@@ -28,6 +28,24 @@ import (
 	yamlpkg "sigs.k8s.io/yaml"
 )
 
+const (
+	// Resource naming constants.
+	SCCBindingSuffix     = "-scc-binding"
+	ServiceAccountSuffix = "-sa"
+
+	// Operator label constants.
+	OperatorManagedByLabel = "llama-stack-operator"
+	OperatorPartOfLabel    = "llama-stack"
+
+	// Kubernetes resource kinds.
+	KindClusterRoleBinding    = "ClusterRoleBinding"
+	KindPersistentVolumeClaim = "PersistentVolumeClaim"
+	KindService               = "Service"
+	KindDeployment            = "Deployment"
+	KindNetworkPolicy         = "NetworkPolicy"
+	KindServiceAccount        = "ServiceAccount"
+)
+
 // RenderManifest takes a manifest directory and transforms it through
 // kustomization and plugins to produce final Kubernetes resources.
 func RenderManifest(
@@ -150,35 +168,72 @@ func isClusterScoped(mapper meta.RESTMapper, gvk schema.GroupVersionKind) (bool,
 	return mapping.Scope.Name() == meta.RESTScopeNameRoot, nil
 }
 
+// isResourceOwnedByInstance checks if a resource is owned by the given LlamaStackDistribution instance.
+// It handles both cluster-scoped and namespace-scoped resources appropriately.
+func isResourceOwnedByInstance(ctx context.Context, cli client.Client, existing *unstructured.Unstructured, ownerInstance *llamav1alpha1.LlamaStackDistribution) bool {
+	logger := log.FromContext(ctx)
+
+	gvk := existing.GroupVersionKind()
+	isClusterScoped, err := isClusterScoped(cli.RESTMapper(), gvk)
+	if err != nil {
+		logger.Error(err, "Failed to determine resource scope - treating as not owned for safety",
+			"kind", existing.GetKind(),
+			"name", existing.GetName(),
+			"namespace", existing.GetNamespace(),
+			"gvk", gvk.String())
+		return false
+	}
+
+	// Cluster-scoped resources use labels/naming patterns since they can't have owner references
+	if isClusterScoped {
+		if existing.GetKind() == KindClusterRoleBinding {
+			if !isOperatorManagedClusterRoleBinding(existing, ownerInstance) {
+				logger.Info("Skipping ClusterRoleBinding not managed by this operator instance",
+					"kind", existing.GetKind(),
+					"name", existing.GetName())
+				return false
+			}
+		} else {
+			if !hasOperatorLabels(existing) {
+				logger.Info("Skipping cluster-scoped resource not managed by this operator",
+					"kind", existing.GetKind(),
+					"name", existing.GetName())
+				return false
+			}
+		}
+		return true
+	}
+
+	// Namespace-scoped resources use owner references
+	for _, ref := range existing.GetOwnerReferences() {
+		if ref.UID == ownerInstance.GetUID() {
+			return true
+		}
+	}
+	logger.Info("Skipping resource not owned by this instance",
+		"kind", existing.GetKind(),
+		"name", existing.GetName(),
+		"namespace", existing.GetNamespace())
+	return false
+}
+
 // patchResource patches an existing resource, but only if we own it.
 func patchResource(ctx context.Context, cli client.Client, desired, existing *unstructured.Unstructured, ownerInstance *llamav1alpha1.LlamaStackDistribution) error {
 	logger := log.FromContext(ctx)
 
-	// Critical safety check to prevent the operator from "stealing" or
-	// overwriting a resource that was created by another user or controller.
-	isOwner := false
-	for _, ref := range existing.GetOwnerReferences() {
-		if ref.UID == ownerInstance.GetUID() {
-			isOwner = true
-			break
-		}
-	}
-	if !isOwner {
-		logger.Info("Skipping resource not owned by this instance",
-			"kind", existing.GetKind(),
-			"name", existing.GetName(),
-			"namespace", existing.GetNamespace())
-		return nil
+	// Check ownership before proceeding with patch
+	if !isResourceOwnedByInstance(ctx, cli, existing, ownerInstance) {
+		return nil // Skip resources not owned by this instance
 	}
 
-	if existing.GetKind() == "PersistentVolumeClaim" {
+	if existing.GetKind() == KindPersistentVolumeClaim {
 		logger.Info("Skipping PVC patch - PVCs are immutable after creation",
 			"name", existing.GetName(),
 			"namespace", existing.GetNamespace())
 		return nil
-	} else if existing.GetKind() == "Service" {
-		if err := compare.CheckAndLogServiceChanges(ctx, cli, desired); err != nil {
-			return fmt.Errorf("failed to validate resource mutations while patching: %w", err)
+	} else if existing.GetKind() == KindService {
+		if serviceErr := compare.CheckAndLogServiceChanges(ctx, cli, desired); serviceErr != nil {
+			return fmt.Errorf("failed to validate resource mutations while patching: %w", serviceErr)
 		}
 	}
 
@@ -216,7 +271,7 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 	}
 
 	fieldTransformerPlugin := plugins.CreateFieldMutator(plugins.FieldMutatorConfig{
-		Mappings: getFieldMappings(ownerInstance),
+		Mappings: GetFieldMappings(ownerInstance),
 	})
 	if err := fieldTransformerPlugin.Transform(*resMap); err != nil {
 		return fmt.Errorf("failed to apply field transformer: %w", err)
@@ -225,99 +280,179 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 	return nil
 }
 
-// getFieldMappings returns essential field mappings for kustomize transformation.
-func getFieldMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plugins.FieldMapping {
+// GetFieldMappings returns essential field mappings for kustomize transformation.
+// The ClusterRoleBinding name includes the namespace prefix to prevent collisions when
+// multiple instances with the same name exist across different namespaces.
+func GetFieldMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plugins.FieldMapping {
+	var mappings []plugins.FieldMapping
+
+	// Add mappings by category
+	mappings = append(mappings, getStorageMappings(ownerInstance)...)
+	mappings = append(mappings, getServiceMappings(ownerInstance)...)
+	mappings = append(mappings, getDeploymentMappings(ownerInstance)...)
+	mappings = append(mappings, getNetworkPolicyMappings(ownerInstance)...)
+	mappings = append(mappings, getClusterRoleBindingMappings(ownerInstance)...)
+	mappings = append(mappings, getServiceAccountMappings(ownerInstance)...)
+
+	return mappings
+}
+
+// getStorageMappings returns field mappings for PersistentVolumeClaim storage configuration.
+func getStorageMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plugins.FieldMapping {
+	storageSize := getStorageSize(ownerInstance)
+
 	return []plugins.FieldMapping{
-		// PVC storage size
 		{
-			SourceValue:       getStorageSize(ownerInstance),
+			SourceValue:       storageSize,
 			DefaultValue:      llamav1alpha1.DefaultStorageSize.String(),
 			TargetField:       "/spec/resources/requests/storage",
-			TargetKind:        "PersistentVolumeClaim",
+			TargetKind:        KindPersistentVolumeClaim,
 			CreateIfNotExists: true,
 		},
-		// Service ports
+	}
+}
+
+// getServiceMappings returns field mappings for Service configuration.
+func getServiceMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plugins.FieldMapping {
+	servicePort := getServicePort(ownerInstance)
+	instanceName := ownerInstance.GetName()
+
+	return []plugins.FieldMapping{
 		{
-			SourceValue:       getServicePort(ownerInstance),
+			SourceValue:       servicePort,
 			DefaultValue:      llamav1alpha1.DefaultServerPort,
 			TargetField:       "/spec/ports/0/port",
-			TargetKind:        "Service",
+			TargetKind:        KindService,
 			CreateIfNotExists: true,
 		},
 		{
-			SourceValue:       getServicePort(ownerInstance),
+			SourceValue:       servicePort,
 			DefaultValue:      llamav1alpha1.DefaultServerPort,
 			TargetField:       "/spec/ports/0/targetPort",
-			TargetKind:        "Service",
+			TargetKind:        KindService,
 			CreateIfNotExists: true,
 		},
-		// Instance labels for all resources
 		{
-			SourceValue:       ownerInstance.GetName(),
+			SourceValue:       instanceName,
 			TargetField:       "/spec/selector/app.kubernetes.io~1instance",
-			TargetKind:        "Service",
+			TargetKind:        KindService,
 			CreateIfNotExists: true,
 		},
+	}
+}
+
+// getDeploymentMappings returns field mappings for Deployment configuration.
+func getDeploymentMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plugins.FieldMapping {
+	instanceName := ownerInstance.GetName()
+	serviceAccountName := getServiceAccountName(ownerInstance)
+
+	return []plugins.FieldMapping{
 		{
-			SourceValue:       ownerInstance.GetName(),
-			TargetField:       "/spec/podSelector/matchLabels/app.kubernetes.io~1instance",
-			TargetKind:        "NetworkPolicy",
-			CreateIfNotExists: true,
-		},
-		// Deployment name (for backward compatibility)
-		{
-			SourceValue:       ownerInstance.GetName(),
+			SourceValue:       instanceName,
 			TargetField:       "/metadata/name",
-			TargetKind:        "Deployment",
+			TargetKind:        KindDeployment,
 			CreateIfNotExists: true,
 		},
-		// Deployment basic fields
 		{
-			SourceValue:       ownerInstance.GetName(),
+			SourceValue:       instanceName,
 			TargetField:       "/spec/selector/matchLabels/app.kubernetes.io~1instance",
-			TargetKind:        "Deployment",
+			TargetKind:        KindDeployment,
 			CreateIfNotExists: true,
 		},
 		{
-			SourceValue:       ownerInstance.GetName(),
+			SourceValue:       instanceName,
 			TargetField:       "/spec/template/metadata/labels/app.kubernetes.io~1instance",
-			TargetKind:        "Deployment",
+			TargetKind:        KindDeployment,
 			CreateIfNotExists: true,
 		},
 		{
 			SourceValue:       ownerInstance.Spec.Replicas,
 			TargetField:       "/spec/replicas",
-			TargetKind:        "Deployment",
+			TargetKind:        KindDeployment,
 			CreateIfNotExists: true,
 		},
-		// NetworkPolicy ports (both rules)
 		{
-			SourceValue:       getServicePort(ownerInstance),
+			SourceValue:       serviceAccountName,
+			TargetField:       "/spec/template/spec/serviceAccountName",
+			TargetKind:        KindDeployment,
+			CreateIfNotExists: true,
+		},
+	}
+}
+
+// getNetworkPolicyMappings returns field mappings for NetworkPolicy configuration.
+func getNetworkPolicyMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plugins.FieldMapping {
+	servicePort := getServicePort(ownerInstance)
+	instanceName := ownerInstance.GetName()
+	operatorNamespace := getOperatorNamespace()
+
+	return []plugins.FieldMapping{
+		{
+			SourceValue:       instanceName,
+			TargetField:       "/spec/podSelector/matchLabels/app.kubernetes.io~1instance",
+			TargetKind:        KindNetworkPolicy,
+			CreateIfNotExists: true,
+		},
+		{
+			SourceValue:       servicePort,
 			DefaultValue:      llamav1alpha1.DefaultServerPort,
 			TargetField:       "/spec/ingress/0/ports/0/port",
-			TargetKind:        "NetworkPolicy",
+			TargetKind:        KindNetworkPolicy,
 			CreateIfNotExists: true,
 		},
 		{
-			SourceValue:       getServicePort(ownerInstance),
+			SourceValue:       servicePort,
 			DefaultValue:      llamav1alpha1.DefaultServerPort,
 			TargetField:       "/spec/ingress/1/ports/0/port",
-			TargetKind:        "NetworkPolicy",
+			TargetKind:        KindNetworkPolicy,
 			CreateIfNotExists: true,
 		},
-		// NetworkPolicy operator namespace
 		{
-			SourceValue:       getOperatorNamespace(),
+			SourceValue:       operatorNamespace,
 			DefaultValue:      "llama-stack-k8s-operator-system",
 			TargetField:       "/spec/ingress/1/from/0/namespaceSelector/matchLabels/kubernetes.io~1metadata.name",
-			TargetKind:        "NetworkPolicy",
+			TargetKind:        KindNetworkPolicy,
 			CreateIfNotExists: true,
 		},
-		// ClusterRoleBinding namespace for ServiceAccount
+	}
+}
+
+// getClusterRoleBindingMappings returns field mappings for ClusterRoleBinding configuration.
+func getClusterRoleBindingMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plugins.FieldMapping {
+	clusterRoleBindingName := ownerInstance.Namespace + "-" + ownerInstance.Name + SCCBindingSuffix
+	serviceAccountName := getServiceAccountName(ownerInstance)
+
+	return []plugins.FieldMapping{
+		{
+			SourceValue:       clusterRoleBindingName,
+			TargetField:       "/metadata/name",
+			TargetKind:        KindClusterRoleBinding,
+			CreateIfNotExists: true,
+		},
 		{
 			SourceValue:       ownerInstance.Namespace,
 			TargetField:       "/subjects/0/namespace",
-			TargetKind:        "ClusterRoleBinding",
+			TargetKind:        KindClusterRoleBinding,
+			CreateIfNotExists: true,
+		},
+		{
+			SourceValue:       serviceAccountName,
+			TargetField:       "/subjects/0/name",
+			TargetKind:        KindClusterRoleBinding,
+			CreateIfNotExists: true,
+		},
+	}
+}
+
+// getServiceAccountMappings returns field mappings for ServiceAccount configuration.
+func getServiceAccountMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plugins.FieldMapping {
+	serviceAccountName := getServiceAccountName(ownerInstance)
+
+	return []plugins.FieldMapping{
+		{
+			SourceValue:       serviceAccountName,
+			TargetField:       "/metadata/name",
+			TargetKind:        KindServiceAccount,
 			CreateIfNotExists: true,
 		},
 	}
@@ -339,6 +474,16 @@ func getServicePort(instance *llamav1alpha1.LlamaStackDistribution) any {
 	}
 	// Returning nil signals the field transformer to use the default value.
 	return nil
+}
+
+// getServiceAccountName returns the service account name for the instance.
+func getServiceAccountName(instance *llamav1alpha1.LlamaStackDistribution) string {
+	// Check if ServiceAccount name is overridden in PodOverrides
+	if instance.Spec.Server.PodOverrides != nil && instance.Spec.Server.PodOverrides.ServiceAccountName != "" {
+		return instance.Spec.Server.PodOverrides.ServiceAccountName
+	}
+	// Use default naming pattern: {instance.Name}-sa
+	return instance.Name + ServiceAccountSuffix
 }
 
 // getOperatorNamespace returns the operator namespace or empty string if not available.
@@ -552,4 +697,64 @@ func CheckClusterRoleExists(ctx context.Context, cli client.Client, crb *unstruc
 		return false, err
 	}
 	return false, nil
+}
+
+// isOperatorManagedClusterRoleBinding checks if a ClusterRoleBinding is managed by this operator
+// and belongs to the given LlamaStackDistribution instance. This uses a namespace-prefixed naming
+// pattern to allow multiple instances with the same name across different namespaces.
+func isOperatorManagedClusterRoleBinding(crb *unstructured.Unstructured, ownerInstance *llamav1alpha1.LlamaStackDistribution) bool {
+	if !hasOperatorLabels(crb) {
+		return false
+	}
+
+	// Check expected naming pattern: {namespace}-{name}-scc-binding
+	// This prevents collisions when the same instance name exists in different namespaces
+	expectedName := ownerInstance.Namespace + "-" + ownerInstance.Name + SCCBindingSuffix
+	if crb.GetName() != expectedName {
+		return false
+	}
+
+	return clusterRoleBindingReferencesServiceAccount(crb, ownerInstance)
+}
+
+// clusterRoleBindingReferencesServiceAccount checks if the ClusterRoleBinding references the correct ServiceAccount.
+func clusterRoleBindingReferencesServiceAccount(crb *unstructured.Unstructured, ownerInstance *llamav1alpha1.LlamaStackDistribution) bool {
+	subjects, found, _ := unstructured.NestedSlice(crb.Object, "subjects")
+	if !found {
+		return false
+	}
+
+	expectedSAName := getServiceAccountName(ownerInstance)
+	expectedNamespace := ownerInstance.Namespace
+
+	for _, subject := range subjects {
+		subjectMap, ok := subject.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		kind, _, _ := unstructured.NestedString(subjectMap, "kind")
+		name, _, _ := unstructured.NestedString(subjectMap, "name")
+		namespace, _, _ := unstructured.NestedString(subjectMap, "namespace")
+
+		if kind == KindServiceAccount && name == expectedSAName && namespace == expectedNamespace {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasOperatorLabels checks if a resource has the standard operator labels.
+func hasOperatorLabels(obj *unstructured.Unstructured) bool {
+	labels := obj.GetLabels()
+	if labels == nil {
+		return false
+	}
+
+	managedBy, hasManagedBy := labels["app.kubernetes.io/managed-by"]
+	partOf, hasPartOf := labels["app.kubernetes.io/part-of"]
+
+	return hasManagedBy && managedBy == OperatorManagedByLabel &&
+		hasPartOf && partOf == OperatorPartOfLabel
 }
