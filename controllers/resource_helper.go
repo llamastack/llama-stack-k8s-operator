@@ -366,7 +366,7 @@ done`, CABundleTempPath, CABundleSourceDir, fileList)
 		},
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: ptr.To(false),
-			RunAsNonRoot:             ptr.To(false),
+			RunAsNonRoot:             ptr.To(true),
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
 			},
@@ -381,7 +381,7 @@ func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconcile
 	}
 
 	// Configure storage volumes and init containers
-	configureStorage(instance, &podSpec, container.Image)
+	configureStorage(instance, &podSpec)
 
 	// Configure TLS CA bundle (with auto-detection support)
 	configureTLSCABundle(ctx, r, instance, &podSpec, container.Image)
@@ -396,16 +396,16 @@ func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconcile
 }
 
 // configureStorage handles storage volume configuration.
-func configureStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec, image string) {
+func configureStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
 	if instance.Spec.Server.Storage != nil {
-		configurePersistentStorage(instance, podSpec, image)
+		configurePersistentStorage(instance, podSpec)
 	} else {
 		configureEmptyDirStorage(podSpec)
 	}
 }
 
 // configurePersistentStorage sets up PVC-based storage with init container for permissions.
-func configurePersistentStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec, image string) {
+func configurePersistentStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
 	// Use PVC for persistent storage
 	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
 		Name: "lls-storage",
@@ -415,47 +415,6 @@ func configurePersistentStorage(instance *llamav1alpha1.LlamaStackDistribution, 
 			},
 		},
 	})
-
-	// Add init container to fix permissions on the PVC mount.
-	mountPath := llamav1alpha1.DefaultMountPath
-	if instance.Spec.Server.Storage.MountPath != "" {
-		mountPath = instance.Spec.Server.Storage.MountPath
-	}
-
-	commands := []string{
-		fmt.Sprintf("mkdir -p %s 2>&1 || echo 'Warning: Could not create directory'", mountPath),
-		fmt.Sprintf("(chown 1001:0 %s 2>&1 || echo 'Warning: Could not change ownership')", mountPath),
-		fmt.Sprintf("ls -la %s 2>&1", mountPath),
-	}
-	command := strings.Join(commands, " && ")
-
-	initContainer := corev1.Container{
-		Name:            "update-pvc-permissions",
-		Image:           image,
-		ImagePullPolicy: corev1.PullAlways,
-		Command: []string{
-			"/bin/sh",
-			"-c",
-			// Try to set permissions, but don't fail if we can't
-			command,
-		},
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      "lls-storage",
-				MountPath: mountPath,
-			},
-		},
-		SecurityContext: &corev1.SecurityContext{
-			RunAsUser:                ptr.To(int64(0)), // Run as root to be able to change ownership
-			RunAsGroup:               ptr.To(int64(0)),
-			AllowPrivilegeEscalation: ptr.To(false),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-		},
-	}
-
-	podSpec.InitContainers = append(podSpec.InitContainers, initContainer)
 }
 
 // configureEmptyDirStorage sets up temporary storage using emptyDir.
@@ -611,8 +570,9 @@ func configurePodOverrides(instance *llamav1alpha1.LlamaStackDistribution, podSp
 	}
 
 	// Set fsGroup to allow write access to mounted volumes
+	const defaultFSGroup = 1001
 	if podSpec.SecurityContext.FSGroup == nil {
-		podSpec.SecurityContext.FSGroup = ptr.To(int64(0))
+		podSpec.SecurityContext.FSGroup = ptr.To(int64(defaultFSGroup))
 	}
 
 	// Apply other pod overrides if specified

@@ -2413,13 +2413,9 @@ rules:
   resources:
   - clusterrolebindings
   verbs:
-  - create
   - delete
   - get
   - list
-  - patch
-  - update
-  - watch
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
@@ -2427,6 +2423,18 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - security.openshift.io

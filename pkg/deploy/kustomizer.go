@@ -89,13 +89,13 @@ func manageResource(
 		return fmt.Errorf("failed to unmarshal resource: %w", err)
 	}
 
-	// Check if ClusterRoleBinding references a ClusterRole that exists
-	if u.GetKind() == "ClusterRoleBinding" {
+	// Check if RoleBinding references a SCC ClusterRole that exists
+	if u.GetKind() == "RoleBinding" {
 		if shouldSkip, err := CheckClusterRoleExists(ctx, cli, u); err != nil {
 			return fmt.Errorf("failed to check ClusterRole existence: %w", err)
 		} else if shouldSkip {
-			log.FromContext(ctx).V(1).Info("Skipping ClusterRoleBinding - referenced ClusterRole not found",
-				"clusterRoleBinding", u.GetName())
+			log.FromContext(ctx).V(1).Info("Skipping RoleBinding - referenced SCC ClusterRole not found",
+				"roleBinding", u.GetName())
 			return nil
 		}
 	}
@@ -227,97 +227,115 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 
 // getFieldMappings returns essential field mappings for kustomize transformation.
 func getFieldMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plugins.FieldMapping {
+	instanceName := ownerInstance.GetName()
+	instanceNamespace := ownerInstance.GetNamespace()
+	serviceAccountName := instanceName + "-sa"
+	servicePort := getServicePort(ownerInstance)
+	storageSize := getStorageSize(ownerInstance)
+	operatorNS := getOperatorNamespace()
+	instanceLabelPath := "/app.kubernetes.io~1instance"
+
+	return buildFieldMappings(instanceName, instanceNamespace, serviceAccountName, servicePort, storageSize, operatorNS, instanceLabelPath, ownerInstance.Spec.Replicas)
+}
+
+// buildFieldMappings constructs the field mappings array.
+func buildFieldMappings(instanceName, instanceNamespace, serviceAccountName string,
+	servicePort any, storageSize, operatorNS, instanceLabelPath string, replicas int32) []plugins.FieldMapping {
 	return []plugins.FieldMapping{
-		// PVC storage size
 		{
-			SourceValue:       getStorageSize(ownerInstance),
+			SourceValue:       storageSize,
 			DefaultValue:      llamav1alpha1.DefaultStorageSize.String(),
 			TargetField:       "/spec/resources/requests/storage",
 			TargetKind:        "PersistentVolumeClaim",
 			CreateIfNotExists: true,
 		},
-		// Service ports
 		{
-			SourceValue:       getServicePort(ownerInstance),
+			SourceValue:       servicePort,
 			DefaultValue:      llamav1alpha1.DefaultServerPort,
 			TargetField:       "/spec/ports/0/port",
 			TargetKind:        "Service",
 			CreateIfNotExists: true,
 		},
 		{
-			SourceValue:       getServicePort(ownerInstance),
+			SourceValue:       servicePort,
 			DefaultValue:      llamav1alpha1.DefaultServerPort,
 			TargetField:       "/spec/ports/0/targetPort",
 			TargetKind:        "Service",
 			CreateIfNotExists: true,
 		},
-		// Instance labels for all resources
 		{
-			SourceValue:       ownerInstance.GetName(),
-			TargetField:       "/spec/selector/app.kubernetes.io~1instance",
+			SourceValue:       instanceName,
+			TargetField:       "/spec/selector" + instanceLabelPath,
 			TargetKind:        "Service",
 			CreateIfNotExists: true,
 		},
 		{
-			SourceValue:       ownerInstance.GetName(),
-			TargetField:       "/spec/podSelector/matchLabels/app.kubernetes.io~1instance",
-			TargetKind:        "NetworkPolicy",
-			CreateIfNotExists: true,
-		},
-		// Deployment name (for backward compatibility)
-		{
-			SourceValue:       ownerInstance.GetName(),
+			SourceValue:       instanceName,
 			TargetField:       "/metadata/name",
 			TargetKind:        "Deployment",
 			CreateIfNotExists: true,
 		},
-		// Deployment basic fields
 		{
-			SourceValue:       ownerInstance.GetName(),
-			TargetField:       "/spec/selector/matchLabels/app.kubernetes.io~1instance",
-			TargetKind:        "Deployment",
-			CreateIfNotExists: true,
-		},
-		{
-			SourceValue:       ownerInstance.GetName(),
-			TargetField:       "/spec/template/metadata/labels/app.kubernetes.io~1instance",
-			TargetKind:        "Deployment",
-			CreateIfNotExists: true,
-		},
-		{
-			SourceValue:       ownerInstance.Spec.Replicas,
+			SourceValue:       replicas,
 			TargetField:       "/spec/replicas",
 			TargetKind:        "Deployment",
 			CreateIfNotExists: true,
 		},
-		// NetworkPolicy ports (both rules)
 		{
-			SourceValue:       getServicePort(ownerInstance),
+			SourceValue:       serviceAccountName,
+			TargetField:       "/spec/template/spec/serviceAccountName",
+			TargetKind:        "Deployment",
+			CreateIfNotExists: true,
+		},
+		{
+			SourceValue:       instanceName,
+			TargetField:       "/spec/selector/matchLabels" + instanceLabelPath,
+			TargetKind:        "Deployment",
+			CreateIfNotExists: true,
+		},
+		{
+			SourceValue:       instanceName,
+			TargetField:       "/spec/template/metadata/labels" + instanceLabelPath,
+			TargetKind:        "Deployment",
+			CreateIfNotExists: true,
+		},
+		{
+			SourceValue:       serviceAccountName,
+			TargetField:       "/subjects/0/name",
+			TargetKind:        "RoleBinding",
+			CreateIfNotExists: true,
+		},
+		{
+			SourceValue:       instanceNamespace,
+			TargetField:       "/subjects/0/namespace",
+			TargetKind:        "RoleBinding",
+			CreateIfNotExists: true,
+		},
+		{
+			SourceValue:       instanceName,
+			TargetField:       "/spec/podSelector/matchLabels" + instanceLabelPath,
+			TargetKind:        "NetworkPolicy",
+			CreateIfNotExists: true,
+		},
+		{
+			SourceValue:       servicePort,
 			DefaultValue:      llamav1alpha1.DefaultServerPort,
 			TargetField:       "/spec/ingress/0/ports/0/port",
 			TargetKind:        "NetworkPolicy",
 			CreateIfNotExists: true,
 		},
 		{
-			SourceValue:       getServicePort(ownerInstance),
+			SourceValue:       servicePort,
 			DefaultValue:      llamav1alpha1.DefaultServerPort,
 			TargetField:       "/spec/ingress/1/ports/0/port",
 			TargetKind:        "NetworkPolicy",
 			CreateIfNotExists: true,
 		},
-		// NetworkPolicy operator namespace
 		{
-			SourceValue:       getOperatorNamespace(),
+			SourceValue:       operatorNS,
 			DefaultValue:      "llama-stack-k8s-operator-system",
 			TargetField:       "/spec/ingress/1/from/0/namespaceSelector/matchLabels/kubernetes.io~1metadata.name",
 			TargetKind:        "NetworkPolicy",
-			CreateIfNotExists: true,
-		},
-		// ClusterRoleBinding namespace for ServiceAccount
-		{
-			SourceValue:       ownerInstance.Namespace,
-			TargetField:       "/subjects/0/namespace",
-			TargetKind:        "ClusterRoleBinding",
 			CreateIfNotExists: true,
 		},
 	}
@@ -524,7 +542,7 @@ func FilterExcludeKinds(resMap *resmap.ResMap, kindsToExclude []string) (*resmap
 	return &filteredResMap, nil
 }
 
-// CheckClusterRoleExists checks if a ClusterRoleBinding should be skipped due to missing ClusterRole.
+// CheckClusterRoleExists checks if a RoleBinding should be skipped due to missing SCC ClusterRole.
 func CheckClusterRoleExists(ctx context.Context, cli client.Client, crb *unstructured.Unstructured) (bool, error) {
 	roleRef, found, _ := unstructured.NestedMap(crb.Object, "roleRef")
 	if !found {
