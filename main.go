@@ -146,6 +146,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Perform one-time upgrade cleanup operations
+	if err := cluster.PerformUpgradeCleanup(ctx, setupClient); err != nil {
+		setupLog.Error(err, "failed to perform upgrade cleanup")
+		os.Exit(1)
+	}
+
 	if err := setupReconciler(ctx, setupClient, mgr, clusterInfo); err != nil {
 		setupLog.Error(err, "failed to set up reconciler")
 		os.Exit(1)
