@@ -14,22 +14,29 @@ The CA bundle configuration allows you to:
 When you configure a CA bundle:
 
 1. **ConfigMap Storage**: CA certificates are stored in a Kubernetes ConfigMap
-2. **Volume Mounting**: The certificates are mounted at `/etc/ssl/certs/` in the container
-3. **Environment Variable**: The `SSL_CERT_FILE` environment variable is set to point to the CA bundle
-4. **Automatic Restarts**: Pods restart automatically when the CA bundle ConfigMap changes
+2. **Volume Mounting**: The certificates are mounted at `/etc/ssl/certs/ca-certificates/` in the container
+3. **Certificate Processing**: A startup script processes the certificates, splitting multi-certificate PEM files into individual files and running `c_rehash` to create OpenSSL hash symlinks
+4. **Environment Variable**: The `SSL_CERT_DIR` environment variable is set to point to the processed certificate directory
+5. **Automatic Restarts**: Pods restart automatically when the CA bundle ConfigMap changes
 
-### Single Key vs Multiple Keys
+### Certificate Processing
 
-**Single Key (configMapKey):**
-- Direct ConfigMap volume mount
-- Certificate file mounted directly from the ConfigMap key
-- Minimal resource overhead
+The operator processes CA bundle certificates at container startup:
 
-**Multiple Keys (configMapKeys):**
-- Uses an InitContainer to concatenate multiple keys
-- All certificates from specified keys are combined into a single file
-- Slightly higher resource overhead due to InitContainer, but maintains standard SSL behavior
-- The final consolidated file is always named `ca-bundle.crt` regardless of source key names
+**Processing Steps:**
+1. ConfigMap keys are mounted as files in `/etc/ssl/certs/ca-certificates/`
+2. Each file is validated to ensure it contains PEM certificates
+3. Multi-certificate PEM files are split into individual certificate files
+4. OpenSSL's `c_rehash` (or `openssl rehash`) creates hash-based symlinks for efficient certificate lookup
+5. The processed certificates are stored in `/tmp/ca-bundle-processed/`
+6. `SSL_CERT_DIR` environment variable points applications to the processed directory
+
+**Security Features:**
+- Maximum certificate limit (1000) to prevent resource exhaustion attacks
+- PEM format validation before processing
+- Null-delimited file handling to prevent filename injection attacks
+- Error handling with automatic cleanup of partial processing
+- Unique temporary files to avoid race conditions
 
 ## Configuration Options
 
@@ -346,6 +353,9 @@ Before deploying a LlamaStackDistribution with CA bundle:
 3. **Namespace Isolation**: Use appropriate namespaces to isolate CA bundles
 4. **Audit Trail**: Monitor ConfigMap changes in production environments
 5. **Principle of Least Privilege**: Only grant necessary permissions to access CA bundle ConfigMaps
+6. **Resource Limits**: The certificate processing has a built-in limit of 1000 certificates to prevent resource exhaustion
+7. **Input Validation**: Certificate files are validated for proper PEM format before processing
+8. **Injection Protection**: Filename handling uses null-delimited processing to prevent injection attacks
 
 ## Limitations
 

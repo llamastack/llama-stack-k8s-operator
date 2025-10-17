@@ -59,14 +59,10 @@ const (
 	manifestsBasePath  = "manifests/base"
 
 	// CA Bundle related constants.
-	DefaultCABundleKey    = "ca-bundle.crt"
-	CABundleMountPath     = "/etc/ssl/certs/ca-bundle.crt"
-	CABundleTempPath      = "/tmp/ca-bundle/ca-bundle.crt"
-	CABundleVolumeName    = "ca-bundle"
-	CABundleSourceDir     = "/tmp/ca-source"
-	CABundleInitName      = "ca-bundle-init"
-	CABundleSourceVolName = "ca-bundle-source"
-	CABundleTempDir       = "/tmp/ca-bundle"
+	DefaultCABundleKey     = "ca-bundle.crt"
+	CABundleVolumeName     = "ca-bundle"
+	CABundleSourceMountDir = "/etc/ssl/certs/ca-certificates" // Where ConfigMap keys are mounted
+	CABundleProcessedDir   = "/tmp/ca-bundle-processed"       // Where processed certs go after c_rehash
 
 	// ODH/RHOAI well-known ConfigMap for trusted CA bundles.
 	odhTrustedCABundleConfigMap = "odh-trusted-ca-bundle"

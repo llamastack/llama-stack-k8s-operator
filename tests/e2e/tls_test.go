@@ -395,8 +395,9 @@ func hasCABundleMount(containers []corev1.Container) bool {
 
 func hasCABundleMountInContainer(mounts []corev1.VolumeMount) bool {
 	for _, mount := range mounts {
-		if mount.MountPath == controllers.CABundleMountPath ||
-			strings.Contains(mount.MountPath, "ca-bundle") {
+		if mount.MountPath == controllers.CABundleSourceMountDir ||
+			strings.Contains(mount.MountPath, "ca-bundle") ||
+			strings.Contains(mount.MountPath, "ca-certificates") {
 			return true
 		}
 	}
@@ -419,7 +420,7 @@ func verifyEnvironmentVariables(t *testing.T, namespace, name string) error {
 	// Check for TLS-related environment variables
 	tlsEnvVarsFound := 0
 	expectedEnvVars := map[string]string{
-		"VLLM_TLS_VERIFY": controllers.CABundleMountPath,
+		"SSL_CERT_DIR": controllers.CABundleProcessedDir,
 	}
 
 	for _, container := range deployment.Spec.Template.Spec.Containers {

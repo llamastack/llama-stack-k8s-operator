@@ -51,7 +51,154 @@ var validConfigMapKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a
 
 // startupScript is the script that will be used to start the server.
 var startupScript = `
-set -e
+set -euo pipefail
+
+# Create unique temporary file for certificate counting using mktemp for atomicity
+cert_count_file=$(mktemp /tmp/cert_count_XXXXXX.txt)
+
+# Cleanup function for error handling
+cleanup() {
+    exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo "Error occurred (exit code: $exit_code), cleaning up partial certificate processing..." >&2
+        rm -rf /tmp/ca-bundle-processed
+    fi
+    # Always clean up the temp file
+    rm -f "$cert_count_file"
+}
+trap cleanup EXIT
+
+# Maximum number of certificates to prevent resource exhaustion
+readonly MAX_CERTS=1000
+
+# Process CA bundle certificates if they exist
+# Check both explicit CA bundle directory and ODH CA bundle directory
+if [ -d "/etc/ssl/certs/ca-certificates" ] || [ -d "/etc/ssl/certs/ca-certificates/odh" ]; then
+    if [ "$(ls -A /etc/ssl/certs/ca-certificates 2>/dev/null)" ] || [ "$(ls -A /etc/ssl/certs/ca-certificates/odh 2>/dev/null)" ]; then
+        echo "Processing CA bundle certificates..."
+
+        # Create the processed directory
+        mkdir -p /tmp/ca-bundle-processed
+
+        # Counter for split certificates
+        cert_counter=0
+
+        # Process explicit CA bundle files first
+        if [ -d "/etc/ssl/certs/ca-certificates" ]; then
+            # Use process substitution to avoid subshell variable isolation
+            # -L flag follows symlinks (required because Kubernetes mounts ConfigMaps as symlinks)
+            while IFS= read -r -d '' cert_file; do
+                echo "Processing explicit CA bundle file: $cert_file"
+
+                # Validate that file contains PEM certificates before processing
+                if ! grep -q "BEGIN CERTIFICATE" "$cert_file"; then
+                    echo "Warning: $cert_file does not contain valid PEM certificates, skipping" >&2
+                    continue
+                fi
+
+                # Split multi-certificate PEM files into individual certificates
+                # AWK script includes resource exhaustion protection
+                awk -v output_dir="/tmp/ca-bundle-processed" -v base_counter="$cert_counter" -v max_certs="$MAX_CERTS" '
+                    BEGIN {
+                        counter = base_counter;
+                        in_cert = 0;
+                    }
+                    /-----BEGIN CERTIFICATE-----/ {
+                        if (counter >= max_certs) {
+                            print "ERROR: Certificate limit exceeded (max " max_certs "). Possible malformed input or resource exhaustion attack." > "/dev/stderr";
+                            exit 1;
+                        }
+                        in_cert = 1;
+                        counter++;
+                        filename = sprintf("%s/cert-%d.pem", output_dir, counter);
+                    }
+                    in_cert {
+                        print > filename;
+                    }
+                    /-----END CERTIFICATE-----/ {
+                        in_cert = 0;
+                        close(filename);
+                    }
+                    END {
+                        print counter;
+                    }
+                ' "$cert_file" > "$cert_count_file"
+
+                # Update counter
+                cert_counter=$(cat "$cert_count_file")
+            done < <(find -L /etc/ssl/certs/ca-certificates -maxdepth 1 -type f -print0)
+        fi
+
+        # Process ODH CA bundle files
+        if [ -d "/etc/ssl/certs/ca-certificates/odh" ]; then
+            # Use process substitution to avoid subshell variable isolation
+            # -L flag follows symlinks (required because Kubernetes mounts ConfigMaps as symlinks)
+            while IFS= read -r -d '' cert_file; do
+                echo "Processing ODH CA bundle file: $cert_file"
+
+                # Validate that file contains PEM certificates before processing
+                if ! grep -q "BEGIN CERTIFICATE" "$cert_file"; then
+                    echo "Warning: $cert_file does not contain valid PEM certificates, skipping" >&2
+                    continue
+                fi
+
+                # Split multi-certificate PEM files into individual certificates
+                # AWK script includes resource exhaustion protection
+                awk -v output_dir="/tmp/ca-bundle-processed" -v base_counter="$cert_counter" -v max_certs="$MAX_CERTS" '
+                    BEGIN {
+                        counter = base_counter;
+                        in_cert = 0;
+                    }
+                    /-----BEGIN CERTIFICATE-----/ {
+                        if (counter >= max_certs) {
+                            print "ERROR: Certificate limit exceeded (max " max_certs "). Possible malformed input or resource exhaustion attack." > "/dev/stderr";
+                            exit 1;
+                        }
+                        in_cert = 1;
+                        counter++;
+                        filename = sprintf("%s/cert-%d.pem", output_dir, counter);
+                    }
+                    in_cert {
+                        print > filename;
+                    }
+                    /-----END CERTIFICATE-----/ {
+                        in_cert = 0;
+                        close(filename);
+                    }
+                    END {
+                        print counter;
+                    }
+                ' "$cert_file" > "$cert_count_file"
+
+                # Update counter
+                cert_counter=$(cat "$cert_count_file")
+            done < <(find -L /etc/ssl/certs/ca-certificates/odh -maxdepth 1 -type f -print0)
+        fi
+
+        # Run c_rehash to create hash symlinks for OpenSSL
+        # Fail explicitly if rehashing fails as this breaks certificate validation
+        if command -v c_rehash >/dev/null 2>&1; then
+            if ! c_rehash /tmp/ca-bundle-processed; then
+                echo "ERROR: c_rehash failed to process certificates" >&2
+                exit 1
+            fi
+        elif command -v openssl >/dev/null 2>&1; then
+            if ! openssl rehash /tmp/ca-bundle-processed; then
+                echo "ERROR: openssl rehash failed to process certificates" >&2
+                exit 1
+            fi
+        else
+            echo "ERROR: Neither c_rehash nor openssl rehash available - cannot process certificates" >&2
+            exit 1
+        fi
+
+        echo "CA bundle processing complete: processed $cert_counter certificate(s)"
+    else
+        echo "No CA bundle certificates found, skipping processing"
+    fi
+else
+    echo "No CA bundle directories found, skipping processing"
+fi
 
 # Determine which CLI to use based on llama-stack version
 VERSION_CODE=$(python -c "
@@ -80,12 +227,25 @@ except Exception as e:
 ")
 
 # Execute the appropriate CLI based on version
-case $VERSION_CODE in
-    0) python3 -m llama_stack.distribution.server.server --config /etc/llama-stack/run.yaml ;;
-    1) python3 -m llama_stack.core.server.server /etc/llama-stack/run.yaml ;;
-    2) llama stack run /etc/llama-stack/run.yaml ;;
-    *) echo "Invalid version code: $VERSION_CODE, using new CLI"; llama stack run /etc/llama-stack/run.yaml ;;
-esac`
+# Check if custom config exists, otherwise use container default behavior
+if [ -f "/etc/llama-stack/run.yaml" ]; then
+    echo "Using custom config file: /etc/llama-stack/run.yaml"
+    case $VERSION_CODE in
+        0) exec python3 -m llama_stack.distribution.server.server --config /etc/llama-stack/run.yaml ;;
+        1) exec python3 -m llama_stack.core.server.server /etc/llama-stack/run.yaml ;;
+        2) exec llama stack run /etc/llama-stack/run.yaml ;;
+        *) echo "Invalid version code: $VERSION_CODE, using new CLI"; exec llama stack run /etc/llama-stack/run.yaml ;;
+    esac
+else
+    echo "No custom config file found, using container default entrypoint with distribution name"
+    # Use the container's default behavior - pass distribution name as argument
+    case $VERSION_CODE in
+        0) exec python3 -m llama_stack.distribution.server.server starter ;;
+        1) exec python3 -m llama_stack.core.server.server starter ;;
+        2) exec llama stack run starter ;;
+        *) echo "Invalid version code: $VERSION_CODE, using new CLI"; exec llama stack run starter ;;
+    esac
+fi`
 
 // validateConfigMapKeys validates that all ConfigMap keys contain only safe characters.
 // Note: This function validates key names only. PEM content validation is performed
@@ -143,7 +303,7 @@ func buildContainerSpec(ctx context.Context, r *LlamaStackDistributionReconciler
 	// Configure environment variables and mounts
 	configureContainerEnvironment(ctx, r, instance, &container)
 	configureContainerMounts(ctx, r, instance, &container)
-	configureContainerCommands(instance, &container)
+	configureContainerCommands(ctx, r, instance, &container)
 
 	return container
 }
@@ -177,22 +337,14 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 		Value: mountPath,
 	})
 
-	// Add CA bundle environment variable if TLS config is specified
-	if instance.Spec.Server.TLSConfig != nil && instance.Spec.Server.TLSConfig.CABundle != nil {
-		// Set SSL_CERT_FILE to point to the specific CA bundle file
+	// Add CA bundle environment variable if any CA bundles are configured
+	// (explicit or auto-detected ODH bundles)
+	if hasAnyCABundle(ctx, r, instance) {
+		// Set SSL_CERT_DIR to point to the processed CA bundle directory
 		container.Env = append(container.Env, corev1.EnvVar{
-			Name:  "SSL_CERT_FILE",
-			Value: CABundleMountPath,
+			Name:  "SSL_CERT_DIR",
+			Value: CABundleProcessedDir,
 		})
-	} else if r != nil {
-		// Check for auto-detected ODH trusted CA bundle
-		if _, keys, err := r.detectODHTrustedCABundle(ctx, instance); err == nil && len(keys) > 0 {
-			// Set SSL_CERT_FILE to point to the auto-detected consolidated CA bundle
-			container.Env = append(container.Env, corev1.EnvVar{
-				Name:  "SSL_CERT_FILE",
-				Value: CABundleMountPath,
-			})
-		}
 	}
 
 	// Finally, add the user provided env vars
@@ -211,15 +363,35 @@ func configureContainerMounts(ctx context.Context, r *LlamaStackDistributionReco
 	addCABundleVolumeMount(ctx, r, instance, container)
 }
 
-// configureContainerCommands sets up container commands and args.
-func configureContainerCommands(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
-	// Override the container entrypoint to use the custom config file if user config is specified
-	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != "" {
-		// Override the container entrypoint to use the custom config file instead of the default
-		// template. The script will determine the llama-stack version and use the appropriate module
-		// path to start the server.
+// hasAnyCABundle checks if any CA bundle will be mounted (explicit or auto-detected).
+func hasAnyCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution) bool {
+	// Check for explicit CA bundle configuration
+	if instance.Spec.Server.TLSConfig != nil && instance.Spec.Server.TLSConfig.CABundle != nil {
+		return true
+	}
 
-		container.Command = []string{"/bin/sh", "-c", startupScript}
+	// Check for auto-detected ODH trusted CA bundle
+	if r != nil {
+		if _, keys, err := r.detectODHTrustedCABundle(ctx, instance); err == nil && len(keys) > 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// configureContainerCommands sets up container commands and args.
+func configureContainerCommands(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
+	// Use startup script if user config is specified OR if any CA bundle is configured (explicit or auto-detected)
+	hasUserConfig := instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != ""
+
+	if hasUserConfig || hasAnyCABundle(ctx, r, instance) {
+		// Override the container entrypoint to use the startup script
+		// The script will:
+		// 1. Process CA bundle certificates if they exist (explicit or auto-detected ODH bundles)
+		// 2. Determine the llama-stack version and use the appropriate module path to start the server
+		// Use /bin/bash explicitly as the script uses bash-specific features (read -d)
+		container.Command = []string{"/bin/bash", "-c", startupScript}
 		container.Args = []string{}
 	}
 
@@ -262,48 +434,35 @@ func addUserConfigVolumeMount(instance *llamav1alpha1.LlamaStackDistribution, co
 }
 
 // addCABundleVolumeMount adds the CA bundle volume mount to the container if TLS config is specified.
-// For multiple keys: the init container writes DefaultCABundleKey to the root of the emptyDir volume,
-// and the main container mounts it with SubPath to CABundleMountPath.
-// For single key: the main container directly mounts the ConfigMap key.
+// Mounts the ConfigMap directly to a directory where the startup script can process the certificates.
 // Also handles auto-detected ODH trusted CA bundle ConfigMaps.
+// Both explicit and ODH bundles can be mounted together (additive).
 func addCABundleVolumeMount(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
+	// Mount explicit CA bundle if configured
 	if instance.Spec.Server.TLSConfig != nil && instance.Spec.Server.TLSConfig.CABundle != nil {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 			Name:      CABundleVolumeName,
-			MountPath: CABundleMountPath,
-			SubPath:   DefaultCABundleKey,
+			MountPath: CABundleSourceMountDir,
 			ReadOnly:  true,
 		})
-	} else if r != nil {
-		// Check for auto-detected ODH trusted CA bundle
+	}
+
+	// Also mount ODH trusted CA bundle if it exists (additive to explicit config)
+	if r != nil {
 		if _, keys, err := r.detectODHTrustedCABundle(ctx, instance); err == nil && len(keys) > 0 {
-			// Mount the auto-detected consolidated CA bundle
 			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-				Name:      CABundleVolumeName,
-				MountPath: CABundleMountPath,
-				SubPath:   DefaultCABundleKey,
+				Name:      "odh-ca-bundle",
+				MountPath: CABundleSourceMountDir + "/odh",
 				ReadOnly:  true,
 			})
 		}
 	}
 }
 
-// createCABundleVolume creates the appropriate volume configuration for CA bundles.
-// For single key: uses direct ConfigMap volume.
-// For multiple keys: uses emptyDir volume with InitContainer to concatenate keys.
+// createCABundleVolume creates the volume configuration for CA bundles.
+// Mounts the ConfigMap directly with all specified keys.
 func createCABundleVolume(caBundleConfig *llamav1alpha1.CABundleConfig) corev1.Volume {
-	// For multiple keys, we'll use an emptyDir that gets populated by an InitContainer
-	if len(caBundleConfig.ConfigMapKeys) > 0 {
-		return corev1.Volume{
-			Name: CABundleVolumeName,
-			VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{},
-			},
-		}
-	}
-
-	// For single key (legacy behavior), use direct ConfigMap volume
-	return corev1.Volume{
+	volume := corev1.Volume{
 		Name: CABundleVolumeName,
 		VolumeSource: corev1.VolumeSource{
 			ConfigMap: &corev1.ConfigMapVolumeSource{
@@ -313,74 +472,21 @@ func createCABundleVolume(caBundleConfig *llamav1alpha1.CABundleConfig) corev1.V
 			},
 		},
 	}
-}
 
-// createCABundleInitContainer creates an InitContainer that concatenates multiple CA bundle keys
-// from a ConfigMap into a single file in the shared ca-bundle volume.
-func createCABundleInitContainer(caBundleConfig *llamav1alpha1.CABundleConfig, image string) (corev1.Container, error) {
-	// Validate ConfigMap keys for security
-	if err := validateConfigMapKeys(caBundleConfig.ConfigMapKeys); err != nil {
-		return corev1.Container{}, fmt.Errorf("failed to validate ConfigMap keys: %w", err)
-	}
-
-	// Build the file list as a shell array embedded in the script
-	// This ensures the arguments are properly passed to the script
-	var fileListBuilder strings.Builder
-	for i, key := range caBundleConfig.ConfigMapKeys {
-		if i > 0 {
-			fileListBuilder.WriteString(" ")
+	// If specific keys are specified, create items to map them
+	if len(caBundleConfig.ConfigMapKeys) > 0 {
+		items := make([]corev1.KeyToPath, 0, len(caBundleConfig.ConfigMapKeys))
+		for _, key := range caBundleConfig.ConfigMapKeys {
+			items = append(items, corev1.KeyToPath{
+				Key:  key,
+				Path: key, // Mount with the same filename
+			})
 		}
-		// Quote each key to handle any special characters safely
-		fileListBuilder.WriteString(fmt.Sprintf("%q", key))
+		volume.VolumeSource.ConfigMap.Items = items
 	}
-	fileList := fileListBuilder.String()
+	// If no keys specified, all keys in the ConfigMap will be mounted
 
-	// Use a secure script approach that embeds the file list directly
-	// This eliminates the issue with arguments not being passed to sh -c
-	script := fmt.Sprintf(`#!/bin/sh
-set -e
-output_file="%s"
-source_dir="%s"
-
-# Clear the output file
-> "$output_file"
-
-# Process each validated key file (keys are pre-validated)
-for key in %s; do
-    file_path="$source_dir/$key"
-    if [ -f "$file_path" ]; then
-        cat "$file_path" >> "$output_file"
-        echo >> "$output_file"  # Add newline between certificates
-    else
-        echo "Warning: Certificate file $file_path not found" >&2
-    fi
-done`, CABundleTempPath, CABundleSourceDir, fileList)
-
-	return corev1.Container{
-		Name:            CABundleInitName,
-		Image:           image,
-		ImagePullPolicy: corev1.PullAlways,
-		Command:         []string{"/bin/sh", "-c", script},
-		// No Args needed since we embed the file list in the script
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      CABundleSourceVolName,
-				MountPath: CABundleSourceDir,
-				ReadOnly:  true,
-			},
-			{
-				Name:      CABundleVolumeName,
-				MountPath: CABundleTempDir,
-			},
-		},
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: ptr.To(false),
-			RunAsNonRoot:             ptr.To(true),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-		},
-	}, nil
+	return volume
 }
 
 // configurePodStorage configures the pod storage and returns the complete pod spec.
@@ -393,7 +499,7 @@ func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconcile
 	configureStorage(instance, &podSpec)
 
 	// Configure TLS CA bundle (with auto-detection support)
-	configureTLSCABundle(ctx, r, instance, &podSpec, container.Image)
+	configureTLSCABundle(ctx, r, instance, &podSpec)
 
 	// Configure user config
 	configureUserConfig(instance, &podSpec)
@@ -438,59 +544,32 @@ func configureEmptyDirStorage(podSpec *corev1.PodSpec) {
 }
 
 // configureTLSCABundle handles TLS CA bundle configuration.
-// For multiple keys: adds a ca-bundle-init init container that concatenates all keys into a single file
-// in a shared emptyDir volume, which the main container then mounts via SubPath.
-// For single key: uses a direct ConfigMap volume mount.
-// If no explicit CA bundle is configured, it checks for the well-known ODH trusted CA bundle ConfigMap.
-func configureTLSCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec, image string) {
+// Supports both explicit CA bundles and auto-detected ODH bundles.
+// Both can be configured simultaneously (additive).
+func configureTLSCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
 	tlsConfig := instance.Spec.Server.TLSConfig
 
-	// Handle explicit CA bundle configuration first
+	// Handle explicit CA bundle configuration
 	if tlsConfig != nil && tlsConfig.CABundle != nil {
-		addExplicitCABundle(ctx, tlsConfig.CABundle, podSpec, image)
-		return
+		addExplicitCABundle(tlsConfig.CABundle, podSpec)
 	}
 
-	// If no explicit CA bundle is configured, check for ODH trusted CA bundle auto-detection
+	// Also check for ODH trusted CA bundle auto-detection (additive to explicit config)
 	if r != nil {
-		addAutoDetectedCABundle(ctx, r, instance, podSpec, image)
+		addAutoDetectedCABundle(ctx, r, instance, podSpec)
 	}
 }
 
 // addExplicitCABundle handles explicitly configured CA bundles.
-func addExplicitCABundle(ctx context.Context, caBundleConfig *llamav1alpha1.CABundleConfig, podSpec *corev1.PodSpec, image string) {
-	// Add CA bundle InitContainer if multiple keys are specified
-	if len(caBundleConfig.ConfigMapKeys) > 0 {
-		caBundleInitContainer, err := createCABundleInitContainer(caBundleConfig, image)
-		if err != nil {
-			log.FromContext(ctx).Error(err, "Failed to create CA bundle init container")
-			return
-		}
-		podSpec.InitContainers = append(podSpec.InitContainers, caBundleInitContainer)
-	}
-
-	// Add CA bundle ConfigMap volume
+func addExplicitCABundle(caBundleConfig *llamav1alpha1.CABundleConfig, podSpec *corev1.PodSpec) {
+	// Add CA bundle ConfigMap volume - mounts directly to the main container
 	volume := createCABundleVolume(caBundleConfig)
 	podSpec.Volumes = append(podSpec.Volumes, volume)
-
-	// Add source ConfigMap volume for multiple keys scenario
-	if len(caBundleConfig.ConfigMapKeys) > 0 {
-		sourceVolume := corev1.Volume{
-			Name: CABundleSourceVolName,
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: caBundleConfig.ConfigMapName,
-					},
-				},
-			},
-		}
-		podSpec.Volumes = append(podSpec.Volumes, sourceVolume)
-	}
 }
 
 // addAutoDetectedCABundle handles auto-detection of ODH trusted CA bundle ConfigMap.
-func addAutoDetectedCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec, image string) {
+// This is additive to any explicit CA bundle configuration.
+func addAutoDetectedCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
 	if r == nil {
 		return
 	}
@@ -507,28 +586,9 @@ func addAutoDetectedCABundle(ctx context.Context, r *LlamaStackDistributionRecon
 		return
 	}
 
-	// Create a virtual CA bundle config for auto-detected ConfigMap
-	autoCaBundleConfig := &llamav1alpha1.CABundleConfig{
-		ConfigMapName: configMap.Name,
-		ConfigMapKeys: keys, // Use all available keys
-	}
-
-	// Use the same logic as explicit configuration
-	caBundleInitContainer, err := createCABundleInitContainer(autoCaBundleConfig, image)
-	if err != nil {
-		// Log error and skip auto-detected CA bundle configuration
-		log.FromContext(ctx).Error(err, "Failed to create CA bundle init container for auto-detected ConfigMap")
-		return
-	}
-	podSpec.InitContainers = append(podSpec.InitContainers, caBundleInitContainer)
-
-	// Add CA bundle emptyDir volume for auto-detected ConfigMap
-	volume := createCABundleVolume(autoCaBundleConfig)
-	podSpec.Volumes = append(podSpec.Volumes, volume)
-
-	// Add source ConfigMap volume for auto-detected ConfigMap
-	sourceVolume := corev1.Volume{
-		Name: CABundleSourceVolName,
+	// Create ODH CA bundle volume with separate name to avoid conflicts with explicit CA bundle
+	volume := corev1.Volume{
+		Name: "odh-ca-bundle",
 		VolumeSource: corev1.VolumeSource{
 			ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{
@@ -537,7 +597,20 @@ func addAutoDetectedCABundle(ctx context.Context, r *LlamaStackDistributionRecon
 			},
 		},
 	}
-	podSpec.Volumes = append(podSpec.Volumes, sourceVolume)
+
+	// Mount all available keys from the ODH bundle
+	if len(keys) > 0 {
+		items := make([]corev1.KeyToPath, 0, len(keys))
+		for _, key := range keys {
+			items = append(items, corev1.KeyToPath{
+				Key:  key,
+				Path: key, // Mount with the same filename
+			})
+		}
+		volume.VolumeSource.ConfigMap.Items = items
+	}
+
+	podSpec.Volumes = append(podSpec.Volumes, volume)
 
 	log.FromContext(ctx).Info("Auto-configured ODH trusted CA bundle",
 		"configMapName", configMap.Name,
