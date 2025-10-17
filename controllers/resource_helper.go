@@ -624,6 +624,17 @@ func (r *LlamaStackDistributionReconciler) resolveImage(distribution llamav1alph
 		if _, exists := distributionMap[distribution.Name]; !exists {
 			return "", fmt.Errorf("failed to validate distribution name: %s", distribution.Name)
 		}
+		// Before taking the distribution image for the map we fist check to see if the llama-stack-operator-config configmap
+		// overide for this version of RHODS/RHOAI
+		if r.RHODSVersion != "" {
+			// Version is of the format X.Y.Z we and to check for a mapping of type distribution.Name-X.Y
+			// This will allow us to specify a image for a specif major/minor version regardless of patch version
+			version := strings.Split(r.RHODSVersion, ".")[0:2]
+			overrideName := distribution.Name + "-" + strings.Join(version, ".")
+			if override, exists := r.ImageMappingOverrides[overrideName]; exists {
+				return override, nil
+			}
+		}
 		return distributionMap[distribution.Name], nil
 	case distribution.Image != "":
 		return distribution.Image, nil

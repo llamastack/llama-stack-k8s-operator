@@ -29,6 +29,8 @@ import (
 // testenvNamespaceCounter is used to generate unique namespace names for test isolation.
 var testenvNamespaceCounter int
 
+const testRHODSVersion = "2.25.0"
+
 func TestStorageConfiguration(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
@@ -511,4 +513,248 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 			AssertNetworkPolicyAbsent(t, k8sClient, npKey)
 		})
 	}
+}
+
+func TestParseImageMappingOverrides_SingleOverride(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	// Test data with single override
+	configMapData := map[string]string{
+		"image-overrides": "rh-dev-2.25: quay.io/rhoai/rhoai-fbc-fragment:rhoai-2.25@sha256:3bc98555",
+	}
+
+	// Call the function
+	result := controllers.ParseImageMappingOverrides(configMapData)
+
+	// Assertions
+	require.Len(t, result, 1, "Should have exactly one override")
+	require.Equal(t, "quay.io/rhoai/rhoai-fbc-fragment:rhoai-2.25@sha256:3bc98555", result["rh-dev-2.25"], "Override should match expected value")
+}
+
+func TestParseImageMappingOverrides_InvalidYAML(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	// Test data with invalid YAML
+	configMapData := map[string]string{
+		"image-overrides": "invalid: yaml: content: [",
+	}
+
+	// Call the function
+	result := controllers.ParseImageMappingOverrides(configMapData)
+
+	// Assertions - should return empty map on error
+	require.Empty(t, result, "Should return empty map when YAML is invalid")
+}
+
+func TestNewLlamaStackDistributionReconciler_WithImageOverrides(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	// Create operator namespace
+	operatorNamespace := createTestNamespace(t, "llama-stack-k8s-operator-system")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	// Create test ConfigMap with image overrides
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{
+			"image-overrides": "rh-dev-2.25: quay.io/rhoai/rhoai-fbc-fragment:rhoai-2.25@sha256:3bc98555",
+			"featureFlags": `enableNetworkPolicy:
+    enabled: false`,
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), configMap))
+
+	// Create test cluster info
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"starter": "default-image"},
+	}
+
+	// Call the function
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+		t.Context(),
+		k8sClient,
+		scheme.Scheme,
+		clusterInfo,
+	)
+
+	// Assertions
+	require.NoError(t, err, "Should create reconciler successfully")
+	require.NotNil(t, reconciler, "Reconciler should not be nil")
+	require.Len(t, reconciler.ImageMappingOverrides, 1, "Should have one image override")
+	require.Equal(t, "quay.io/rhoai/rhoai-fbc-fragment:rhoai-2.25@sha256:3bc98555",
+		reconciler.ImageMappingOverrides["rh-dev-2.25"], "Override should match expected value")
+	require.False(t, reconciler.EnableNetworkPolicy, "Network policy should be disabled")
+}
+
+func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	// Create test namespace
+	namespace := createTestNamespace(t, "test-configmap-update")
+	operatorNamespace := createTestNamespace(t, "llama-stack-k8s-operator-system")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	// Create initial ConfigMap
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{
+			"featureFlags": `enableNetworkPolicy:
+    enabled: false`,
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), configMap))
+
+	// Create LlamaStackDistribution instance using rh-dev
+	instance := NewDistributionBuilder().
+		WithName("test-configmap-update").
+		WithNamespace(namespace.Name).
+		WithDistribution("rh-dev").
+		Build()
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+
+	// Create reconciler with initial overrides
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"rh-dev": "default-rh-dev-image"},
+	}
+
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+		t.Context(),
+		k8sClient,
+		scheme.Scheme,
+		clusterInfo,
+	)
+	require.NoError(t, err)
+
+	// Set RHODSVersion to enable image override logic
+	reconciler.RHODSVersion = testRHODSVersion
+
+	// Initial reconciliation
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
+	})
+	require.NoError(t, err)
+
+	// Get initial deployment and verify it uses the first override
+	deployment := &appsv1.Deployment{}
+	waitForResource(t, k8sClient, instance.Namespace, instance.Name, deployment)
+	initialImage := deployment.Spec.Template.Spec.Containers[0].Image
+	require.Equal(t, "default-rh-dev-image", initialImage,
+		"Initial deployment should use distribution image")
+
+	// Update ConfigMap with new overrides
+	configMap.Data["image-overrides"] = "rh-dev-2.25: quay.io/rhoai/rhoai-fbc-fragment:rhoai-2.25@sha256:newhash"
+	require.NoError(t, k8sClient.Update(t.Context(), configMap))
+
+	// Simulate ConfigMap update by recreating reconciler (in real scenario this would be triggered by watch)
+	updatedReconciler, err := controllers.NewLlamaStackDistributionReconciler(
+		t.Context(),
+		k8sClient,
+		scheme.Scheme,
+		clusterInfo,
+	)
+	require.NoError(t, err)
+
+	// Set RHODSVersion for the updated reconciler
+	updatedReconciler.RHODSVersion = testRHODSVersion
+
+	// Reconcile with updated overrides
+	_, err = updatedReconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
+	})
+	require.NoError(t, err)
+
+	// Verify deployment was updated with new image
+	waitForResourceWithKeyAndCondition(
+		t, k8sClient, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
+		deployment, func() bool {
+			return deployment.Spec.Template.Spec.Containers[0].Image == "quay.io/rhoai/rhoai-fbc-fragment:rhoai-2.25@sha256:newhash"
+		}, "Deployment should be updated with new image")
+}
+
+func TestImageOverrideVersionMatching(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	// Create operator namespace
+	operatorNamespace := createTestNamespace(t, "llama-stack-k8s-operator-system")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	// Create test namespace for the distribution
+	testNamespace := createTestNamespace(t, "test-image-override")
+
+	// Create test ConfigMap with multiple version overrides
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{
+			"image-overrides": `rh-dev-2.25: quay.io/rhoai/rhoai-fbc-fragment:rhoai-2.25@sha256:3bc98555
+rh-dev-2.26: quay.io/rhoai/rhoai-fbc-fragment:rhoai-2.26@sha256:3bc98666`,
+			"featureFlags": `enableNetworkPolicy:
+    enabled: false`,
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), configMap))
+
+	// Create test cluster info with rh-dev distribution
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"rh-dev": "default-rh-dev-image"},
+	}
+
+	// Create LlamaStackDistribution instance using rh-dev
+	instance := NewDistributionBuilder().
+		WithName("test-image-override").
+		WithNamespace(testNamespace.Name).
+		WithDistribution("rh-dev").
+		Build()
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+
+	// Create reconciler with overrides
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+		t.Context(),
+		k8sClient,
+		scheme.Scheme,
+		clusterInfo,
+	)
+	require.NoError(t, err, "Should create reconciler successfully")
+
+	// Set RHODSVersion to enable image override logic
+	reconciler.RHODSVersion = testRHODSVersion
+
+	// Verify overrides are loaded
+	require.Len(t, reconciler.ImageMappingOverrides, 2, "Should have two image overrides")
+	require.Equal(t, "quay.io/rhoai/rhoai-fbc-fragment:rhoai-2.25@sha256:3bc98555",
+		reconciler.ImageMappingOverrides["rh-dev-2.25"], "Should match rh-dev-2.25 version")
+	require.Equal(t, "quay.io/rhoai/rhoai-fbc-fragment:rhoai-2.26@sha256:3bc98666",
+		reconciler.ImageMappingOverrides["rh-dev-2.26"], "Should match rh-dev-2.26 version")
+
+	// Reconcile to create deployment
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
+	})
+	require.NoError(t, err, "Should reconcile successfully")
+
+	// Get the deployment and verify it uses the correct image
+	deployment := &appsv1.Deployment{}
+	waitForResource(t, k8sClient, instance.Namespace, instance.Name, deployment)
+
+	// Verify the deployment has the correct image from overrides
+	// The deployment should use one of the override images, not the default
+	require.NotEmpty(t, deployment.Spec.Template.Spec.Containers, "Deployment should have containers")
+	containerImage := deployment.Spec.Template.Spec.Containers[0].Image
+	require.NotEmpty(t, containerImage, "Container should have an image")
+
+	// The image should be the rh-dev-2.25 override since RHODSVersion is "2.25.0"
+	// The override logic constructs the key as "rh-dev-2.25" from distribution "rh-dev" and version "2.25.0"
+	expectedImage := "quay.io/rhoai/rhoai-fbc-fragment:rhoai-2.25@sha256:3bc98555"
+	require.Equal(t, expectedImage, containerImage, "Container image should match the rh-dev-2.25 override image")
 }
