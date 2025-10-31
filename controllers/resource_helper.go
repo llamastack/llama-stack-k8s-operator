@@ -64,11 +64,14 @@ try:
     print(f'Detected llama-stack version: {llama_version}', file=sys.stderr)
 
     v = pkg_version.parse(llama_version)
+    # Use base_version to ignore pre-release/post-release/dev suffixes
+    # This ensures that 0.3.0rc2, 0.3.0alpha1, etc. are treated as 0.3.0
+    base_v = pkg_version.parse(v.base_version)
 
-    if v < pkg_version.parse('0.2.17'):
+    if base_v < pkg_version.parse('0.2.17'):
         print('Using legacy module path (llama_stack.distribution.server.server)', file=sys.stderr)
         print(0)
-    elif v < pkg_version.parse('0.3.0'):
+    elif base_v < pkg_version.parse('0.3.0'):
         print('Using core module path (llama_stack.core.server.server)', file=sys.stderr)
         print(1)
     else:
