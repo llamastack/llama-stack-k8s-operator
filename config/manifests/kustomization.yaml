@@ -7,3 +7,10 @@ resources:
 - ../default
 - ../samples
 - ../scorecard
+
+patches:
+- path: patches/fips-annotation-patch.yaml
+  target:
+    group: operators.coreos.com
+    version: v1alpha1
+    kind: ClusterServiceVersion
