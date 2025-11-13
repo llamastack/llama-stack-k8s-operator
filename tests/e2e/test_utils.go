@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -423,34 +424,75 @@ func logPodDetails(t *testing.T, testenv *TestEnvironment, namespace string) {
 func logServiceEndpoints(t *testing.T, testenv *TestEnvironment, namespace, serviceName string) {
 	t.Helper()
 
-	endpoints := &corev1.Endpoints{}
-	err := testenv.Client.Get(testenv.Ctx, types.NamespacedName{
-		Name:      serviceName,
-		Namespace: namespace,
-	}, endpoints)
+	// List all EndpointSlices for the service
+	endpointSliceList := &discoveryv1.EndpointSliceList{}
+	err := testenv.Client.List(testenv.Ctx, endpointSliceList,
+		client.InNamespace(namespace),
+		client.MatchingLabels{"kubernetes.io/service-name": serviceName})
 
 	if err != nil {
-		t.Logf("Failed to get endpoints for service %s: %v", serviceName, err)
+		t.Logf("Failed to get endpoint slices for service %s: %v", serviceName, err)
+		return
+	}
+
+	if len(endpointSliceList.Items) == 0 {
+		t.Logf("🔗 Service %s has no endpoint slices", serviceName)
 		return
 	}
 
 	t.Logf("🔗 Service %s endpoints:", serviceName)
-	for i, subset := range endpoints.Subsets {
-		t.Logf("  Subset %d:", i)
-		// Ready addresses indicate pods that passed health checks and can receive traffic
-		t.Logf("    Ready addresses: %d", len(subset.Addresses))
-		for _, addr := range subset.Addresses {
-			t.Logf("      - %s", addr.IP)
+	for i, slice := range endpointSliceList.Items {
+		t.Logf("  EndpointSlice %d (%s):", i, slice.Name)
+		logEndpointSliceDetails(t, &slice)
+	}
+}
+
+// logEndpointSliceDetails logs the details of a single endpoint slice.
+func logEndpointSliceDetails(t *testing.T, slice *discoveryv1.EndpointSlice) {
+	t.Helper()
+
+	readyCount, notReadyCount := logEndpointAddresses(t, slice.Endpoints)
+	t.Logf("    Summary: %d ready, %d not ready", readyCount, notReadyCount)
+
+	t.Logf("    Ports:")
+	logPortDetails(t, slice.Ports)
+}
+
+// logEndpointAddresses logs endpoint addresses and returns counts of ready and not-ready endpoints.
+func logEndpointAddresses(t *testing.T, endpoints []discoveryv1.Endpoint) (readyCount, notReadyCount int) {
+	t.Helper()
+
+	for _, endpoint := range endpoints {
+		isReady := endpoint.Conditions.Ready != nil && *endpoint.Conditions.Ready
+		if isReady {
+			readyCount++
+			for _, addr := range endpoint.Addresses {
+				t.Logf("    Ready: %s", addr)
+			}
+		} else {
+			notReadyCount++
+			for _, addr := range endpoint.Addresses {
+				t.Logf("    Not ready: %s", addr)
+			}
 		}
-		// Not ready addresses show pods that exist but failed health checks
-		t.Logf("    Not ready addresses: %d", len(subset.NotReadyAddresses))
-		for _, addr := range subset.NotReadyAddresses {
-			t.Logf("      - %s", addr.IP)
+	}
+	return readyCount, notReadyCount
+}
+
+// logPortDetails logs port information from an endpoint slice.
+func logPortDetails(t *testing.T, ports []discoveryv1.EndpointPort) {
+	t.Helper()
+
+	for _, port := range ports {
+		portNum := int32(0)
+		if port.Port != nil {
+			portNum = *port.Port
 		}
-		t.Logf("    Ports:")
-		for _, port := range subset.Ports {
-			t.Logf("      - %s: %d", port.Name, port.Port)
+		portName := ""
+		if port.Name != nil {
+			portName = *port.Name
 		}
+		t.Logf("      - %s: %d", portName, portNum)
 	}
 }
 
