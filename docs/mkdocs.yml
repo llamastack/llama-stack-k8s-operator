@@ -1,0 +1,118 @@
+site_name: LlamaStack Kubernetes Operator
+site_description: Kubernetes operator for managing LlamaStack distributions
+site_url: https://llamastack-k8s-operator.pages.dev
+repo_url: https://github.com/llamastack/llama-stack-k8s-operator
+repo_name: llamastack/llama-stack-k8s-operator
+
+# Directory configuration
+docs_dir: content
+site_dir: site
+
+# Theme configuration (Material Design like HyperShift)
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - navigation.footer
+
+# Navigation structure
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quick-start.md
+    - Understanding Distributions: getting-started/distributions.md
+    - Configuration: getting-started/configuration.md
+  - Distributions:
+    - Starter: distributions/starter.md
+    - vLLM: distributions/vllm.md
+    - Ollama: distributions/ollama.md
+    - AWS Bedrock: distributions/bedrock.md
+    - Text Generation Inference: distributions/tgi.md
+    - Together AI: distributions/together.md
+    - Bring Your Own: distributions/bring-your-own.md
+  - How-to Guides:
+    - Deploy LlamaStack: how-to/deploy-llamastack.md
+    - Configure Storage: how-to/configure-storage.md
+    - Scaling: how-to/scaling.md
+    - Monitoring: how-to/monitoring.md
+    - Troubleshooting: how-to/troubleshooting.md
+  - Reference:
+    - API Reference: reference/api.md
+    - Configuration Reference: reference/configuration.md
+    - CLI Reference: reference/cli.md
+  - Examples:
+    - Basic Deployment: examples/basic-deployment.md
+    - Production Setup: examples/production-setup.md
+    - Custom Images: examples/custom-images.md
+  - Contributing:
+    - Development Guide: contributing/development.md
+    - Testing: contributing/testing.md
+    - Documentation: contributing/documentation.md
+
+# Plugins
+plugins:
+  - search
+  - mermaid2
+
+# Markdown extensions
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+# Extra CSS and JavaScript
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/extra.js
+
+# Footer
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/llamastack/llama-stack-k8s-operator
+    - icon: fontawesome/brands/docker
+      link: https://quay.io/repository/llamastack/llama-stack-k8s-operator
+  version:
+    provider: mike
