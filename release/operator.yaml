@@ -272,6 +272,31 @@ spec:
                     x-kubernetes-validations:
                     - message: Only one of name or image can be specified
                       rule: '!(has(self.name) && has(self.image))'
+                  envFromExternalConfigMaps:
+                    description: EnvFromExternalConfigMaps defines external ConfigMaps
+                      to inject as environment variables
+                    items:
+                      description: ExternalConfigMapSpec defines external ConfigMaps
+                        to inject as environment variables
+                      properties:
+                        mapping:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            Mapping defines how ConfigMap keys map to environment variable names
+                            Key is the ConfigMap key, Value is the environment variable name
+                          type: object
+                        name:
+                          description: Name is the name of the ConfigMap
+                          type: string
+                        namespace:
+                          description: Namespace is the namespace of the ConfigMap
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
+                    type: array
                   podOverrides:
                     description: PodOverrides allows advanced pod-level customization.
                     properties:

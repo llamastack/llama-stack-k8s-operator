@@ -1,0 +1,41 @@
+apiVersion: llamastack.io/v1alpha1
+kind: LlamaStackDistribution
+metadata:
+  name: llamastackdistribution-with-external-configmaps
+spec:
+  replicas: 1
+  server:
+    containerSpec:
+      env:
+        - name: INFERENCE_MODEL
+          value: 'llama3.2:1b'
+        - name: OLLAMA_URL
+          value: 'http://ollama-server-service.ollama-dist.svc.cluster.local:11434'
+      name: llama-stack
+    distribution:
+      name: starter
+    storage:
+      size: "20Gi"
+      mountPath: "/home/lls/.lls"
+    # External ConfigMaps configuration - enables referencing Konflux-built images
+    # from the redhat-ods-applications namespace ConfigMaps
+    envFromExternalConfigMaps:
+      - name: trustyai-service-operator-config
+        namespace: redhat-ods-applications
+        mapping:
+          ragas-provider-image: RAGAS_PROVIDER_IMAGE
+          garak-provider-image: GARAK_PROVIDER_IMAGE
+---
+# Example of how the ConfigMap would look like in redhat-ods-applications namespace
+# This would be automatically created/managed by the trustyai-service-operator
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trustyai-service-operator-config
+  namespace: redhat-ods-applications
+data:
+  ragas-provider-image: "quay.io/trustyai/llama-stack-provider-ragas:v1.2.3-konflux-build-123"
+  garak-provider-image: "quay.io/trustyai/llama-stack-provider-trustyai-garak:v1.2.3-konflux-build-456"
+  # Other trustyai operator configuration values...
+  trustyaiServiceImage: "quay.io/trustyai/trustyai-service:latest"
+  trustyaiOperatorImage: "quay.io/trustyai/trustyai-service-operator:latest"
