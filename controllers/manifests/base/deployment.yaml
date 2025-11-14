@@ -18,4 +18,3 @@ spec:
       serviceAccountName: sa
       containers: []  # Will be populated by controller
       volumes: []     # Will be populated by controller
-      initContainers: []  # Will be populated by controller

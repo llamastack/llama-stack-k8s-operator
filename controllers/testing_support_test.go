@@ -1,7 +1,13 @@
 package controllers_test
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"slices"
 	"testing"
 	"time"
@@ -108,6 +114,17 @@ func (b *DistributionBuilder) WithServiceAccountName(serviceAccountName string) 
 func (b *DistributionBuilder) WithUserConfig(configMapName string) *DistributionBuilder {
 	b.instance.Spec.Server.UserConfig = &llamav1alpha1.UserConfigSpec{
 		ConfigMapName: configMapName,
+	}
+	return b
+}
+
+func (b *DistributionBuilder) WithCABundle(configMapName string, configMapKeys []string) *DistributionBuilder {
+	if b.instance.Spec.Server.TLSConfig == nil {
+		b.instance.Spec.Server.TLSConfig = &llamav1alpha1.TLSConfig{}
+	}
+	b.instance.Spec.Server.TLSConfig.CABundle = &llamav1alpha1.CABundleConfig{
+		ConfigMapName: configMapName,
+		ConfigMapKeys: configMapKeys,
 	}
 	return b
 }
@@ -504,4 +521,50 @@ func createTestNamespace(t *testing.T, namePrefix string) *corev1.Namespace {
 		}
 	})
 	return namespace
+}
+
+// loadTestCertificate generates a valid self-signed test certificate.
+// This function generates certificates programmatically to avoid dependencies on external scripts
+// or the openssl command, making tests portable across different environments including CI/CD.
+func loadTestCertificate(t *testing.T) string {
+	t.Helper()
+
+	// Generate a private key
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err, "Failed to generate private key")
+
+	// Create a certificate template
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	require.NoError(t, err, "Failed to generate serial number")
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Country:            []string{"US"},
+			Province:           []string{"California"},
+			Locality:           []string{"Los Angeles"},
+			Organization:       []string{"Test Corp"},
+			OrganizationalUnit: []string{"Testing"},
+			CommonName:         "test-ca",
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+
+	// Create a self-signed certificate
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	require.NoError(t, err, "Failed to create certificate")
+
+	// Encode certificate to PEM format
+	certPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certDER,
+	})
+	require.NotNil(t, certPEM, "Failed to encode certificate to PEM")
+
+	return string(certPEM)
 }

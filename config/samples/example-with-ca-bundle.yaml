@@ -61,8 +61,6 @@ spec:
         value: "meta-llama/Llama-3.2-1B-Instruct"
       - name: VLLM_URL
         value: "https://vllm-server.vllm-dist.svc.cluster.local:8000/v1"
-      - name: VLLM_TLS_VERIFY
-        value: "/etc/ssl/certs/ca-bundle.crt"
     userConfig:
       configMapName: llama-stack-config
       # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR
@@ -71,6 +69,12 @@ spec:
         configMapName: custom-ca-bundle
         # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR
         # configMapKeys not specified - defaults to ["ca-bundle.crt"]
-        # configMapKeys: # Specify multiple keys to concatenate into ca-bundle.crt
+        # configMapKeys: # Specify multiple keys to concatenate into a single CA bundle
         #   - ca-bundle1.crt
         #   - ca-bundle2.crt
+        # Note: The operator will automatically:
+        #   1. Validate and extract valid certificates from all specified ConfigMap keys
+        #   2. Concatenate them into a single PEM file
+        #   3. Create a managed ConfigMap named {instance-name}-ca-bundle
+        #   4. Mount the bundle at /etc/ssl/certs/ca-bundle/ca-bundle.crt
+        #   5. Set SSL_CERT_FILE environment variable automatically

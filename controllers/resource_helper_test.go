@@ -596,13 +596,13 @@ func TestValidateConfigMapKeys(t *testing.T) {
 			name:        "command injection attempt",
 			keys:        []string{"valid-key; rm -rf /; echo malicious"},
 			expectError: true,
-			errorMsg:    "contains invalid characters",
+			errorMsg:    "contains invalid path characters",
 		},
 		{
 			name:        "path traversal attempt",
 			keys:        []string{"../../../etc/passwd"},
 			expectError: true,
-			errorMsg:    "contains invalid characters",
+			errorMsg:    "contains invalid path characters",
 		},
 		{
 			name:        "shell metacharacters",
@@ -614,7 +614,7 @@ func TestValidateConfigMapKeys(t *testing.T) {
 			name:        "pipe injection",
 			keys:        []string{"key | cat /etc/passwd"},
 			expectError: true,
-			errorMsg:    "contains invalid characters",
+			errorMsg:    "contains invalid path characters",
 		},
 		{
 			name:        "too long key",

@@ -18,8 +18,10 @@ package controllers
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -59,14 +61,16 @@ const (
 	manifestsBasePath  = "manifests/base"
 
 	// CA Bundle related constants.
-	DefaultCABundleKey    = "ca-bundle.crt"
-	CABundleMountPath     = "/etc/ssl/certs/ca-bundle.crt"
-	CABundleTempPath      = "/tmp/ca-bundle/ca-bundle.crt"
-	CABundleVolumeName    = "ca-bundle"
-	CABundleSourceDir     = "/tmp/ca-source"
-	CABundleInitName      = "ca-bundle-init"
-	CABundleSourceVolName = "ca-bundle-source"
-	CABundleTempDir       = "/tmp/ca-bundle"
+	DefaultCABundleKey             = "ca-bundle.crt"
+	CABundleVolumeName             = "ca-bundle"
+	ManagedCABundleConfigMapSuffix = "-ca-bundle"
+	ManagedCABundleKey             = "ca-bundle.crt"
+	ManagedCABundleMountPath       = "/etc/ssl/certs/ca-bundle"
+	ManagedCABundleFilePath        = "/etc/ssl/certs/ca-bundle/ca-bundle.crt"
+
+	// Security limits for CA bundle processing.
+	MaxCABundleSize         = 10 * 1024 * 1024 // 10MB max total size
+	MaxCABundleCertificates = 1000             // Maximum number of certificates
 
 	// ODH/RHOAI well-known ConfigMap for trusted CA bundles.
 	odhTrustedCABundleConfigMap = "odh-trusted-ca-bundle"
@@ -381,18 +385,75 @@ func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Contex
 }
 
 func (r *LlamaStackDistributionReconciler) reconcileConfigMaps(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
-	// Reconcile the ConfigMap if specified by the user
+	if err := r.validateCABundleKeys(instance); err != nil {
+		return err
+	}
+
+	if err := r.reconcileUserAndCABundleConfigMaps(ctx, instance); err != nil {
+		return err
+	}
+
+	return r.reconcileManagedCABundle(ctx, instance)
+}
+
+func (r *LlamaStackDistributionReconciler) validateCABundleKeys(instance *llamav1alpha1.LlamaStackDistribution) error {
+	if instance.Spec.Server.TLSConfig == nil || instance.Spec.Server.TLSConfig.CABundle == nil {
+		return nil
+	}
+
+	if len(instance.Spec.Server.TLSConfig.CABundle.ConfigMapKeys) > 0 {
+		if err := validateConfigMapKeys(instance.Spec.Server.TLSConfig.CABundle.ConfigMapKeys); err != nil {
+			return fmt.Errorf("failed to validate CA bundle ConfigMap keys: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (r *LlamaStackDistributionReconciler) reconcileUserAndCABundleConfigMaps(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
 	if r.hasUserConfigMap(instance) {
 		if err := r.reconcileUserConfigMap(ctx, instance); err != nil {
 			return fmt.Errorf("failed to reconcile user ConfigMap: %w", err)
 		}
 	}
 
-	// Reconcile the CA bundle ConfigMap if specified
 	if r.hasCABundleConfigMap(instance) {
 		if err := r.reconcileCABundleConfigMap(ctx, instance); err != nil {
 			return fmt.Errorf("failed to reconcile CA bundle ConfigMap: %w", err)
 		}
+	}
+
+	return nil
+}
+
+func (r *LlamaStackDistributionReconciler) reconcileManagedCABundle(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	logger := log.FromContext(ctx)
+	managedConfigMapName := getManagedCABundleConfigMapName(instance)
+
+	if !r.hasCABundleConfigMap(instance) && !r.hasODHTrustedCABundle(ctx, instance) {
+		// No CA bundles configured, delete managed ConfigMap if it exists
+		existingConfigMap := &corev1.ConfigMap{}
+		err := r.Get(ctx, types.NamespacedName{
+			Name:      managedConfigMapName,
+			Namespace: instance.Namespace,
+		}, existingConfigMap)
+
+		if err == nil {
+			// ConfigMap exists but is no longer needed, delete it
+			logger.Info("Deleting unused managed CA bundle ConfigMap", "configMap", managedConfigMapName)
+			if delErr := r.Delete(ctx, existingConfigMap); delErr != nil && !k8serrors.IsNotFound(delErr) {
+				return fmt.Errorf("failed to delete unused managed CA bundle ConfigMap: %w", delErr)
+			}
+			logger.Info("Successfully deleted unused managed CA bundle ConfigMap", "configMap", managedConfigMapName)
+		} else if !k8serrors.IsNotFound(err) {
+			// Unexpected error
+			return fmt.Errorf("failed to check for managed CA bundle ConfigMap: %w", err)
+		}
+		return nil
+	}
+
+	if err := r.reconcileManagedCABundleConfigMap(ctx, instance); err != nil {
+		return fmt.Errorf("failed to reconcile managed CA bundle ConfigMap: %w", err)
 	}
 
 	return nil
@@ -1079,13 +1140,6 @@ func (r *LlamaStackDistributionReconciler) reconcileUserConfigMap(ctx context.Co
 	return nil
 }
 
-// isValidPEM validates that the given data contains valid PEM formatted content.
-func isValidPEM(data []byte) bool {
-	// Basic PEM validation using pem.Decode.
-	block, _ := pem.Decode(data)
-	return block != nil
-}
-
 // reconcileCABundleConfigMap validates that the referenced CA bundle ConfigMap exists.
 func (r *LlamaStackDistributionReconciler) reconcileCABundleConfigMap(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
 	logger := log.FromContext(ctx)
@@ -1136,26 +1190,9 @@ func (r *LlamaStackDistributionReconciler) reconcileCABundleConfigMap(ctx contex
 			return fmt.Errorf("failed to find CA bundle key '%s' in ConfigMap %s/%s", key, configMapNamespace, instance.Spec.Server.TLSConfig.CABundle.ConfigMapName)
 		}
 
-		// Validate that the key contains valid PEM data
-		pemData, exists := configMap.Data[key]
-		if !exists {
-			// This should not happen since we checked above, but just to be safe
-			return fmt.Errorf("failed to find CA bundle key '%s' in ConfigMap %s/%s", key, configMapNamespace, instance.Spec.Server.TLSConfig.CABundle.ConfigMapName)
-		}
-
-		if !isValidPEM([]byte(pemData)) {
-			logger.Error(nil, "CA bundle key contains invalid PEM data",
-				"configMapName", instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
-				"configMapNamespace", configMapNamespace,
-				"key", key)
-			return fmt.Errorf("failed to validate CA bundle key '%s' in ConfigMap %s/%s: contains invalid PEM data",
-				key,
-				configMapNamespace,
-				instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
-			)
-		}
-
-		logger.V(1).Info("CA bundle key contains valid PEM data",
+		// Note: Detailed PEM validation is performed later
+		// in extractValidCertificates() which validates all PEM blocks.
+		logger.V(1).Info("CA bundle key found",
 			"configMapName", instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
 			"configMapNamespace", configMapNamespace,
 			"key", key)
@@ -1190,34 +1227,315 @@ func (r *LlamaStackDistributionReconciler) getConfigMapHash(ctx context.Context,
 	return fmt.Sprintf("%s-%s", configMap.ResourceVersion, configMap.Name), nil
 }
 
-// getCABundleConfigMapHash calculates a hash of the CA bundle ConfigMap data to detect changes.
+// getCABundleConfigMapHash calculates a hash of the managed CA bundle ConfigMap to detect changes.
 func (r *LlamaStackDistributionReconciler) getCABundleConfigMapHash(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) (string, error) {
-	if !r.hasCABundleConfigMap(instance) {
+	// Check if any CA bundles are configured
+	if !r.hasCABundleConfigMap(instance) && !r.hasODHTrustedCABundle(ctx, instance) {
 		return "", nil
 	}
 
-	configMapNamespace := r.getCABundleConfigMapNamespace(instance)
+	// Get the managed ConfigMap
+	managedConfigMapName := getManagedCABundleConfigMapName(instance)
+	configMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      managedConfigMapName,
+		Namespace: instance.Namespace,
+	}, configMap)
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			// ConfigMap doesn't exist yet, return empty hash
+			return "", nil
+		}
+		return "", err
+	}
 
+	// Create a content-based hash that will change when the ConfigMap data changes
+	return fmt.Sprintf("%s-%s", configMap.ResourceVersion, configMap.Name), nil
+}
+
+// hasODHTrustedCABundle checks if the ODH trusted CA bundle ConfigMap exists and has valid keys.
+func (r *LlamaStackDistributionReconciler) hasODHTrustedCABundle(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) bool {
+	_, keys, err := r.detectODHTrustedCABundle(ctx, instance)
+	return err == nil && len(keys) > 0
+}
+
+// gatherCABundleData collects all CA certificate data from source ConfigMaps and concatenates them.
+// This function implements security measures to prevent injection attacks:
+// - Validates PEM structure and X.509 certificate format during processing.
+// - Enforces size limits to prevent resource exhaustion.
+// - Only extracts valid CERTIFICATE blocks using PEM decoder and X.509 parser.
+func (r *LlamaStackDistributionReconciler) gatherCABundleData(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) (string, error) {
+	logger := log.FromContext(ctx)
+	collector := &certificateCollector{logger: logger}
+
+	if err := r.gatherExplicitCABundle(ctx, instance, collector); err != nil {
+		return "", err
+	}
+
+	if err := r.gatherODHCABundle(ctx, instance, collector); err != nil {
+		return "", err
+	}
+
+	return collector.concatenate()
+}
+
+type certificateCollector struct {
+	logger           logr.Logger
+	certificates     []string
+	totalSize        int
+	certificateCount int
+}
+
+func (c *certificateCollector) add(certs []string, size, count int, configMapName, key string) error {
+	c.totalSize += size
+	c.certificateCount += count
+
+	if c.totalSize > MaxCABundleSize {
+		return fmt.Errorf("failed to process CA bundle: total size exceeds maximum allowed size of %d bytes", MaxCABundleSize)
+	}
+
+	if c.certificateCount > MaxCABundleCertificates {
+		return fmt.Errorf("failed to process CA bundle: contains more than %d certificates (maximum allowed)", MaxCABundleCertificates)
+	}
+
+	c.certificates = append(c.certificates, certs...)
+	c.logger.V(1).Info("Processed CA bundle key",
+		"configMap", configMapName,
+		"key", key,
+		"certificates", count,
+		"size", size)
+
+	return nil
+}
+
+func (c *certificateCollector) concatenate() (string, error) {
+	if len(c.certificates) == 0 {
+		return "", errors.New("failed to find valid certificates in CA bundle ConfigMaps")
+	}
+
+	// Use strings.Builder for efficient memory usage with large bundles
+	var builder strings.Builder
+	builder.Grow(c.totalSize + len(c.certificates)) // Pre-allocate with space for newlines
+	for i, cert := range c.certificates {
+		if i > 0 {
+			builder.WriteString("\n")
+		}
+		builder.WriteString(cert)
+	}
+
+	concatenated := builder.String()
+	c.logger.Info("Successfully gathered CA bundle data",
+		"totalCertificates", c.certificateCount,
+		"totalSize", len(concatenated))
+
+	return concatenated, nil
+}
+
+func (r *LlamaStackDistributionReconciler) gatherExplicitCABundle(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, collector *certificateCollector) error {
+	if !r.hasCABundleConfigMap(instance) {
+		return nil
+	}
+
+	configMapNamespace := r.getCABundleConfigMapNamespace(instance)
 	configMap := &corev1.ConfigMap{}
 	err := r.Get(ctx, types.NamespacedName{
 		Name:      instance.Spec.Server.TLSConfig.CABundle.ConfigMapName,
 		Namespace: configMapNamespace,
 	}, configMap)
 	if err != nil {
-		return "", err
+		return fmt.Errorf("failed to get CA bundle ConfigMap %s/%s: %w",
+			configMapNamespace, instance.Spec.Server.TLSConfig.CABundle.ConfigMapName, err)
 	}
 
-	// Create a content-based hash that will change when the ConfigMap data changes
-	// Include information about which keys are being used
-	var keyInfo string
-	if len(instance.Spec.Server.TLSConfig.CABundle.ConfigMapKeys) > 0 {
-		keyInfo = fmt.Sprintf("-%s", strings.Join(instance.Spec.Server.TLSConfig.CABundle.ConfigMapKeys, ","))
+	keysToProcess := instance.Spec.Server.TLSConfig.CABundle.ConfigMapKeys
+	if len(keysToProcess) == 0 {
+		keysToProcess = []string{DefaultCABundleKey}
+	}
+
+	return r.processConfigMapKeys(configMap, keysToProcess, configMapNamespace, instance.Spec.Server.TLSConfig.CABundle.ConfigMapName, collector)
+}
+
+func (r *LlamaStackDistributionReconciler) gatherODHCABundle(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, collector *certificateCollector) error {
+	configMap, keys, err := r.detectODHTrustedCABundle(ctx, instance)
+	if err != nil {
+		// Log but don't fail - ODH bundle is optional
+		collector.logger.V(1).Info("Could not detect ODH trusted CA bundle", "error", err)
+		return nil
+	}
+	if configMap == nil || len(keys) == 0 {
+		return nil
+	}
+
+	return r.processODHConfigMapKeys(configMap, keys, collector)
+}
+
+func (r *LlamaStackDistributionReconciler) processConfigMapKeys(configMap *corev1.ConfigMap, keys []string, namespace, name string, collector *certificateCollector) error {
+	for _, key := range keys {
+		data, exists := configMap.Data[key]
+		if !exists {
+			return fmt.Errorf("failed to find CA bundle key '%s' in ConfigMap %s/%s", key, namespace, name)
+		}
+
+		certs, size, count, err := extractValidCertificates([]byte(data), key)
+		if err != nil {
+			return fmt.Errorf("failed to process CA bundle key '%s' from ConfigMap %s/%s: %w", key, namespace, name, err)
+		}
+
+		if err := collector.add(certs, size, count, configMap.Name, key); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *LlamaStackDistributionReconciler) processODHConfigMapKeys(configMap *corev1.ConfigMap, keys []string, collector *certificateCollector) error {
+	for _, key := range keys {
+		data, exists := configMap.Data[key]
+		if !exists {
+			collector.logger.V(1).Info("ODH CA bundle key not found, skipping", "key", key)
+			continue
+		}
+
+		certs, size, count, err := extractValidCertificates([]byte(data), key)
+		if err != nil {
+			collector.logger.Error(err, "Failed to process ODH CA bundle key, skipping",
+				"configMap", configMap.Name,
+				"key", key)
+			continue
+		}
+
+		if err := collector.add(certs, size, count, configMap.Name, key); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// extractValidCertificates extracts only valid CERTIFICATE blocks from PEM data.
+// This function validates PEM structure and X.509 certificate format for all blocks.
+// It filters out non-certificate PEM blocks (e.g., private keys, public keys) and
+// rejects invalid X.509 certificates.
+// Returns: (certificates as strings, total size, certificate count, error).
+func extractValidCertificates(data []byte, keyName string) ([]string, int, int, error) {
+	if len(data) == 0 {
+		return nil, 0, 0, fmt.Errorf("failed to process CA bundle key '%s': contains no data", keyName)
+	}
+
+	var certificates []string
+	totalSize := 0
+	remaining := data
+
+	for {
+		block, rest := pem.Decode(remaining)
+		if block == nil {
+			break
+		}
+
+		// Only accept CERTIFICATE blocks, reject other PEM types
+		if block.Type != "CERTIFICATE" {
+			// Skip non-certificate blocks (could be private keys, etc.)
+			remaining = rest
+			continue
+		}
+
+		// Validate that this is actually a valid X.509 certificate
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			return nil, 0, 0, fmt.Errorf("failed to parse X.509 certificate from key '%s': %w", keyName, err)
+		}
+
+		// Re-encode the certificate to ensure it's properly formatted
+		certPEM := pem.EncodeToMemory(block)
+		if certPEM == nil {
+			return nil, 0, 0, fmt.Errorf("failed to encode certificate from key '%s'", keyName)
+		}
+
+		certificates = append(certificates, string(certPEM))
+		totalSize += len(certPEM)
+		remaining = rest
+	}
+
+	if len(certificates) == 0 {
+		return nil, 0, 0, fmt.Errorf("failed to find valid certificates in CA bundle key '%s'", keyName)
+	}
+
+	return certificates, totalSize, len(certificates), nil
+}
+
+// reconcileManagedCABundleConfigMap creates or updates the managed CA bundle ConfigMap.
+func (r *LlamaStackDistributionReconciler) reconcileManagedCABundleConfigMap(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	logger := log.FromContext(ctx)
+
+	// Gather all CA certificate data
+	caBundleData, err := r.gatherCABundleData(ctx, instance)
+	if err != nil {
+		return fmt.Errorf("failed to gather CA bundle data: %w", err)
+	}
+
+	managedConfigMapName := getManagedCABundleConfigMapName(instance)
+
+	// Check if the managed ConfigMap already exists
+	existingConfigMap := &corev1.ConfigMap{}
+	err = r.Get(ctx, types.NamespacedName{
+		Name:      managedConfigMapName,
+		Namespace: instance.Namespace,
+	}, existingConfigMap)
+
+	if err != nil && !k8serrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get managed CA bundle ConfigMap: %w", err)
+	}
+
+	// Create the desired ConfigMap
+	desiredConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      managedConfigMapName,
+			Namespace: instance.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "llama-stack-operator",
+				"app.kubernetes.io/instance":   instance.Name,
+				"app.kubernetes.io/component":  "ca-bundle",
+			},
+		},
+		Data: map[string]string{
+			ManagedCABundleKey: caBundleData,
+		},
+	}
+
+	// Set owner reference so the ConfigMap is deleted when the LlamaStackDistribution is deleted
+	if refErr := ctrl.SetControllerReference(instance, desiredConfigMap, r.Scheme); refErr != nil {
+		return fmt.Errorf("failed to set controller reference on managed CA bundle ConfigMap: %w", refErr)
+	}
+
+	if k8serrors.IsNotFound(err) {
+		// ConfigMap doesn't exist, create it
+		logger.Info("Creating managed CA bundle ConfigMap", "configMap", managedConfigMapName)
+		if err := r.Create(ctx, desiredConfigMap); err != nil {
+			return fmt.Errorf("failed to create managed CA bundle ConfigMap: %w", err)
+		}
+		logger.Info("Successfully created managed CA bundle ConfigMap", "configMap", managedConfigMapName)
 	} else {
-		// Default to DefaultCABundleKey when no keys are specified
-		keyInfo = fmt.Sprintf("-%s", DefaultCABundleKey)
+		// ConfigMap exists, update it if the data has changed
+		if existingConfigMap.Data[ManagedCABundleKey] != caBundleData {
+			logger.Info("Updating managed CA bundle ConfigMap", "configMap", managedConfigMapName)
+			// Use Patch instead of Update to avoid race conditions
+			patch := client.MergeFrom(existingConfigMap.DeepCopy())
+			existingConfigMap.Data = desiredConfigMap.Data
+			existingConfigMap.Labels = desiredConfigMap.Labels
+			if err := r.Patch(ctx, existingConfigMap, patch); err != nil {
+				if k8serrors.IsConflict(err) {
+					// Conflict detected, will be retried by controller
+					return fmt.Errorf("failed to patch managed CA bundle ConfigMap (conflict): %w", err)
+				}
+				return fmt.Errorf("failed to patch managed CA bundle ConfigMap: %w", err)
+			}
+			logger.Info("Successfully updated managed CA bundle ConfigMap", "configMap", managedConfigMapName)
+		} else {
+			logger.V(1).Info("Managed CA bundle ConfigMap is up to date", "configMap", managedConfigMapName)
+		}
 	}
 
-	return fmt.Sprintf("%s-%s%s", configMap.ResourceVersion, configMap.Name, keyInfo), nil
+	return nil
 }
 
 // detectODHTrustedCABundle checks if the well-known ODH trusted CA bundle ConfigMap
@@ -1243,23 +1561,17 @@ func (r *LlamaStackDistributionReconciler) detectODHTrustedCABundle(ctx context.
 			instance.Namespace, odhTrustedCABundleConfigMap, err)
 	}
 
-	// Extract available data keys and validate they contain valid PEM data
+	// Extract available data keys
+	// PEM data is validated in extractValidCertificates()
+	// which properly validates all PEM blocks.
 	keys := make([]string, 0, len(configMap.Data))
 
-	for key, value := range configMap.Data {
-		// Only include keys that contain valid PEM data
-		if isValidPEM([]byte(value)) {
-			keys = append(keys, key)
-			logger.V(1).Info("Auto-detected CA bundle key contains valid PEM data",
-				"configMapName", odhTrustedCABundleConfigMap,
-				"namespace", instance.Namespace,
-				"key", key)
-		} else {
-			logger.V(1).Info("Auto-detected CA bundle key contains invalid PEM data, skipping",
-				"configMapName", odhTrustedCABundleConfigMap,
-				"namespace", instance.Namespace,
-				"key", key)
-		}
+	for key := range configMap.Data {
+		keys = append(keys, key)
+		logger.V(1).Info("Auto-detected CA bundle key",
+			"configMapName", odhTrustedCABundleConfigMap,
+			"namespace", instance.Namespace,
+			"key", key)
 	}
 
 	logger.V(1).Info("ODH trusted CA bundle ConfigMap detected",

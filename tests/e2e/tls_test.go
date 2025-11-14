@@ -100,6 +100,10 @@ func testLlamaStackWithCABundle(t *testing.T) {
 	err = waitForDeploymentCreation(t, llsTestNS, "llamastack-with-config", 3*time.Minute)
 	require.NoError(t, err, "LlamaStack deployment should be created by operator")
 
+	// Wait for pods to be running and ready
+	err = WaitForPodsReady(t, TestEnv, llsTestNS, "llamastack-with-config", 5*time.Minute)
+	require.NoError(t, err, "LlamaStack pods should be running and ready")
+
 	// Verify certificate volumes are mounted correctly
 	err = verifyCertificateMounts(t, llsTestNS, "llamastack-with-config")
 	require.NoError(t, err, "Certificate volumes should be mounted correctly")
@@ -377,7 +381,11 @@ func verifyCertificateMounts(t *testing.T, namespace, name string) error {
 
 func hasCABundleVolume(volumes []corev1.Volume) bool {
 	for _, volume := range volumes {
-		if volume.ConfigMap != nil && volume.ConfigMap.Name == "custom-ca-bundle" {
+		// Check for the managed CA bundle ConfigMap (named {instance-name}-ca-bundle)
+		// or the source CA bundle ConfigMap
+		if volume.ConfigMap != nil &&
+			(strings.HasSuffix(volume.ConfigMap.Name, "-ca-bundle") ||
+				volume.ConfigMap.Name == "custom-ca-bundle") {
 			return true
 		}
 	}
@@ -395,8 +403,9 @@ func hasCABundleMount(containers []corev1.Container) bool {
 
 func hasCABundleMountInContainer(mounts []corev1.VolumeMount) bool {
 	for _, mount := range mounts {
-		if mount.MountPath == controllers.CABundleMountPath ||
-			strings.Contains(mount.MountPath, "ca-bundle") {
+		if mount.MountPath == controllers.ManagedCABundleMountPath ||
+			strings.Contains(mount.MountPath, "ca-bundle") ||
+			strings.Contains(mount.MountPath, "ca-certificates") {
 			return true
 		}
 	}
@@ -419,7 +428,7 @@ func verifyEnvironmentVariables(t *testing.T, namespace, name string) error {
 	// Check for TLS-related environment variables
 	tlsEnvVarsFound := 0
 	expectedEnvVars := map[string]string{
-		"VLLM_TLS_VERIFY": controllers.CABundleMountPath,
+		"SSL_CERT_FILE": controllers.ManagedCABundleFilePath,
 	}
 
 	for _, container := range deployment.Spec.Template.Spec.Containers {

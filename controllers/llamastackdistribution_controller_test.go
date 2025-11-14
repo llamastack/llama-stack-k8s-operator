@@ -512,3 +512,287 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 		})
 	}
 }
+
+// TestCABundleConfigMapKeyValidation tests that invalid ConfigMap keys are rejected during reconciliation.
+func TestCABundleConfigMapKeyValidation(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	tests := []struct {
+		name          string
+		configMapKeys []string
+		shouldFail    bool
+		errorContains string
+	}{
+		{
+			name:          "valid ConfigMap keys",
+			configMapKeys: []string{"ca-bundle.crt", "root-ca.pem", "intermediate.crt"},
+			shouldFail:    false,
+		},
+		{
+			name:          "ConfigMap key with path traversal (..) should fail",
+			configMapKeys: []string{"../etc/passwd"},
+			shouldFail:    true,
+			errorContains: "invalid path characters",
+		},
+		{
+			name:          "ConfigMap key with forward slash should fail",
+			configMapKeys: []string{"path/to/cert.crt"},
+			shouldFail:    true,
+			errorContains: "invalid path characters",
+		},
+		{
+			name:          "ConfigMap key with double dots in middle should fail",
+			configMapKeys: []string{"ca..bundle.crt"},
+			shouldFail:    true,
+			errorContains: "invalid path characters",
+		},
+		{
+			name:          "empty ConfigMap key should fail",
+			configMapKeys: []string{""},
+			shouldFail:    true,
+			errorContains: "cannot be empty",
+		},
+		{
+			name:          "ConfigMap key with invalid characters should fail",
+			configMapKeys: []string{"ca bundle with spaces.crt"},
+			shouldFail:    true,
+			errorContains: "invalid characters",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// --- arrange ---
+			namespace := createTestNamespace(t, "test-cabundle-validation")
+			instance := NewDistributionBuilder().
+				WithName("test-cabundle").
+				WithNamespace(namespace.Name).
+				WithCABundle("test-ca-configmap", tt.configMapKeys).
+				Build()
+
+			require.NoError(t, k8sClient.Create(t.Context(), instance))
+			t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
+
+			// --- act ---
+			reconciler := createTestReconciler()
+			_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      instance.Name,
+					Namespace: instance.Namespace,
+				},
+			})
+
+			// --- assert ---
+			if tt.shouldFail {
+				require.Error(t, err, "reconciliation should fail for invalid ConfigMap keys")
+				require.Contains(t, err.Error(), tt.errorContains,
+					"error message should indicate the validation failure")
+			} else if err != nil {
+				// For valid keys, reconciliation might fail for other reasons (ConfigMap doesn't exist),
+				// but it should NOT fail due to key validation
+				require.NotContains(t, err.Error(), "failed to validate CA bundle ConfigMap keys",
+					"reconciliation should not fail due to key validation for valid keys")
+			}
+		})
+	}
+}
+
+// TestManagedCABundleConfigMap tests that the operator creates and manages CA bundle ConfigMaps.
+func TestManagedCABundleConfigMap(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	t.Run("creates managed ConfigMap with concatenated certificates", func(t *testing.T) {
+		// --- arrange ---
+		namespace := createTestNamespace(t, "test-managed-cabundle")
+
+		// Load valid test certificate
+		testCert := loadTestCertificate(t)
+
+		// Create source CA bundle ConfigMap with multiple keys (using same cert as both for simplicity)
+		sourceConfigMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "source-ca-bundle",
+				Namespace: namespace.Name,
+			},
+			Data: map[string]string{
+				"root-ca.crt":      testCert,
+				"intermediate.crt": testCert,
+			},
+		}
+		require.NoError(t, k8sClient.Create(t.Context(), sourceConfigMap))
+
+		instance := NewDistributionBuilder().
+			WithName("test-managed").
+			WithNamespace(namespace.Name).
+			WithCABundle("source-ca-bundle", []string{"root-ca.crt", "intermediate.crt"}).
+			Build()
+
+		require.NoError(t, k8sClient.Create(t.Context(), instance))
+		t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
+
+		// --- act ---
+		ReconcileDistribution(t, instance, false)
+
+		// --- assert ---
+		managedConfigMapName := instance.Name + "-ca-bundle"
+		managedConfigMap := &corev1.ConfigMap{}
+		waitForResource(t, k8sClient, namespace.Name, managedConfigMapName, managedConfigMap)
+
+		// Verify the managed ConfigMap has the correct structure
+		require.Contains(t, managedConfigMap.Data, "ca-bundle.crt", "managed ConfigMap should have ca-bundle.crt key")
+		caBundleData := managedConfigMap.Data["ca-bundle.crt"]
+
+		// Verify certificates are present in the concatenated bundle
+		require.Contains(t, caBundleData, "BEGIN CERTIFICATE", "bundle should contain certificates")
+		require.Contains(t, caBundleData, "END CERTIFICATE", "bundle should contain complete certificates")
+
+		// Verify owner reference
+		AssertResourceOwnedByInstance(t, managedConfigMap, instance)
+
+		// Verify labels
+		require.Equal(t, "llama-stack-operator", managedConfigMap.Labels["app.kubernetes.io/managed-by"])
+		require.Equal(t, instance.Name, managedConfigMap.Labels["app.kubernetes.io/instance"])
+		require.Equal(t, "ca-bundle", managedConfigMap.Labels["app.kubernetes.io/component"])
+	})
+
+	t.Run("updates managed ConfigMap when source changes", func(t *testing.T) {
+		// --- arrange ---
+		namespace := createTestNamespace(t, "test-cabundle-update")
+
+		// Load valid test certificate
+		testCert := loadTestCertificate(t)
+
+		sourceConfigMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "source-ca-bundle",
+				Namespace: namespace.Name,
+			},
+			Data: map[string]string{
+				"ca-bundle.crt": testCert,
+			},
+		}
+		require.NoError(t, k8sClient.Create(t.Context(), sourceConfigMap))
+
+		instance := NewDistributionBuilder().
+			WithName("test-update").
+			WithNamespace(namespace.Name).
+			WithCABundle("source-ca-bundle", nil).
+			Build()
+
+		require.NoError(t, k8sClient.Create(t.Context(), instance))
+		t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
+
+		ReconcileDistribution(t, instance, false)
+
+		managedConfigMapName := instance.Name + "-ca-bundle"
+		managedConfigMap := &corev1.ConfigMap{}
+		waitForResource(t, k8sClient, namespace.Name, managedConfigMapName, managedConfigMap)
+
+		originalData := managedConfigMap.Data["ca-bundle.crt"]
+
+		// --- act ---
+		// Update source ConfigMap by adding the certificate twice (making bundle larger)
+		sourceConfigMap.Data["ca-bundle.crt"] = testCert + "\n" + testCert
+		require.NoError(t, k8sClient.Update(t.Context(), sourceConfigMap))
+
+		ReconcileDistribution(t, instance, false)
+
+		// --- assert ---
+		require.NoError(t, k8sClient.Get(t.Context(), types.NamespacedName{
+			Name:      managedConfigMapName,
+			Namespace: namespace.Name,
+		}, managedConfigMap))
+
+		updatedData := managedConfigMap.Data["ca-bundle.crt"]
+		require.NotEqual(t, originalData, updatedData, "managed ConfigMap should be updated")
+		require.Contains(t, updatedData, "BEGIN CERTIFICATE", "managed ConfigMap should still contain certificate")
+		// Verify the bundle has two certificates now
+		require.Greater(t, len(updatedData), len(originalData), "updated bundle should be larger")
+	})
+
+	t.Run("rejects non-certificate PEM blocks", func(t *testing.T) {
+		// --- arrange ---
+		namespace := createTestNamespace(t, "test-reject-non-cert")
+
+		// Create source ConfigMap with non-certificate PEM block (should be rejected)
+		// Using "PUBLIC KEY" type to test that only CERTIFICATE blocks are accepted
+		sourceConfigMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "source-with-key",
+				Namespace: namespace.Name,
+			},
+			Data: map[string]string{
+				"ca-bundle.crt": `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1234567890ABCDEF
+-----END PUBLIC KEY-----`,
+			},
+		}
+		require.NoError(t, k8sClient.Create(t.Context(), sourceConfigMap))
+
+		instance := NewDistributionBuilder().
+			WithName("test-reject").
+			WithNamespace(namespace.Name).
+			WithCABundle("source-with-key", nil).
+			Build()
+
+		require.NoError(t, k8sClient.Create(t.Context(), instance))
+		t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
+
+		// --- act ---
+		reconciler := createTestReconciler()
+		_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      instance.Name,
+				Namespace: instance.Namespace,
+			},
+		})
+
+		// --- assert ---
+		require.Error(t, err, "reconciliation should fail for non-certificate PEM")
+		require.Contains(t, err.Error(), "failed to find valid certificates",
+			"error should indicate no valid certificates")
+	})
+
+	t.Run("rejects invalid X.509 certificates", func(t *testing.T) {
+		// --- arrange ---
+		namespace := createTestNamespace(t, "test-reject-invalid-x509")
+
+		// Create source ConfigMap with malformed certificate data
+		// This has correct PEM structure but invalid X.509 certificate data
+		sourceConfigMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "source-with-invalid-cert",
+				Namespace: namespace.Name,
+			},
+			Data: map[string]string{
+				"ca-bundle.crt": `-----BEGIN CERTIFICATE-----
+InvalidCertificateDataThatIsNotValidX509
+-----END CERTIFICATE-----`,
+			},
+		}
+		require.NoError(t, k8sClient.Create(t.Context(), sourceConfigMap))
+
+		instance := NewDistributionBuilder().
+			WithName("test-reject-invalid").
+			WithNamespace(namespace.Name).
+			WithCABundle("source-with-invalid-cert", nil).
+			Build()
+
+		require.NoError(t, k8sClient.Create(t.Context(), instance))
+		t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
+
+		// --- act ---
+		reconciler := createTestReconciler()
+		_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      instance.Name,
+				Namespace: instance.Namespace,
+			},
+		})
+
+		// --- assert ---
+		require.Error(t, err, "reconciliation should fail for invalid X.509 certificate")
+		require.Contains(t, err.Error(), "failed to parse X.509 certificate",
+			"error should indicate X.509 parsing failure")
+	})
+}

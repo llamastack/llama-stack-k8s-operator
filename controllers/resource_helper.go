@@ -26,8 +26,6 @@ import (
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Constants for validation limits.
@@ -35,6 +33,9 @@ const (
 	// maxConfigMapKeyLength defines the maximum allowed length for ConfigMap keys
 	// based on Kubernetes DNS subdomain name limits.
 	maxConfigMapKeyLength = 253
+	// FSGroup is the filesystem group ID for the pod.
+	// This is the default group ID for the llama-stack server.
+	FSGroup = int64(1001)
 )
 
 // Probes configuration.
@@ -48,6 +49,11 @@ const (
 // validConfigMapKeyRegex defines allowed characters for ConfigMap keys.
 // Kubernetes ConfigMap keys must be valid DNS subdomain names or data keys.
 var validConfigMapKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$`)
+
+// getManagedCABundleConfigMapName returns the name of the managed CA bundle ConfigMap.
+func getManagedCABundleConfigMapName(instance *llamav1alpha1.LlamaStackDistribution) string {
+	return instance.Name + ManagedCABundleConfigMapSuffix
+}
 
 // startupScript is the script that will be used to start the server.
 var startupScript = `
@@ -101,12 +107,13 @@ func validateConfigMapKeys(keys []string) error {
 		if len(key) > maxConfigMapKeyLength {
 			return fmt.Errorf("failed to validate ConfigMap key '%s': too long (max %d characters)", key, maxConfigMapKeyLength)
 		}
-		if !validConfigMapKeyRegex.MatchString(key) {
-			return fmt.Errorf("failed to validate ConfigMap key '%s': contains invalid characters. Only alphanumeric characters, hyphens, underscores, and dots are allowed", key)
-		}
-		// Additional security check: prevent path traversal attempts
+		// Check for path traversal attempts first (before general regex check)
+		// to provide specific error messages for security-related issues
 		if strings.Contains(key, "..") || strings.Contains(key, "/") {
 			return fmt.Errorf("failed to validate ConfigMap key '%s': contains invalid path characters", key)
+		}
+		if !validConfigMapKeyRegex.MatchString(key) {
+			return fmt.Errorf("failed to validate ConfigMap key '%s': contains invalid characters. Only alphanumeric characters, hyphens, underscores, and dots are allowed", key)
 		}
 	}
 	return nil
@@ -180,22 +187,14 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 		Value: mountPath,
 	})
 
-	// Add CA bundle environment variable if TLS config is specified
-	if instance.Spec.Server.TLSConfig != nil && instance.Spec.Server.TLSConfig.CABundle != nil {
-		// Set SSL_CERT_FILE to point to the specific CA bundle file
+	// Add CA bundle environment variable if any CA bundles are configured
+	// (explicit or auto-detected ODH bundles)
+	if hasAnyCABundle(ctx, r, instance) {
+		// Set SSL_CERT_FILE to point to the managed CA bundle file
 		container.Env = append(container.Env, corev1.EnvVar{
 			Name:  "SSL_CERT_FILE",
-			Value: CABundleMountPath,
+			Value: ManagedCABundleFilePath,
 		})
-	} else if r != nil {
-		// Check for auto-detected ODH trusted CA bundle
-		if _, keys, err := r.detectODHTrustedCABundle(ctx, instance); err == nil && len(keys) > 0 {
-			// Set SSL_CERT_FILE to point to the auto-detected consolidated CA bundle
-			container.Env = append(container.Env, corev1.EnvVar{
-				Name:  "SSL_CERT_FILE",
-				Value: CABundleMountPath,
-			})
-		}
 	}
 
 	// Finally, add the user provided env vars
@@ -212,6 +211,23 @@ func configureContainerMounts(ctx context.Context, r *LlamaStackDistributionReco
 
 	// Add CA bundle volume mount if TLS config is specified or auto-detected
 	addCABundleVolumeMount(ctx, r, instance, container)
+}
+
+// hasAnyCABundle checks if any CA bundle will be mounted (explicit or auto-detected).
+func hasAnyCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution) bool {
+	// Check for explicit CA bundle configuration
+	if instance.Spec.Server.TLSConfig != nil && instance.Spec.Server.TLSConfig.CABundle != nil {
+		return true
+	}
+
+	// Check for auto-detected ODH trusted CA bundle
+	if r != nil {
+		if _, keys, err := r.detectODHTrustedCABundle(ctx, instance); err == nil && len(keys) > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 // configureContainerCommands sets up container commands and args.
@@ -264,139 +280,54 @@ func addUserConfigVolumeMount(instance *llamav1alpha1.LlamaStackDistribution, co
 	}
 }
 
-// addCABundleVolumeMount adds the CA bundle volume mount to the container if TLS config is specified.
-// For multiple keys: the init container writes DefaultCABundleKey to the root of the emptyDir volume,
-// and the main container mounts it with SubPath to CABundleMountPath.
-// For single key: the main container directly mounts the ConfigMap key.
-// Also handles auto-detected ODH trusted CA bundle ConfigMaps.
+// addCABundleVolumeMount adds the managed CA bundle volume mount to the container.
+// Mounts the operator-managed ConfigMap containing all concatenated certificates.
 func addCABundleVolumeMount(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
-	if instance.Spec.Server.TLSConfig != nil && instance.Spec.Server.TLSConfig.CABundle != nil {
+	// Mount managed CA bundle if any CA bundles are configured
+	if hasAnyCABundle(ctx, r, instance) {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 			Name:      CABundleVolumeName,
-			MountPath: CABundleMountPath,
-			SubPath:   DefaultCABundleKey,
+			MountPath: ManagedCABundleMountPath,
 			ReadOnly:  true,
 		})
-	} else if r != nil {
-		// Check for auto-detected ODH trusted CA bundle
-		if _, keys, err := r.detectODHTrustedCABundle(ctx, instance); err == nil && len(keys) > 0 {
-			// Mount the auto-detected consolidated CA bundle
-			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-				Name:      CABundleVolumeName,
-				MountPath: CABundleMountPath,
-				SubPath:   DefaultCABundleKey,
-				ReadOnly:  true,
-			})
-		}
 	}
 }
 
-// createCABundleVolume creates the appropriate volume configuration for CA bundles.
-// For single key: uses direct ConfigMap volume.
-// For multiple keys: uses emptyDir volume with InitContainer to concatenate keys.
-func createCABundleVolume(caBundleConfig *llamav1alpha1.CABundleConfig) corev1.Volume {
-	// For multiple keys, we'll use an emptyDir that gets populated by an InitContainer
-	if len(caBundleConfig.ConfigMapKeys) > 0 {
-		return corev1.Volume{
-			Name: CABundleVolumeName,
-			VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{},
-			},
-		}
-	}
-
-	// For single key (legacy behavior), use direct ConfigMap volume
+// createCABundleVolume creates the volume configuration for the managed CA bundle ConfigMap.
+func createCABundleVolume(managedConfigMapName string) corev1.Volume {
 	return corev1.Volume{
 		Name: CABundleVolumeName,
 		VolumeSource: corev1.VolumeSource{
 			ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{
-					Name: caBundleConfig.ConfigMapName,
+					Name: managedConfigMapName,
+				},
+				Items: []corev1.KeyToPath{
+					{
+						Key:  ManagedCABundleKey,
+						Path: ManagedCABundleKey,
+					},
 				},
 			},
 		},
 	}
 }
 
-// createCABundleInitContainer creates an InitContainer that concatenates multiple CA bundle keys
-// from a ConfigMap into a single file in the shared ca-bundle volume.
-func createCABundleInitContainer(caBundleConfig *llamav1alpha1.CABundleConfig, image string) (corev1.Container, error) {
-	// Validate ConfigMap keys for security
-	if err := validateConfigMapKeys(caBundleConfig.ConfigMapKeys); err != nil {
-		return corev1.Container{}, fmt.Errorf("failed to validate ConfigMap keys: %w", err)
-	}
-
-	// Build the file list as a shell array embedded in the script
-	// This ensures the arguments are properly passed to the script
-	var fileListBuilder strings.Builder
-	for i, key := range caBundleConfig.ConfigMapKeys {
-		if i > 0 {
-			fileListBuilder.WriteString(" ")
-		}
-		// Quote each key to handle any special characters safely
-		fileListBuilder.WriteString(fmt.Sprintf("%q", key))
-	}
-	fileList := fileListBuilder.String()
-
-	// Use a secure script approach that embeds the file list directly
-	// This eliminates the issue with arguments not being passed to sh -c
-	script := fmt.Sprintf(`#!/bin/sh
-set -e
-output_file="%s"
-source_dir="%s"
-
-# Clear the output file
-> "$output_file"
-
-# Process each validated key file (keys are pre-validated)
-for key in %s; do
-    file_path="$source_dir/$key"
-    if [ -f "$file_path" ]; then
-        cat "$file_path" >> "$output_file"
-        echo >> "$output_file"  # Add newline between certificates
-    else
-        echo "Warning: Certificate file $file_path not found" >&2
-    fi
-done`, CABundleTempPath, CABundleSourceDir, fileList)
-
-	return corev1.Container{
-		Name:            CABundleInitName,
-		Image:           image,
-		ImagePullPolicy: corev1.PullAlways,
-		Command:         []string{"/bin/sh", "-c", script},
-		// No Args needed since we embed the file list in the script
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      CABundleSourceVolName,
-				MountPath: CABundleSourceDir,
-				ReadOnly:  true,
-			},
-			{
-				Name:      CABundleVolumeName,
-				MountPath: CABundleTempDir,
-			},
-		},
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: ptr.To(false),
-			RunAsNonRoot:             ptr.To(true),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-		},
-	}, nil
-}
-
 // configurePodStorage configures the pod storage and returns the complete pod spec.
 func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container corev1.Container) corev1.PodSpec {
+	fsGroup := FSGroup
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container},
+		SecurityContext: &corev1.PodSecurityContext{
+			FSGroup: &fsGroup,
+		},
 	}
 
-	// Configure storage volumes and init containers
+	// Configure storage volumes
 	configureStorage(instance, &podSpec)
 
 	// Configure TLS CA bundle (with auto-detection support)
-	configureTLSCABundle(ctx, r, instance, &podSpec, container.Image)
+	configureTLSCABundle(ctx, r, instance, &podSpec)
 
 	// Configure user config
 	configureUserConfig(instance, &podSpec)
@@ -416,7 +347,7 @@ func configureStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *c
 	}
 }
 
-// configurePersistentStorage sets up PVC-based storage with init container for permissions.
+// configurePersistentStorage sets up PVC-based storage.
 func configurePersistentStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
 	// Use PVC for persistent storage
 	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
@@ -441,110 +372,17 @@ func configureEmptyDirStorage(podSpec *corev1.PodSpec) {
 }
 
 // configureTLSCABundle handles TLS CA bundle configuration.
-// For multiple keys: adds a ca-bundle-init init container that concatenates all keys into a single file
-// in a shared emptyDir volume, which the main container then mounts via SubPath.
-// For single key: uses a direct ConfigMap volume mount.
-// If no explicit CA bundle is configured, it checks for the well-known ODH trusted CA bundle ConfigMap.
-func configureTLSCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec, image string) {
-	tlsConfig := instance.Spec.Server.TLSConfig
-
-	// Handle explicit CA bundle configuration first
-	if tlsConfig != nil && tlsConfig.CABundle != nil {
-		addExplicitCABundle(ctx, tlsConfig.CABundle, podSpec, image)
+// Mounts the operator-managed CA bundle ConfigMap that contains all certificates.
+func configureTLSCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+	// Check if any CA bundles are configured (explicit or auto-detected ODH)
+	if !hasAnyCABundle(ctx, r, instance) {
 		return
 	}
 
-	// If no explicit CA bundle is configured, check for ODH trusted CA bundle auto-detection
-	if r != nil {
-		addAutoDetectedCABundle(ctx, r, instance, podSpec, image)
-	}
-}
-
-// addExplicitCABundle handles explicitly configured CA bundles.
-func addExplicitCABundle(ctx context.Context, caBundleConfig *llamav1alpha1.CABundleConfig, podSpec *corev1.PodSpec, image string) {
-	// Add CA bundle InitContainer if multiple keys are specified
-	if len(caBundleConfig.ConfigMapKeys) > 0 {
-		caBundleInitContainer, err := createCABundleInitContainer(caBundleConfig, image)
-		if err != nil {
-			log.FromContext(ctx).Error(err, "Failed to create CA bundle init container")
-			return
-		}
-		podSpec.InitContainers = append(podSpec.InitContainers, caBundleInitContainer)
-	}
-
-	// Add CA bundle ConfigMap volume
-	volume := createCABundleVolume(caBundleConfig)
+	// Add the managed CA bundle ConfigMap volume
+	managedConfigMapName := getManagedCABundleConfigMapName(instance)
+	volume := createCABundleVolume(managedConfigMapName)
 	podSpec.Volumes = append(podSpec.Volumes, volume)
-
-	// Add source ConfigMap volume for multiple keys scenario
-	if len(caBundleConfig.ConfigMapKeys) > 0 {
-		sourceVolume := corev1.Volume{
-			Name: CABundleSourceVolName,
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: caBundleConfig.ConfigMapName,
-					},
-				},
-			},
-		}
-		podSpec.Volumes = append(podSpec.Volumes, sourceVolume)
-	}
-}
-
-// addAutoDetectedCABundle handles auto-detection of ODH trusted CA bundle ConfigMap.
-func addAutoDetectedCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec, image string) {
-	if r == nil {
-		return
-	}
-
-	configMap, keys, err := r.detectODHTrustedCABundle(ctx, instance)
-	if err != nil {
-		// Log error but don't fail the reconciliation
-		log.FromContext(ctx).Error(err, "Failed to detect ODH trusted CA bundle ConfigMap")
-		return
-	}
-
-	if configMap == nil || len(keys) == 0 {
-		// No ODH trusted CA bundle found or no keys available
-		return
-	}
-
-	// Create a virtual CA bundle config for auto-detected ConfigMap
-	autoCaBundleConfig := &llamav1alpha1.CABundleConfig{
-		ConfigMapName: configMap.Name,
-		ConfigMapKeys: keys, // Use all available keys
-	}
-
-	// Use the same logic as explicit configuration
-	caBundleInitContainer, err := createCABundleInitContainer(autoCaBundleConfig, image)
-	if err != nil {
-		// Log error and skip auto-detected CA bundle configuration
-		log.FromContext(ctx).Error(err, "Failed to create CA bundle init container for auto-detected ConfigMap")
-		return
-	}
-	podSpec.InitContainers = append(podSpec.InitContainers, caBundleInitContainer)
-
-	// Add CA bundle emptyDir volume for auto-detected ConfigMap
-	volume := createCABundleVolume(autoCaBundleConfig)
-	podSpec.Volumes = append(podSpec.Volumes, volume)
-
-	// Add source ConfigMap volume for auto-detected ConfigMap
-	sourceVolume := corev1.Volume{
-		Name: CABundleSourceVolName,
-		VolumeSource: corev1.VolumeSource{
-			ConfigMap: &corev1.ConfigMapVolumeSource{
-				LocalObjectReference: corev1.LocalObjectReference{
-					Name: configMap.Name,
-				},
-			},
-		},
-	}
-	podSpec.Volumes = append(podSpec.Volumes, sourceVolume)
-
-	log.FromContext(ctx).Info("Auto-configured ODH trusted CA bundle",
-		"configMapName", configMap.Name,
-		"keys", keys)
 }
 
 // configureUserConfig handles user configuration setup.
@@ -574,17 +412,6 @@ func configurePodOverrides(instance *llamav1alpha1.LlamaStackDistribution, podSp
 		podSpec.ServiceAccountName = instance.Spec.Server.PodOverrides.ServiceAccountName
 	} else {
 		podSpec.ServiceAccountName = instance.Name + "-sa"
-	}
-
-	// Configure pod-level security context for OpenShift SCC compatibility
-	if podSpec.SecurityContext == nil {
-		podSpec.SecurityContext = &corev1.PodSecurityContext{}
-	}
-
-	// Set fsGroup to allow write access to mounted volumes
-	const defaultFSGroup = 1001
-	if podSpec.SecurityContext.FSGroup == nil {
-		podSpec.SecurityContext.FSGroup = ptr.To(int64(defaultFSGroup))
 	}
 
 	// Apply other pod overrides if specified

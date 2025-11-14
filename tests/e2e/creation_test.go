@@ -93,6 +93,10 @@ func testCreateDistributionForType(t *testing.T, distType string) *v1alpha1.Llam
 	}, llsdistributionCR.Name, ns.Name, ResourceReadyTimeout, isDeploymentReady)
 	require.NoError(t, err)
 
+	// Wait for pods to be running and ready
+	err = WaitForPodsReady(t, TestEnv, ns.Name, llsdistributionCR.Name, ResourceReadyTimeout)
+	require.NoError(t, err, "Pods should be running and ready")
+
 	// Verify service is created
 	err = EnsureResourceReady(t, TestEnv, schema.GroupVersionKind{
 		Group:   "",
@@ -144,6 +148,15 @@ func testCRDeploymentUpdate(t *testing.T, distribution *v1alpha1.LlamaStackDistr
 		Name:      distribution.Name,
 	}, distribution)
 	require.NoError(t, err)
+
+	// Skip scaling test if PVC with ReadWriteOnce is used
+	// Most cloud providers (AWS EBS, Azure Disk, GCE PD) only support ReadWriteOnce for block storage
+	// ReadWriteMany requires network file systems (NFS, CephFS, etc.) which may not be available
+	if distribution.Spec.Server.Storage != nil {
+		t.Log("Skipping replica scaling test - PVC with ReadWriteOnce can only be attached to one pod at a time")
+		t.Log("To enable replica scaling with persistent storage, configure a StorageClass that supports ReadWriteMany")
+		return
+	}
 
 	// Update replicas
 	distribution.Spec.Replicas = 2
