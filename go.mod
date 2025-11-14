@@ -7,7 +7,7 @@ require (
 	github.com/go-openapi/jsonpointer v0.21.2
 	github.com/google/go-cmp v0.7.0
 	github.com/stretchr/testify v1.10.0
-	go.uber.org/zap v1.26.0
+	go.uber.org/zap v1.27.0
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.29.2
