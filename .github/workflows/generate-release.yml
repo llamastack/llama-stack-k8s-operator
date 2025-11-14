@@ -29,7 +29,7 @@ jobs:
       release_branch: ${{ steps.validate.outputs.release_branch }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           fetch-depth: 0  # Need full history to check existing tags
 
@@ -90,7 +90,7 @@ jobs:
           fi
 
       - name: Set up Go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 #v 5.5.0
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 #v 6.0.0
         with:
           go-version-file: go.mod
 
@@ -186,7 +186,7 @@ jobs:
       release_branch: ${{ needs.generate-release.outputs.release_branch }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: ${{ env.release_branch }}
           fetch-depth: 0
@@ -243,7 +243,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - name: Set up Go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
         with:
           go-version-file: go.mod
 
@@ -253,7 +253,7 @@ jobs:
           make image-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
 
       - name: Log in to Quay.io
-        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
           registry: quay.io
           username: ${{ secrets.APP_QUAY_USERNAME }}
