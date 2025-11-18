@@ -15,6 +15,7 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
 - [Quick Start](#quick-start)
     - [Installation](#installation)
     - [Deploying Llama Stack Server](#deploying-the-llama-stack-server)
+- [Enabling Network Policies](#enabling-network-policies)
 - [Developer Guide](#developer-guide)
     - [Prerequisites](#prerequisites)
     - [Building the Operator](#building-the-operator)
@@ -102,6 +103,36 @@ Example to create a run.yaml ConfigMap, and a LlamaStackDistribution that refere
 ```
 kubectl apply -f config/samples/example-with-configmap.yaml
 ```
+
+## Enabling Network Policies
+
+The operator can create an ingress-only `NetworkPolicy` for every `LlamaStackDistribution` to ensure traffic is limited to:
+- Other pods in the same namespace that are part of the Llama Stack deployment (`app.kubernetes.io/part-of: llama-stack`)
+- Components that run inside the operator namespace (default: `llama-stack-k8s-operator-system`)
+
+This behavior is guarded by a feature flag and is disabled by default to avoid interfering with existing cluster-level policies. To enable it:
+
+1. Identify the namespace where the operator is running. If you used the provided manifests, it is `llama-stack-k8s-operator-system`.
+2. Create or update the `llama-stack-operator-config` ConfigMap in that namespace so the `featureFlags` entry enables the network policy flag.
+
+```bash
+cat <<'EOF' > feature-flags.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llama-stack-operator-config
+  namespace: llama-stack-k8s-operator-system
+data:
+  featureFlags: |
+    enableNetworkPolicy:
+      enabled: true
+EOF
+
+kubectl apply -f feature-flags.yaml
+```
+
+Within the next reconciliation loop the operator will begin creating a `<name>-network-policy` resource for each distribution.
+Set `enabled: false` (or remove the block) to turn the feature back off; the operator will delete the previously managed policies.
 
 ## Developer Guide
 
