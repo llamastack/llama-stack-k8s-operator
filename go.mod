@@ -4,7 +4,7 @@ go 1.24.6
 
 require (
 	github.com/go-logr/logr v1.4.3
-	github.com/go-openapi/jsonpointer v0.21.2
+	github.com/go-openapi/jsonpointer v0.22.3
 	github.com/google/go-cmp v0.7.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.0
@@ -33,6 +33,7 @@ require (
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonreference v0.21.0 // indirect
 	github.com/go-openapi/swag v0.23.1 // indirect
+	github.com/go-openapi/swag/jsonname v0.25.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
