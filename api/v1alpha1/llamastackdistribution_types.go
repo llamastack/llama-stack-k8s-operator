@@ -85,6 +85,9 @@ type ServerSpec struct {
 	// TLSConfig defines the TLS configuration for the llama-stack server
 	// +optional
 	TLSConfig *TLSConfig `json:"tlsConfig,omitempty"`
+	// EnvFromExternalConfigMaps defines external ConfigMaps to inject as environment variables
+	// +optional
+	EnvFromExternalConfigMaps []ExternalConfigMapSpec `json:"envFromExternalConfigMaps,omitempty"`
 }
 
 type UserConfigSpec struct {
@@ -117,6 +120,18 @@ type CABundleConfig struct {
 	// +kubebuilder:validation:Items:Pattern="^[a-zA-Z0-9]([a-zA-Z0-9\\-_.]*[a-zA-Z0-9])?$"
 	// +kubebuilder:validation:Items:MaxLength=253
 	ConfigMapKeys []string `json:"configMapKeys,omitempty"`
+}
+
+// ExternalConfigMapSpec defines external ConfigMaps to inject as environment variables
+type ExternalConfigMapSpec struct {
+	// Name is the name of the ConfigMap
+	Name string `json:"name"`
+	// Namespace is the namespace of the ConfigMap
+	Namespace string `json:"namespace"`
+	// Mapping defines how ConfigMap keys map to environment variable names
+	// Key is the ConfigMap key, Value is the environment variable name
+	// +optional
+	Mapping map[string]string `json:"mapping,omitempty"`
 }
 
 // StorageSpec defines the persistent storage configuration

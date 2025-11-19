@@ -85,6 +85,19 @@ _Appears in:_
 | `name` _string_ | Name is the distribution name that maps to supported distributions. |  |  |
 | `image` _string_ | Image is the direct container image reference to use |  |  |
 
+#### ExternalConfigMapSpec
+
+ExternalConfigMapSpec defines external ConfigMaps to inject as environment variables
+
+_Appears in:_
+- [ServerSpec](#serverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the name of the ConfigMap |  |  |
+| `namespace` _string_ | Namespace is the namespace of the ConfigMap |  |  |
+| `mapping` _object (keys:string, values:string)_ | Mapping defines how ConfigMap keys map to environment variable names<br />Key is the ConfigMap key, Value is the environment variable name |  |  |
+
 #### LlamaStackDistribution
 
 _Appears in:_
@@ -196,6 +209,7 @@ _Appears in:_
 | `storage` _[StorageSpec](#storagespec)_ | Storage defines the persistent storage configuration |  |  |
 | `userConfig` _[UserConfigSpec](#userconfigspec)_ | UserConfig defines the user configuration for the llama-stack server |  |  |
 | `tlsConfig` _[TLSConfig](#tlsconfig)_ | TLSConfig defines the TLS configuration for the llama-stack server |  |  |
+| `envFromExternalConfigMaps` _[ExternalConfigMapSpec](#externalconfigmapspec) array_ | EnvFromExternalConfigMaps defines external ConfigMaps to inject as environment variables |  |  |
 
 #### StorageSpec
 
