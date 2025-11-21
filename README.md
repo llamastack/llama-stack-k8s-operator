@@ -134,6 +134,35 @@ kubectl apply -f feature-flags.yaml
 Within the next reconciliation loop the operator will begin creating a `<name>-network-policy` resource for each distribution.
 Set `enabled: false` (or remove the block) to turn the feature back off; the operator will delete the previously managed policies.
 
+## Image Mapping Overrides
+
+The operator supports ConfigMap-driven image updates for LLS Distribution images. This allows independent patching for security fixes or bug fixes without requiring a new operator version.
+
+### Configuration
+
+Create or update the operator ConfigMap with an `image-overrides` key:
+
+```yaml
+
+  image-overrides: |
+    starter-gpu: quay.io/custom/llama-stack:starter-gpu
+    starter: quay.io/custom/llama-stack:starter
+```
+
+### Configuration Format
+
+Use the distribution name directly as the key (e.g., `starter-gpu`, `starter`). The operator will apply these overrides automatically
+
+### Example Usage
+
+To update the LLS Distribution image for all `starter` distributions:
+
+```bash
+kubectl patch configmap llama-stack-operator-config -n llama-stack-k8s-operator-system --type merge -p '{"data":{"image-overrides":"starter: quay.io/opendatahub/llama-stack:latest"}}'
+```
+
+This will cause all LlamaStackDistribution resources using the `starter` distribution to restart with the new image.
+
 ## Developer Guide
 
 ### Prerequisites
