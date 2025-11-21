@@ -1,0 +1,81 @@
+name = "llamastack-k8s-operator-docs"
+compatibility_date = "2024-01-15"
+
+[env.production]
+name = "llamastack-k8s-operator-docs"
+
+[env.preview]
+name = "llamastack-k8s-operator-docs-preview"
+
+# Build configuration
+[build]
+command = "make docs-build"
+cwd = "."
+watch_dir = ["docs", "api", "crd-ref-docs.config.yaml"]
+
+[build.environment_variables]
+GO_VERSION = "1.21"
+PYTHON_VERSION = "3.11"
+NODE_VERSION = "18"
+
+# Pages configuration
+[pages]
+build_output_dir = "docs/site"
+build_caching = true
+
+# Custom headers for security and performance
+[[pages.headers]]
+for = "/*"
+[pages.headers.values]
+X-Frame-Options = "DENY"
+X-Content-Type-Options = "nosniff"
+X-XSS-Protection = "1; mode=block"
+Referrer-Policy = "strict-origin-when-cross-origin"
+Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+[[pages.headers]]
+for = "*.css"
+[pages.headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+
+[[pages.headers]]
+for = "*.js"
+[pages.headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+
+[[pages.headers]]
+for = "*.woff2"
+[pages.headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+
+[[pages.headers]]
+for = "*.png"
+[pages.headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+
+[[pages.headers]]
+for = "*.jpg"
+[pages.headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+
+# Redirects for better UX
+[[pages.redirects]]
+from = "/api"
+to = "/reference/api/"
+status = 301
+
+[[pages.redirects]]
+from = "/docs"
+to = "/"
+status = 301
+
+[[pages.redirects]]
+from = "/getting-started"
+to = "/getting-started/installation/"
+status = 301
+
+# SPA fallback for client-side routing
+[[pages.redirects]]
+from = "/*"
+to = "/404.html"
+status = 404

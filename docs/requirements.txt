@@ -1,0 +1,11 @@
+# MkDocs and theme
+mkdocs>=1.5.0
+mkdocs-material>=9.4.0
+
+# Plugins
+mkdocs-mermaid2-plugin>=1.1.0
+
+# Python dependencies for documentation generation
+PyYAML>=6.0
+Jinja2>=3.1.0
+Markdown>=3.5.0

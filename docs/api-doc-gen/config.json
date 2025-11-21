@@ -1,0 +1,30 @@
+{
+  "hideMemberFields": [
+    "TypeMeta"
+  ],
+  "hideTypePatterns": [
+    "(LlamaStackDistribution)List$"
+  ],
+  "externalPackages": [
+    {
+      "typeMatchPrefix": "k8s.io/api/",
+      "docsURLTemplate": "https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#{{lower .TypeIdentifier}}-{{arrIndex .PackageSegments -1}}-{{arrIndex .PackageSegments -2}}"
+    },
+    {
+      "typeMatchPrefix": "k8s.io/apimachinery/pkg/apis/meta/v1",
+      "docsURLTemplate": "https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#{{lower .TypeIdentifier}}-v1-meta"
+    },
+    {
+      "typeMatchPrefix": "k8s.io/api/core/v1",
+      "docsURLTemplate": "https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#{{lower .TypeIdentifier}}-v1-core"
+    },
+    {
+      "typeMatchPrefix": "k8s.io/apimachinery/pkg/api/resource",
+      "docsURLTemplate": "https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#quantity-resource-core"
+    }
+  ],
+  "typeDisplayNamePrefixOverrides": {
+    "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1": ""
+  },
+  "markdownDisabled": false
+}

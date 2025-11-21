@@ -244,6 +244,7 @@ GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
 YQ ?= $(LOCALBIN)/yq
 YAMLFMT ?= $(LOCALBIN)/yamlfmt
 CRD_REF_DOCS ?= $(LOCALBIN)/crd-ref-docs
+GEN_CRD_API_REF_DOCS ?= $(LOCALBIN)/gen-crd-api-reference-docs
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.4.3
@@ -253,6 +254,7 @@ GOLANGCI_LINT_VERSION ?= v1.64.4
 YQ_VERSION ?= v4.45.3
 YAMLFMT_VERSION ?= v0.12.0
 CRD_REF_DOCS_VERSION = v0.2.0
+GEN_CRD_API_REF_DOCS_VERSION = v0.3.0
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -288,6 +290,11 @@ $(YAMLFMT): $(LOCALBIN)
 crd-ref-docs: $(CRD_REF_DOCS) ## Download crd-ref-docs locally if necessary.
 $(CRD_REF_DOCS): $(LOCALBIN)
 	$(call go-install-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs,$(CRD_REF_DOCS_VERSION))
+
+.PHONY: gen-crd-api-reference-docs
+gen-crd-api-reference-docs: $(GEN_CRD_API_REF_DOCS) ## Download gen-crd-api-reference-docs locally if necessary.
+$(GEN_CRD_API_REF_DOCS): $(LOCALBIN)
+	$(call go-install-tool,$(GEN_CRD_API_REF_DOCS),github.com/ahmetb/gen-crd-api-reference-docs,$(GEN_CRD_API_REF_DOCS_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
@@ -338,10 +345,13 @@ OPERATOR_SDK = $(shell which operator-sdk)
 endif
 endif
 
+##@ Documentation
+
 .PHONY: api-docs
-API_DOCS_PATH = ./docs/api-overview.md
-api-docs: crd-ref-docs ## Creates API docs using https://github.com/elastic/crd-ref-docs
-	mkdir -p docs
+API_DOCS_PATH = ./docs/content/reference/api.md
+api-docs: crd-ref-docs gen-crd-api-reference-docs ## Generate comprehensive API documentation (HyperShift-style)
+	mkdir -p docs/content/reference
+	@echo "Generating API documentation..."
 	$(CRD_REF_DOCS) --source-path ./ --output-path $(API_DOCS_PATH) --renderer markdown --config ./crd-ref-docs.config.yaml
 	@# Combined command to remove .io links, ensure a trailing newline, and collapse multiple blank lines.
 	@sed -i.bak -e  '/^$$/N;/^\n$$/D' $(API_DOCS_PATH)
@@ -351,6 +361,41 @@ api-docs: crd-ref-docs ## Creates API docs using https://github.com/elastic/crd-
 		sed -i.bak -e '$${/^$$/d}' -e '$${N;/^\n$$/d}' $(API_DOCS_PATH); \
 	fi
 	rm -f $(API_DOCS_PATH).bak
+	@echo "API documentation generated at $(API_DOCS_PATH)"
+
+.PHONY: docs-build
+docs-build: api-docs ## Build complete documentation site
+	@echo "Building documentation site..."
+	@if [ ! -f docs/requirements.txt ]; then echo "Error: docs/requirements.txt not found"; exit 1; fi
+	@if command -v pip >/dev/null 2>&1; then \
+		pip install -r docs/requirements.txt; \
+	else \
+		echo "Warning: pip not found, assuming dependencies are installed"; \
+	fi
+	cd docs && mkdocs build
+	@echo "Documentation site built in docs/site/"
+
+.PHONY: docs-serve
+docs-serve: docs-build ## Serve documentation locally (like HyperShift's serve-containerized)
+	@echo "Starting documentation server at http://localhost:8000"
+	cd docs && mkdocs serve --dev-addr 0.0.0.0:8000
+
+.PHONY: docs-clean
+docs-clean: ## Clean documentation build artifacts
+	rm -rf docs/site/
+	rm -f docs/content/reference/api.md
+
+# Legacy target for backward compatibility
+.PHONY: api-docs-legacy
+API_DOCS_LEGACY_PATH = ./docs/api-overview.md
+api-docs-legacy: crd-ref-docs ## Creates legacy API docs (backward compatibility)
+	mkdir -p docs
+	$(CRD_REF_DOCS) --source-path ./ --output-path $(API_DOCS_LEGACY_PATH) --renderer markdown --config ./crd-ref-docs.config.yaml
+	@sed -i.bak -e '/\.io\/[^v][^1].*)/d' -e '/^$$/N;/^\n$$/D' $(API_DOCS_LEGACY_PATH)
+	@if sed --version >/dev/null 2>&1; then \
+		sed -i.bak -e '$${/^$$/d}' -e '$${N;/^\n$$/d}' $(API_DOCS_LEGACY_PATH); \
+	fi
+	rm -f $(API_DOCS_LEGACY_PATH).bak
 
 .PHONY: bundle
 bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata, then validate generated files.

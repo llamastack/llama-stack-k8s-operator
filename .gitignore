@@ -34,3 +34,26 @@ catalog-item
 config/manifests/bases/llama-stack-k8s-operator.clusterserviceversion.yaml
 
 .DS_Store
+
+# Documentation build artifacts
+docs/site/
+docs/content/reference/api.md
+
+# Python virtual environments and cache (for MkDocs)
+docs/.venv/
+docs/venv/
+docs/__pycache__/
+*.pyc
+*.pyo
+
+# MkDocs temporary files
+docs/.mkdocs_cache/
+
+# Wrangler/Cloudflare Pages
+.wrangler/
+wrangler.toml.bak
+
+# Documentation tool binaries (specific to our setup)
+bin/crd-ref-docs*
+bin/gen-crd-api-reference-docs*
+DOCUMENTATION_STRUCTURE.md

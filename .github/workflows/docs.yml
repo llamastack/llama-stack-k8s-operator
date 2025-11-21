@@ -1,0 +1,196 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths: 
+      - 'api/**'
+      - 'docs/**'
+      - 'crd-ref-docs.config.yaml'
+      - '.github/workflows/docs.yml'
+      - 'Makefile'
+  pull_request:
+    paths:
+      - 'api/**'
+      - 'docs/**'
+      - 'crd-ref-docs.config.yaml'
+      - '.github/workflows/docs.yml'
+      - 'Makefile'
+
+env:
+  GO_VERSION: '1.21'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache Python dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Go dependencies
+        run: |
+          make crd-ref-docs gen-crd-api-reference-docs
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r docs/requirements.txt
+
+      - name: Generate API documentation
+        run: |
+          make api-docs
+
+      - name: Build documentation site
+        run: |
+          make docs-build
+
+      - name: Upload documentation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-site
+          path: docs/site/
+          retention-days: 30
+
+      - name: Upload API documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-documentation
+          path: docs/content/reference/api.md
+          retention-days: 30
+
+  deploy-preview:
+    if: github.event_name == 'pull_request'
+    needs: build-docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download documentation artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: documentation-site
+          path: docs/site/
+
+      - name: Deploy to Cloudflare Pages (Preview)
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: llamastack-k8s-operator-docs
+          directory: docs/site
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          wranglerVersion: '3'
+
+  deploy-production:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build-docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download documentation artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: documentation-site
+          path: docs/site/
+
+      - name: Deploy to Cloudflare Pages (Production)
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: llamastack-k8s-operator-docs
+          directory: docs/site
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          wranglerVersion: '3'
+
+      - name: Update legacy API docs (backward compatibility)
+        run: |
+          make api-docs || echo "Legacy API docs target not found, skipping"
+
+      - name: Commit updated API docs
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add docs/api-overview.md || true
+          git diff --staged --quiet || git commit -m "docs: update API documentation [skip ci]"
+          git push || true
+
+  validate-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r docs/requirements.txt
+          pip install linkchecker
+
+      - name: Validate MkDocs configuration
+        run: |
+          cd docs && mkdocs build --clean --verbose
+
+      - name: Check for broken links (if built)
+        run: |
+          if [ -d "docs/site" ]; then
+            cd docs/site
+            python -m http.server 8000 &
+            sleep 5
+            linkchecker http://localhost:8000 --no-warnings --ignore-url=".*\.css$" --ignore-url=".*\.js$" || true
+            kill %1 2>/dev/null || true
+          fi
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: 'docs/'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
