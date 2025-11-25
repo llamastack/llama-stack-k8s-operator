@@ -4,10 +4,25 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [ main ]
+  workflow_call:
+    outputs:
+      success:
+        description: 'Whether the e2e tests passed successfully'
+        value: ${{ jobs.e2e-tests.outputs.success }}
+      summary:
+        description: 'High-level summary of test results'
+        value: ${{ jobs.e2e-tests.outputs.summary }}
+      run_url:
+        description: 'URL to this workflow run for detailed logs'
+        value: ${{ jobs.e2e-tests.outputs.run_url }}
 
 jobs:
   e2e-tests:
     runs-on: ubuntu-latest
+    outputs:
+      success: ${{ steps.test-results.outputs.success }}
+      summary: ${{ steps.test-results.outputs.summary }}
+      run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Checkout code
         uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
@@ -59,11 +74,11 @@ jobs:
 
       - name: Build operator image
         run: |
-          # Build the image with a simpler tag format
-          docker build -t kind-registry:5000/llama-stack-k8s-operator:pr${{ github.event.pull_request.number }} -f Dockerfile .
+          # Build the image with run-based tag for uniqueness
+          docker build -t kind-registry:5000/llama-stack-k8s-operator:run-${{ github.run_id }} -f Dockerfile .
 
           # Tag the image for local registry
-          docker tag kind-registry:5000/llama-stack-k8s-operator:pr${{ github.event.pull_request.number }} kind-registry:5000/llama-stack-k8s-operator:latest
+          docker tag kind-registry:5000/llama-stack-k8s-operator:run-${{ github.run_id }} kind-registry:5000/llama-stack-k8s-operator:latest
 
       - name: Push operator image to local registry
         run: |
@@ -86,6 +101,18 @@ jobs:
       - name: Run e2e tests
         run: |
           make test-e2e
+
+      - name: Set test results
+        id: test-results
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "success=true" >> $GITHUB_OUTPUT
+            echo "summary=E2E tests passed successfully" >> $GITHUB_OUTPUT
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "summary=E2E tests failed - check logs for details" >> $GITHUB_OUTPUT
+          fi
 
       - name: Get logs
         if: ${{ always() }}
