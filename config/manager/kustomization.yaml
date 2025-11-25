@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
 - manager.yaml
+- pdb.yaml
 
 generatorOptions:
   disableNameSuffixHash: true
