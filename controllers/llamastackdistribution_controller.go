@@ -39,8 +39,10 @@ import (
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/featureflags"
 	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -240,6 +242,14 @@ func (r *LlamaStackDistributionReconciler) determineKindsToExclude(instance *lla
 		kinds = append(kinds, "Service")
 	}
 
+	if !needsPodDisruptionBudget(instance) {
+		kinds = append(kinds, "PodDisruptionBudget")
+	}
+
+	if instance.Spec.Server.Autoscaling == nil {
+		kinds = append(kinds, "HorizontalPodAutoscaler")
+	}
+
 	return kinds
 }
 
@@ -288,6 +298,20 @@ func (r *LlamaStackDistributionReconciler) deleteExcludedResources(ctx context.C
 		}
 	}
 
+	if slices.Contains(kindsToExclude, "PodDisruptionBudget") {
+		if err := r.deletePodDisruptionBudgetIfExists(ctx, instance); err != nil {
+			logger.Error(err, "Failed to delete PodDisruptionBudget")
+			return err
+		}
+	}
+
+	if slices.Contains(kindsToExclude, "HorizontalPodAutoscaler") {
+		if err := r.deleteHorizontalPodAutoscalerIfExists(ctx, instance); err != nil {
+			logger.Error(err, "Failed to delete HorizontalPodAutoscaler")
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -318,6 +342,60 @@ func (r *LlamaStackDistributionReconciler) deleteNetworkPolicyIfExists(ctx conte
 	logger.Info("Deleting NetworkPolicy as feature is disabled", "networkPolicy", networkPolicyName)
 	if err := r.Delete(ctx, networkPolicy); err != nil {
 		return fmt.Errorf("failed to delete NetworkPolicy: %w", err)
+	}
+
+	return nil
+}
+
+func (r *LlamaStackDistributionReconciler) deletePodDisruptionBudgetIfExists(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	logger := log.FromContext(ctx)
+
+	pdb := &policyv1.PodDisruptionBudget{}
+	pdbName := instance.Name + "-pdb"
+	key := types.NamespacedName{Name: pdbName, Namespace: instance.Namespace}
+
+	if err := r.Get(ctx, key, pdb); err != nil {
+		if k8serrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to get PodDisruptionBudget: %w", err)
+	}
+
+	if !metav1.IsControlledBy(pdb, instance) {
+		logger.V(1).Info("PodDisruptionBudget not owned by this instance, skipping deletion", "pdb", pdbName)
+		return nil
+	}
+
+	logger.Info("Deleting PodDisruptionBudget as feature is disabled", "pdb", pdbName)
+	if err := r.Delete(ctx, pdb); err != nil {
+		return fmt.Errorf("failed to delete PodDisruptionBudget: %w", err)
+	}
+
+	return nil
+}
+
+func (r *LlamaStackDistributionReconciler) deleteHorizontalPodAutoscalerIfExists(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	logger := log.FromContext(ctx)
+
+	hpa := &autoscalingv2.HorizontalPodAutoscaler{}
+	hpaName := instance.Name + "-hpa"
+	key := types.NamespacedName{Name: hpaName, Namespace: instance.Namespace}
+
+	if err := r.Get(ctx, key, hpa); err != nil {
+		if k8serrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to get HorizontalPodAutoscaler: %w", err)
+	}
+
+	if !metav1.IsControlledBy(hpa, instance) {
+		logger.V(1).Info("HorizontalPodAutoscaler not owned by this instance, skipping deletion", "hpa", hpaName)
+		return nil
+	}
+
+	logger.Info("Deleting HorizontalPodAutoscaler as feature is disabled", "hpa", hpaName)
+	if err := r.Delete(ctx, hpa); err != nil {
+		return fmt.Errorf("failed to delete HorizontalPodAutoscaler: %w", err)
 	}
 
 	return nil
@@ -361,11 +439,16 @@ func (r *LlamaStackDistributionReconciler) buildManifestContext(ctx context.Cont
 		return nil, fmt.Errorf("failed to convert pod spec to map: %w", err)
 	}
 
+	pdbSpec := buildPodDisruptionBudgetSpec(instance)
+	hpaSpec := buildHPASpec(instance)
+
 	return &deploy.ManifestContext{
-		ResolvedImage: resolvedImage,
-		ConfigMapHash: configMapHash,
-		CABundleHash:  caBundleHash,
-		PodSpec:       podSpecMap,
+		ResolvedImage:           resolvedImage,
+		ConfigMapHash:           configMapHash,
+		CABundleHash:            caBundleHash,
+		PodSpec:                 podSpecMap,
+		PodDisruptionBudgetSpec: pdbSpec,
+		HPASpec:                 hpaSpec,
 	}, nil
 }
 
@@ -471,6 +554,8 @@ func (r *LlamaStackDistributionReconciler) SetupWithManager(ctx context.Context,
 			UpdateFunc: r.llamaStackUpdatePredicate(mgr),
 		})).
 		Owns(&appsv1.Deployment{}).
+		Owns(&policyv1.PodDisruptionBudget{}).
+		Owns(&autoscalingv2.HorizontalPodAutoscaler{}).
 		Owns(&corev1.Service{}).
 		Owns(&networkingv1.NetworkPolicy{}).
 		Owns(&corev1.PersistentVolumeClaim{}).

@@ -50,6 +50,18 @@ rules:
   - update
   - watch
 - apiGroups:
+  - autoscaling
+  resources:
+  - horizontalpodautoscalers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - llamastack.io
   resources:
   - llamastackdistributions
@@ -79,6 +91,18 @@ rules:
   - networking.k8s.io
   resources:
   - networkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
   verbs:
   - create
   - delete

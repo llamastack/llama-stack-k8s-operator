@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb
+  labels:
+    app: llama-stack
+    app.kubernetes.io/instance: ""
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: llama-stack
+      app.kubernetes.io/instance: ""

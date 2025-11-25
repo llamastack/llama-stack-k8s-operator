@@ -583,3 +583,48 @@ func TestSetDefaultPort(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, int(llamav1alpha1.DefaultServerPort), actualPort)
 }
+
+func TestRemoveDeploymentReplicas(t *testing.T) {
+	t.Parallel()
+
+	instance := &llamav1alpha1.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "example",
+			Namespace: "llama",
+		},
+		Spec: llamav1alpha1.LlamaStackDistributionSpec{
+			Server: llamav1alpha1.ServerSpec{
+				Autoscaling: &llamav1alpha1.AutoscalingSpec{
+					MaxReplicas: 5,
+				},
+			},
+		},
+	}
+
+	resMap := resmap.New()
+	require.NoError(t, resMap.Append(newTestResource(t, "apps/v1", "Deployment", "deployment", "llama", map[string]any{
+		"replicas": int32(1),
+	})))
+	require.NoError(t, resMap.Append(newTestResource(t, "apps/v1", "Deployment", "deployment-no-replicas", "llama", map[string]any{})))
+
+	require.NoError(t, applyPlugins(&resMap, instance))
+
+	resources := resMap.Resources()
+	require.Len(t, resources, 2)
+
+	var hasReplicas bool
+	for _, res := range resources {
+		if res.GetKind() != "Deployment" {
+			continue
+		}
+		spec, err := res.Map()
+		require.NoError(t, err)
+		specMap, ok := spec["spec"].(map[string]any)
+		require.True(t, ok, "deployment should have a spec map")
+		if _, ok := specMap["replicas"]; ok {
+			hasReplicas = true
+		}
+	}
+
+	require.False(t, hasReplicas, "replicas should be removed from all deployments when autoscaling is enabled")
+}

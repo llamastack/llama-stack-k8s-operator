@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,8 +50,14 @@ func TestBuildContainerSpec(t *testing.T) {
 			},
 			image: "test-image:latest",
 			expectedResult: corev1.Container{
-				Name:         llamav1alpha1.DefaultContainerName,
-				Image:        "test-image:latest",
+				Name:  llamav1alpha1.DefaultContainerName,
+				Image: "test-image:latest",
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    llamav1alpha1.DefaultServerCPURequest,
+						corev1.ResourceMemory: llamav1alpha1.DefaultServerMemoryRequest,
+					},
+				},
 				Ports:        []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
 				StartupProbe: newDefaultStartupProbe(llamav1alpha1.DefaultServerPort),
 				VolumeMounts: []corev1.VolumeMount{{
@@ -93,6 +100,10 @@ func TestBuildContainerSpec(t *testing.T) {
 				Ports:        []corev1.ContainerPort{{ContainerPort: 9000}},
 				StartupProbe: newDefaultStartupProbe(9000),
 				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    llamav1alpha1.DefaultServerCPURequest,
+						corev1.ResourceMemory: llamav1alpha1.DefaultServerMemoryRequest,
+					},
 					Limits: corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("1"),
 						corev1.ResourceMemory: resource.MustParse("2Gi"),
@@ -123,8 +134,14 @@ func TestBuildContainerSpec(t *testing.T) {
 			},
 			image: "test-image:latest",
 			expectedResult: corev1.Container{
-				Name:         llamav1alpha1.DefaultContainerName,
-				Image:        "test-image:latest",
+				Name:  llamav1alpha1.DefaultContainerName,
+				Image: "test-image:latest",
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    llamav1alpha1.DefaultServerCPURequest,
+						corev1.ResourceMemory: llamav1alpha1.DefaultServerMemoryRequest,
+					},
+				},
 				Command:      []string{"/custom/entrypoint.sh"},
 				Args:         []string{"--config", "/etc/config.yaml", "--debug"},
 				Ports:        []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
@@ -158,10 +175,16 @@ func TestBuildContainerSpec(t *testing.T) {
 				Name:            llamav1alpha1.DefaultContainerName,
 				Image:           "test-image:latest",
 				ImagePullPolicy: corev1.PullAlways,
-				Ports:           []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
-				StartupProbe:    newDefaultStartupProbe(llamav1alpha1.DefaultServerPort),
-				Command:         []string{"/bin/sh", "-c", startupScript},
-				Args:            []string{},
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    llamav1alpha1.DefaultServerCPURequest,
+						corev1.ResourceMemory: llamav1alpha1.DefaultServerMemoryRequest,
+					},
+				},
+				Ports:        []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
+				StartupProbe: newDefaultStartupProbe(llamav1alpha1.DefaultServerPort),
+				Command:      []string{"/bin/sh", "-c", startupScript},
+				Args:         []string{},
 				Env: []corev1.EnvVar{
 					{Name: "HF_HOME", Value: llamav1alpha1.DefaultMountPath},
 				},
@@ -645,6 +668,218 @@ func TestValidateConfigMapKeys(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDefaultSchedulingAppliedWhenReplicasGreaterThanOne(t *testing.T) {
+	instance := &llamav1alpha1.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sample",
+			Namespace: "default",
+		},
+		Spec: llamav1alpha1.LlamaStackDistributionSpec{
+			Replicas: 2,
+			Server:   llamav1alpha1.ServerSpec{},
+		},
+	}
+
+	podSpec := configurePodStorage(t.Context(), nil, instance, corev1.Container{})
+
+	require.NotNil(t, podSpec.Affinity)
+	require.NotNil(t, podSpec.Affinity.PodAntiAffinity)
+	require.Len(t, podSpec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution, 1)
+	require.Len(t, podSpec.TopologySpreadConstraints, 3)
+
+	keys := []string{
+		podSpec.TopologySpreadConstraints[0].TopologyKey,
+		podSpec.TopologySpreadConstraints[1].TopologyKey,
+		podSpec.TopologySpreadConstraints[2].TopologyKey,
+	}
+	assert.ElementsMatch(t, []string{
+		"topology.kubernetes.io/region",
+		"topology.kubernetes.io/zone",
+		"kubernetes.io/hostname",
+	}, keys)
+}
+
+func TestDefaultSchedulingSkippedForSingleReplica(t *testing.T) {
+	instance := &llamav1alpha1.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "solo",
+			Namespace: "default",
+		},
+		Spec: llamav1alpha1.LlamaStackDistributionSpec{
+			Replicas: 1,
+			Server:   llamav1alpha1.ServerSpec{},
+		},
+	}
+
+	podSpec := configurePodStorage(t.Context(), nil, instance, corev1.Container{})
+	assert.Nil(t, podSpec.Affinity)
+	assert.Empty(t, podSpec.TopologySpreadConstraints)
+}
+
+func TestCustomTopologySpreadConstraintsRespected(t *testing.T) {
+	customConstraint := corev1.TopologySpreadConstraint{
+		MaxSkew:           2,
+		TopologyKey:       "custom.topology/key",
+		WhenUnsatisfiable: corev1.DoNotSchedule,
+		LabelSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				"custom": "label",
+			},
+		},
+	}
+
+	instance := &llamav1alpha1.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "custom",
+			Namespace: "default",
+		},
+		Spec: llamav1alpha1.LlamaStackDistributionSpec{
+			Replicas: 3,
+			Server: llamav1alpha1.ServerSpec{
+				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{customConstraint},
+			},
+		},
+	}
+
+	podSpec := configurePodStorage(t.Context(), nil, instance, corev1.Container{})
+
+	require.Len(t, podSpec.TopologySpreadConstraints, 1)
+	assert.Equal(t, customConstraint.TopologyKey, podSpec.TopologySpreadConstraints[0].TopologyKey)
+	assert.Equal(t, customConstraint.WhenUnsatisfiable, podSpec.TopologySpreadConstraints[0].WhenUnsatisfiable)
+}
+
+func TestNeedsPodDisruptionBudget(t *testing.T) {
+	tests := []struct {
+		name     string
+		instance *llamav1alpha1.LlamaStackDistribution
+		expected bool
+	}{
+		{
+			name: "single replica without override",
+			instance: &llamav1alpha1.LlamaStackDistribution{
+				Spec: llamav1alpha1.LlamaStackDistributionSpec{Replicas: 1, Server: llamav1alpha1.ServerSpec{}},
+			},
+			expected: false,
+		},
+		{
+			name: "multiple replicas without override",
+			instance: &llamav1alpha1.LlamaStackDistribution{
+				Spec: llamav1alpha1.LlamaStackDistributionSpec{Replicas: 2, Server: llamav1alpha1.ServerSpec{}},
+			},
+			expected: true,
+		},
+		{
+			name: "explicit override",
+			instance: &llamav1alpha1.LlamaStackDistribution{
+				Spec: llamav1alpha1.LlamaStackDistributionSpec{
+					Replicas: 1,
+					Server: llamav1alpha1.ServerSpec{
+						PodDisruptionBudget: &llamav1alpha1.PodDisruptionBudgetSpec{},
+					},
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, needsPodDisruptionBudget(tt.instance))
+		})
+	}
+}
+
+func TestBuildPodDisruptionBudgetSpec(t *testing.T) {
+	t.Run("defaults when replicas greater than one", func(t *testing.T) {
+		instance := &llamav1alpha1.LlamaStackDistribution{
+			Spec: llamav1alpha1.LlamaStackDistributionSpec{
+				Replicas: 2,
+				Server:   llamav1alpha1.ServerSpec{},
+			},
+		}
+
+		spec := buildPodDisruptionBudgetSpec(instance)
+		require.NotNil(t, spec)
+		require.NotNil(t, spec.MinAvailable)
+		assert.Equal(t, 1, spec.MinAvailable.IntValue())
+		assert.Nil(t, spec.MaxUnavailable)
+	})
+
+	t.Run("respects custom overrides", func(t *testing.T) {
+		minValue := intstr.FromString("50%")
+		maxValue := intstr.FromInt(1)
+		instance := &llamav1alpha1.LlamaStackDistribution{
+			Spec: llamav1alpha1.LlamaStackDistributionSpec{
+				Replicas: 1,
+				Server: llamav1alpha1.ServerSpec{
+					PodDisruptionBudget: &llamav1alpha1.PodDisruptionBudgetSpec{
+						MinAvailable:   &minValue,
+						MaxUnavailable: &maxValue,
+					},
+				},
+			},
+		}
+
+		spec := buildPodDisruptionBudgetSpec(instance)
+		require.NotNil(t, spec)
+		require.NotNil(t, spec.MinAvailable)
+		assert.Equal(t, minValue.String(), spec.MinAvailable.String())
+		require.NotNil(t, spec.MaxUnavailable)
+		assert.Equal(t, maxValue.IntValue(), spec.MaxUnavailable.IntValue())
+	})
+}
+
+func TestBuildHPASpec(t *testing.T) {
+	cpuTarget := int32(70)
+	memoryTarget := int32(60)
+	minReplicas := int32(3)
+	instance := &llamav1alpha1.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{Name: "sample"},
+		Spec: llamav1alpha1.LlamaStackDistributionSpec{
+			Replicas: 2,
+			Server: llamav1alpha1.ServerSpec{
+				Autoscaling: &llamav1alpha1.AutoscalingSpec{
+					MinReplicas:                       &minReplicas,
+					MaxReplicas:                       5,
+					TargetCPUUtilizationPercentage:    &cpuTarget,
+					TargetMemoryUtilizationPercentage: &memoryTarget,
+				},
+			},
+		},
+	}
+
+	spec := buildHPASpec(instance)
+	require.NotNil(t, spec)
+	assert.Equal(t, int32(5), spec.MaxReplicas)
+	require.NotNil(t, spec.MinReplicas)
+	assert.Equal(t, minReplicas, *spec.MinReplicas)
+	require.Len(t, spec.Metrics, 2)
+	assert.Equal(t, autoscalingv2.ResourceMetricSourceType, spec.Metrics[0].Type)
+	assert.Equal(t, autoscalingv2.UtilizationMetricType, spec.Metrics[0].Resource.Target.Type)
+	assert.Equal(t, cpuTarget, *spec.Metrics[0].Resource.Target.AverageUtilization)
+	assert.Equal(t, "Deployment", spec.ScaleTargetRef.Kind)
+	assert.Equal(t, instance.Name, spec.ScaleTargetRef.Name)
+
+	t.Run("defaults metric when none provided", func(t *testing.T) {
+		instance := &llamav1alpha1.LlamaStackDistribution{
+			ObjectMeta: metav1.ObjectMeta{Name: "sample"},
+			Spec: llamav1alpha1.LlamaStackDistributionSpec{
+				Replicas: 1,
+				Server: llamav1alpha1.ServerSpec{
+					Autoscaling: &llamav1alpha1.AutoscalingSpec{MaxReplicas: 4},
+				},
+			},
+		}
+
+		spec := buildHPASpec(instance)
+		require.NotNil(t, spec)
+		require.Len(t, spec.Metrics, 1)
+		assert.Equal(t, int32(80), *spec.Metrics[0].Resource.Target.AverageUtilization)
+		require.NotNil(t, spec.MinReplicas)
+		assert.Equal(t, int32(1), *spec.MinReplicas)
+	})
 }
 
 // newDefaultStartupProbe returns a Kubernetes HTTP readiness probe that checks

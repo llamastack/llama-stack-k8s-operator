@@ -11,6 +11,20 @@ Package v1alpha1 contains API Schema definitions for the  v1alpha1 API group
 - [LlamaStackDistribution](#llamastackdistribution)
 - [LlamaStackDistributionList](#llamastackdistributionlist)
 
+#### AutoscalingSpec
+
+AutoscalingSpec configures HorizontalPodAutoscaler targets.
+
+_Appears in:_
+- [ServerSpec](#serverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `minReplicas` _integer_ | MinReplicas is the lower bound replica count maintained by the HPA |  |  |
+| `maxReplicas` _integer_ | MaxReplicas is the upper bound replica count maintained by the HPA |  |  |
+| `targetCPUUtilizationPercentage` _integer_ | TargetCPUUtilizationPercentage configures CPU based scaling |  |  |
+| `targetMemoryUtilizationPercentage` _integer_ | TargetMemoryUtilizationPercentage configures memory based scaling |  |  |
+
 #### CABundleConfig
 
 CABundleConfig defines the CA bundle configuration for custom certificates
@@ -141,6 +155,18 @@ _Appears in:_
 | `availableReplicas` _integer_ | AvailableReplicas is the number of available replicas |  |  |
 | `serviceURL` _string_ | ServiceURL is the internal Kubernetes service URL where the distribution is exposed |  |  |
 
+#### PodDisruptionBudgetSpec
+
+PodDisruptionBudgetSpec defines voluntary disruption controls.
+
+_Appears in:_
+- [ServerSpec](#serverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `minAvailable` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | MinAvailable is the minimum number of pods that must remain available |  |  |
+| `maxUnavailable` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | MaxUnavailable is the maximum number of pods that can be disrupted simultaneously |  |  |
+
 #### PodOverrides
 
 PodOverrides allows advanced pod-level customization.
@@ -193,6 +219,9 @@ _Appears in:_
 | `distribution` _[DistributionType](#distributiontype)_ |  |  |  |
 | `containerSpec` _[ContainerSpec](#containerspec)_ |  |  |  |
 | `podOverrides` _[PodOverrides](#podoverrides)_ |  |  |  |
+| `podDisruptionBudget` _[PodDisruptionBudgetSpec](#poddisruptionbudgetspec)_ | PodDisruptionBudget controls voluntary disruption tolerance for the server pods |  |  |
+| `topologySpreadConstraints` _[TopologySpreadConstraint](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#topologyspreadconstraint-v1-core) array_ | TopologySpreadConstraints defines fine-grained spreading rules |  |  |
+| `autoscaling` _[AutoscalingSpec](#autoscalingspec)_ | Autoscaling configures HorizontalPodAutoscaler for the server pods |  |  |
 | `storage` _[StorageSpec](#storagespec)_ | Storage defines the persistent storage configuration |  |  |
 | `userConfig` _[UserConfigSpec](#userconfigspec)_ | UserConfig defines the user configuration for the llama-stack server |  |  |
 | `tlsConfig` _[TLSConfig](#tlsconfig)_ | TLSConfig defines the TLS configuration for the llama-stack server |  |  |

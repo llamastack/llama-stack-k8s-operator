@@ -12,12 +12,15 @@ import (
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/compare"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy/plugins"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	policyv1 "k8s.io/api/policy/v1"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,6 +31,8 @@ import (
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 	yamlpkg "sigs.k8s.io/yaml"
 )
+
+const deploymentKind = "Deployment"
 
 // RenderManifest takes a manifest directory and transforms it through
 // kustomization and plugins to produce final Kubernetes resources.
@@ -202,7 +207,7 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 	namePrefixPlugin := plugins.CreateNamePrefixPlugin(plugins.NamePrefixConfig{
 		Prefix: ownerInstance.GetName(),
 		// Exclude Deployment to maintain backward compatibility with existing deployment names
-		ExcludeKinds: []string{"Deployment"},
+		ExcludeKinds: []string{deploymentKind},
 	})
 	if err := namePrefixPlugin.Transform(*resMap); err != nil {
 		return fmt.Errorf("failed to apply name prefix: %w", err)
@@ -223,6 +228,44 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 		return fmt.Errorf("failed to apply field transformer: %w", err)
 	}
 
+	if isAutoscalingEnabled(ownerInstance) {
+		if err := removeDeploymentReplicas(*resMap); err != nil {
+			return fmt.Errorf("failed to strip replicas for autoscaling: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// removeDeploymentReplicas deletes spec.replicas from Deployment manifests so that
+// the HPA (or default Kubernetes behavior) controls the replica count.
+func removeDeploymentReplicas(resMap resmap.ResMap) error {
+	for _, res := range resMap.Resources() {
+		if res.GetKind() != deploymentKind {
+			continue
+		}
+
+		data, err := parseResourceYAML(res)
+		if err != nil {
+			return err
+		}
+
+		spec, ok := data["spec"].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		if _, exists := spec["replicas"]; !exists {
+			continue
+		}
+
+		delete(spec, "replicas")
+
+		if err := updateResourceFromData(res, data); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -240,8 +283,11 @@ func getFieldMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plu
 }
 
 // buildFieldMappings constructs the field mappings array.
+//
+//nolint:funlen // mappings list is long but straightforward
 func buildFieldMappings(instanceName, instanceNamespace, serviceAccountName string,
 	servicePort any, storageSize, operatorNS, instanceLabelPath string, replicas int32) []plugins.FieldMapping {
+	var replicaSourceValue any = replicas
 	return []plugins.FieldMapping{
 		{
 			SourceValue:       storageSize,
@@ -277,7 +323,7 @@ func buildFieldMappings(instanceName, instanceNamespace, serviceAccountName stri
 			CreateIfNotExists: true,
 		},
 		{
-			SourceValue:       replicas,
+			SourceValue:       replicaSourceValue,
 			TargetField:       "/spec/replicas",
 			TargetKind:        "Deployment",
 			CreateIfNotExists: true,
@@ -339,6 +385,18 @@ func buildFieldMappings(instanceName, instanceNamespace, serviceAccountName stri
 			TargetKind:        "NetworkPolicy",
 			CreateIfNotExists: true,
 		},
+		{
+			SourceValue:       instanceName,
+			TargetField:       "/spec/selector/matchLabels" + instanceLabelPath,
+			TargetKind:        "PodDisruptionBudget",
+			CreateIfNotExists: true,
+		},
+		{
+			SourceValue:       instanceName,
+			TargetField:       "/spec/scaleTargetRef/name",
+			TargetKind:        "HorizontalPodAutoscaler",
+			CreateIfNotExists: true,
+		},
 	}
 }
 
@@ -369,13 +427,23 @@ func getOperatorNamespace() string {
 	return ""
 }
 
+func isAutoscalingEnabled(instance *llamav1alpha1.LlamaStackDistribution) bool {
+	if instance == nil || instance.Spec.Server.Autoscaling == nil {
+		return false
+	}
+
+	return instance.Spec.Server.Autoscaling.MaxReplicas > 0
+}
+
 // ManifestContext provides the necessary context for complex resource rendering.
 type ManifestContext struct {
-	ResolvedImage string
-	ConfigMapHash string
-	CABundleHash  string
-	ContainerSpec map[string]any
-	PodSpec       map[string]any
+	ResolvedImage           string
+	ConfigMapHash           string
+	CABundleHash            string
+	ContainerSpec           map[string]any
+	PodSpec                 map[string]any
+	PodDisruptionBudgetSpec *policyv1.PodDisruptionBudgetSpec
+	HPASpec                 *autoscalingv2.HorizontalPodAutoscalerSpec
 }
 
 // RenderManifestWithContext renders manifests and enhances the Deployment with complex specs.
@@ -396,14 +464,21 @@ func RenderManifestWithContext(
 		return resMap, nil
 	}
 
-	// Update the Deployment with the manifest context
+	// Update the resources with the manifest context
 	for _, res := range (*resMap).Resources() {
-		if res.GetKind() != "Deployment" {
-			continue
-		}
-
-		if err := updateDeploymentSpec(res, manifestCtx); err != nil {
-			return nil, fmt.Errorf("failed to update Deployment: %w", err)
+		switch res.GetKind() {
+		case deploymentKind:
+			if err := updateDeploymentSpec(res, manifestCtx); err != nil {
+				return nil, fmt.Errorf("failed to update Deployment: %w", err)
+			}
+		case "PodDisruptionBudget":
+			if err := updatePodDisruptionBudget(res, manifestCtx); err != nil {
+				return nil, fmt.Errorf("failed to update PodDisruptionBudget: %w", err)
+			}
+		case "HorizontalPodAutoscaler":
+			if err := updateHorizontalPodAutoscaler(res, manifestCtx); err != nil {
+				return nil, fmt.Errorf("failed to update HorizontalPodAutoscaler: %w", err)
+			}
 		}
 	}
 
@@ -413,7 +488,7 @@ func RenderManifestWithContext(
 // updateDeploymentSpec updates the Deployment spec with the manifest context.
 func updateDeploymentSpec(res *resource.Resource, manifestCtx *ManifestContext) error {
 	// Parse the deployment YAML
-	data, err := parseDeploymentYAML(res)
+	data, err := parseResourceYAML(res)
 	if err != nil {
 		return err
 	}
@@ -447,8 +522,8 @@ func updateDeploymentSpec(res *resource.Resource, manifestCtx *ManifestContext) 
 	return updateResourceFromData(res, data)
 }
 
-// parseDeploymentYAML parses the deployment resource YAML into a map.
-func parseDeploymentYAML(res *resource.Resource) (map[string]any, error) {
+// parseResourceYAML parses a resource YAML into a map.
+func parseResourceYAML(res *resource.Resource) (map[string]any, error) {
 	yamlBytes, err := res.AsYAML()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get YAML: %w", err)
@@ -514,6 +589,59 @@ func addConfigMapAnnotations(data map[string]any, manifestCtx *ManifestContext) 
 	}
 
 	return nil
+}
+
+func updatePodDisruptionBudget(res *resource.Resource, manifestCtx *ManifestContext) error {
+	if manifestCtx.PodDisruptionBudgetSpec == nil {
+		return nil
+	}
+	data, err := parseResourceYAML(res)
+	if err != nil {
+		return err
+	}
+	spec, ok := data["spec"].(map[string]any)
+	if !ok {
+		return errors.New("failed to find PDB spec in data")
+	}
+
+	if manifestCtx.PodDisruptionBudgetSpec.MinAvailable != nil {
+		spec["minAvailable"] = intOrStringToInterface(manifestCtx.PodDisruptionBudgetSpec.MinAvailable)
+	} else {
+		delete(spec, "minAvailable")
+	}
+	if manifestCtx.PodDisruptionBudgetSpec.MaxUnavailable != nil {
+		spec["maxUnavailable"] = intOrStringToInterface(manifestCtx.PodDisruptionBudgetSpec.MaxUnavailable)
+	} else {
+		delete(spec, "maxUnavailable")
+	}
+
+	return updateResourceFromData(res, data)
+}
+
+func updateHorizontalPodAutoscaler(res *resource.Resource, manifestCtx *ManifestContext) error {
+	if manifestCtx.HPASpec == nil {
+		return nil
+	}
+	specMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(manifestCtx.HPASpec)
+	if err != nil {
+		return fmt.Errorf("failed to convert HPA spec: %w", err)
+	}
+	data, err := parseResourceYAML(res)
+	if err != nil {
+		return err
+	}
+	data["spec"] = specMap
+	return updateResourceFromData(res, data)
+}
+
+func intOrStringToInterface(value *intstr.IntOrString) any {
+	if value == nil {
+		return nil
+	}
+	if value.Type == intstr.String {
+		return value.StrVal
+	}
+	return value.IntValue()
 }
 
 // updateResourceFromData updates the resource with the modified data.

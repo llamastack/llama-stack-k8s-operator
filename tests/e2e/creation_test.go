@@ -115,6 +115,10 @@ func testCreateDistributionForType(t *testing.T, distType string) *v1alpha1.Llam
 
 func testDirectDeploymentUpdates(t *testing.T, distribution *v1alpha1.LlamaStackDistribution) {
 	t.Helper()
+
+	if distribution.Spec.Server.Autoscaling != nil && distribution.Spec.Server.Autoscaling.MaxReplicas > 0 {
+		t.Skip("Skipping direct deployment update healing test when autoscaling is enabled")
+	}
 	// Get the deployment
 	deployment := &appsv1.Deployment{}
 	err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{

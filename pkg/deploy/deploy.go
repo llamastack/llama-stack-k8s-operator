@@ -30,8 +30,10 @@ func ApplyDeployment(ctx context.Context, cli client.Client, scheme *runtime.Sch
 		return fmt.Errorf("failed to fetch deployment: %w", err)
 	}
 
-	// For updates, preserve the existing selector since it's immutable
-	// and use server-side apply for other fields
+	if isAutoscalingEnabled(instance) {
+		deployment.Spec.Replicas = found.Spec.Replicas
+	}
+
 	if !reflect.DeepEqual(found.Spec, deployment.Spec) {
 		logger.Info("Updating Deployment", "deployment", deployment.Name)
 

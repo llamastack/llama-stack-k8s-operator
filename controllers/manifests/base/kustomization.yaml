@@ -7,6 +7,8 @@ resources:
 - service.yaml
 - networkpolicy.yaml
 - deployment.yaml
+- hpa.yaml
+- pdb.yaml
 - rolebinding.yaml
 
 labels:

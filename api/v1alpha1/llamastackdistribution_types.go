@@ -25,6 +25,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 const (
@@ -44,8 +45,13 @@ const (
 	LlamaStackDistributionKind = "LlamaStackDistribution"
 )
 
-// DefaultStorageSize is the default size for persistent storage
-var DefaultStorageSize = resource.MustParse("10Gi")
+var (
+	// DefaultStorageSize is the default size for persistent storage
+	DefaultStorageSize = resource.MustParse("10Gi")
+	// Default requests ensure the HPA and scheduler have baseline values
+	DefaultServerCPURequest    = resource.MustParse("500m")
+	DefaultServerMemoryRequest = resource.MustParse("1Gi")
+)
 
 // DistributionType defines the distribution configuration for llama-stack.
 // +kubebuilder:validation:XValidation:rule="!(has(self.name) && has(self.image))",message="Only one of name or image can be specified"
@@ -76,6 +82,15 @@ type ServerSpec struct {
 	Distribution  DistributionType `json:"distribution"`
 	ContainerSpec ContainerSpec    `json:"containerSpec,omitempty"`
 	PodOverrides  *PodOverrides    `json:"podOverrides,omitempty"` // Optional pod-level overrides
+	// PodDisruptionBudget controls voluntary disruption tolerance for the server pods
+	// +optional
+	PodDisruptionBudget *PodDisruptionBudgetSpec `json:"podDisruptionBudget,omitempty"`
+	// TopologySpreadConstraints defines fine-grained spreading rules
+	// +optional
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
+	// Autoscaling configures HorizontalPodAutoscaler for the server pods
+	// +optional
+	Autoscaling *AutoscalingSpec `json:"autoscaling,omitempty"`
 	// Storage defines the persistent storage configuration
 	// +optional
 	Storage *StorageSpec `json:"storage,omitempty"`
@@ -146,6 +161,31 @@ type PodOverrides struct {
 	ServiceAccountName string               `json:"serviceAccountName,omitempty"`
 	Volumes            []corev1.Volume      `json:"volumes,omitempty"`
 	VolumeMounts       []corev1.VolumeMount `json:"volumeMounts,omitempty"`
+}
+
+// PodDisruptionBudgetSpec defines voluntary disruption controls.
+type PodDisruptionBudgetSpec struct {
+	// MinAvailable is the minimum number of pods that must remain available
+	// +optional
+	MinAvailable *intstr.IntOrString `json:"minAvailable,omitempty"`
+	// MaxUnavailable is the maximum number of pods that can be disrupted simultaneously
+	// +optional
+	MaxUnavailable *intstr.IntOrString `json:"maxUnavailable,omitempty"`
+}
+
+// AutoscalingSpec configures HorizontalPodAutoscaler targets.
+type AutoscalingSpec struct {
+	// MinReplicas is the lower bound replica count maintained by the HPA
+	// +optional
+	MinReplicas *int32 `json:"minReplicas,omitempty"`
+	// MaxReplicas is the upper bound replica count maintained by the HPA
+	MaxReplicas int32 `json:"maxReplicas"`
+	// TargetCPUUtilizationPercentage configures CPU based scaling
+	// +optional
+	TargetCPUUtilizationPercentage *int32 `json:"targetCPUUtilizationPercentage,omitempty"`
+	// TargetMemoryUtilizationPercentage configures memory based scaling
+	// +optional
+	TargetMemoryUtilizationPercentage *int32 `json:"targetMemoryUtilizationPercentage,omitempty"`
 }
 
 // ProviderInfo represents a single provider from the providers endpoint.

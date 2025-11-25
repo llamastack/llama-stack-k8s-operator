@@ -24,7 +24,10 @@ import (
 	"strings"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
@@ -36,6 +39,13 @@ const (
 	// FSGroup is the filesystem group ID for the pod.
 	// This is the default group ID for the llama-stack server.
 	FSGroup = int64(1001)
+	// instanceLabelKey is the label we apply to all resources for per-instance targeting.
+	instanceLabelKey = "app.kubernetes.io/instance"
+)
+
+var (
+	// defaultHPACPUUtilization defines the fallback HPA CPU target percentage.
+	defaultHPACPUUtilization = int32(80) //nolint:mnd // standard HPA default
 )
 
 // Probes configuration.
@@ -145,7 +155,7 @@ func buildContainerSpec(ctx context.Context, r *LlamaStackDistributionReconciler
 	container := corev1.Container{
 		Name:         getContainerName(instance),
 		Image:        image,
-		Resources:    instance.Spec.Server.ContainerSpec.Resources,
+		Resources:    resolveContainerResources(instance.Spec.Server.ContainerSpec),
 		Ports:        []corev1.ContainerPort{{ContainerPort: getContainerPort(instance)}},
 		StartupProbe: getStartupProbe(instance),
 	}
@@ -156,6 +166,26 @@ func buildContainerSpec(ctx context.Context, r *LlamaStackDistributionReconciler
 	configureContainerCommands(instance, &container)
 
 	return container
+}
+
+// resolveContainerResources ensures the container always has CPU and memory
+// requests defined so that HPAs using utilization metrics can function.
+func resolveContainerResources(spec llamav1alpha1.ContainerSpec) corev1.ResourceRequirements {
+	resources := spec.Resources
+
+	if resources.Requests == nil {
+		resources.Requests = corev1.ResourceList{}
+	}
+
+	if cpuQty, ok := resources.Requests[corev1.ResourceCPU]; !ok || cpuQty.IsZero() {
+		resources.Requests[corev1.ResourceCPU] = llamav1alpha1.DefaultServerCPURequest
+	}
+
+	if memQty, ok := resources.Requests[corev1.ResourceMemory]; !ok || memQty.IsZero() {
+		resources.Requests[corev1.ResourceMemory] = llamav1alpha1.DefaultServerMemoryRequest
+	}
+
+	return resources
 }
 
 // getContainerName returns the container name, using custom name if specified.
@@ -335,6 +365,8 @@ func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconcile
 	// Apply pod overrides including ServiceAccount, volumes, and volume mounts
 	configurePodOverrides(instance, &podSpec)
 
+	configurePodScheduling(instance, &podSpec)
+
 	return podSpec
 }
 
@@ -430,6 +462,80 @@ func configurePodOverrides(instance *llamav1alpha1.LlamaStackDistribution, podSp
 	}
 }
 
+func configurePodScheduling(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+	if len(instance.Spec.Server.TopologySpreadConstraints) > 0 {
+		podSpec.TopologySpreadConstraints = deepCopyTopologySpreadConstraints(instance.Spec.Server.TopologySpreadConstraints)
+	} else if instance.Spec.Replicas > 1 {
+		podSpec.TopologySpreadConstraints = defaultTopologySpreadConstraints(instance)
+	}
+
+	if instance.Spec.Replicas > 1 {
+		ensureDefaultPodAntiAffinity(instance, podSpec)
+	}
+}
+
+func deepCopyTopologySpreadConstraints(constraints []corev1.TopologySpreadConstraint) []corev1.TopologySpreadConstraint {
+	copied := make([]corev1.TopologySpreadConstraint, len(constraints))
+	for i := range constraints {
+		copied[i] = *constraints[i].DeepCopy()
+	}
+	return copied
+}
+
+func defaultTopologySpreadConstraints(instance *llamav1alpha1.LlamaStackDistribution) []corev1.TopologySpreadConstraint {
+	labelSelector := defaultInstanceLabelSelector(instance)
+	return []corev1.TopologySpreadConstraint{
+		newTopologySpreadConstraint(labelSelector, "topology.kubernetes.io/region"),
+		newTopologySpreadConstraint(labelSelector, "topology.kubernetes.io/zone"),
+		newTopologySpreadConstraint(labelSelector, "kubernetes.io/hostname"),
+	}
+}
+
+func newTopologySpreadConstraint(selector *metav1.LabelSelector, topologyKey string) corev1.TopologySpreadConstraint {
+	return corev1.TopologySpreadConstraint{
+		MaxSkew:           1,
+		TopologyKey:       topologyKey,
+		WhenUnsatisfiable: corev1.ScheduleAnyway,
+		LabelSelector:     selector.DeepCopy(),
+	}
+}
+
+func ensureDefaultPodAntiAffinity(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+	if podSpec.Affinity != nil && podSpec.Affinity.PodAntiAffinity != nil {
+		return
+	}
+
+	selector := defaultInstanceLabelSelector(instance)
+	term := corev1.PodAffinityTerm{
+		LabelSelector: selector,
+		TopologyKey:   "kubernetes.io/hostname",
+	}
+
+	defaultAntiAffinity := &corev1.PodAntiAffinity{
+		PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+			{
+				Weight:          100,
+				PodAffinityTerm: term,
+			},
+		},
+	}
+
+	if podSpec.Affinity == nil {
+		podSpec.Affinity = &corev1.Affinity{}
+	}
+
+	// Deep copy to avoid sharing selectors across pods
+	podSpec.Affinity.PodAntiAffinity = defaultAntiAffinity.DeepCopy()
+}
+
+func defaultInstanceLabelSelector(instance *llamav1alpha1.LlamaStackDistribution) *metav1.LabelSelector {
+	return &metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			instanceLabelKey: instance.Name,
+		},
+	}
+}
+
 // validateDistribution validates the distribution configuration.
 func (r *LlamaStackDistributionReconciler) validateDistribution(instance *llamav1alpha1.LlamaStackDistribution) error {
 	// If using distribution name, validate it exists in clusterInfo
@@ -460,4 +566,114 @@ func (r *LlamaStackDistributionReconciler) resolveImage(distribution llamav1alph
 	default:
 		return "", errors.New("failed to validate distribution: either distribution.name or distribution.image must be set")
 	}
+}
+
+func buildPodDisruptionBudgetSpec(instance *llamav1alpha1.LlamaStackDistribution) *policyv1.PodDisruptionBudgetSpec {
+	if !needsPodDisruptionBudget(instance) {
+		return nil
+	}
+
+	spec := &policyv1.PodDisruptionBudgetSpec{}
+	if instance.Spec.Server.PodDisruptionBudget != nil {
+		spec.MinAvailable = copyIntOrString(instance.Spec.Server.PodDisruptionBudget.MinAvailable)
+		spec.MaxUnavailable = copyIntOrString(instance.Spec.Server.PodDisruptionBudget.MaxUnavailable)
+	} else {
+		minAvailable := intstr.FromInt(1)
+		spec.MinAvailable = &minAvailable
+	}
+
+	return spec
+}
+
+func buildHPASpec(instance *llamav1alpha1.LlamaStackDistribution) *autoscalingv2.HorizontalPodAutoscalerSpec {
+	auto := instance.Spec.Server.Autoscaling
+	if auto == nil || auto.MaxReplicas == 0 {
+		return nil
+	}
+
+	minReplicas := resolveMinReplicas(auto.MinReplicas, instance.Spec.Replicas)
+
+	spec := &autoscalingv2.HorizontalPodAutoscalerSpec{
+		ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
+			APIVersion: "apps/v1",
+			Kind:       "Deployment",
+			Name:       instance.Name,
+		},
+		MinReplicas: minReplicas,
+		MaxReplicas: auto.MaxReplicas,
+		Metrics:     buildHPAMetrics(auto),
+	}
+
+	return spec
+}
+
+func resolveMinReplicas(value *int32, defaultVal int32) *int32 {
+	resolved := int32(1)
+	if defaultVal > resolved {
+		resolved = defaultVal
+	}
+	if value != nil && *value > resolved {
+		resolved = *value
+	}
+	return &resolved
+}
+
+func buildHPAMetrics(auto *llamav1alpha1.AutoscalingSpec) []autoscalingv2.MetricSpec {
+	var metrics []autoscalingv2.MetricSpec
+
+	if auto.TargetCPUUtilizationPercentage != nil {
+		metrics = append(metrics, autoscalingv2.MetricSpec{
+			Type: autoscalingv2.ResourceMetricSourceType,
+			Resource: &autoscalingv2.ResourceMetricSource{
+				Name: corev1.ResourceCPU,
+				Target: autoscalingv2.MetricTarget{
+					Type:               autoscalingv2.UtilizationMetricType,
+					AverageUtilization: auto.TargetCPUUtilizationPercentage,
+				},
+			},
+		})
+	}
+
+	if auto.TargetMemoryUtilizationPercentage != nil {
+		metrics = append(metrics, autoscalingv2.MetricSpec{
+			Type: autoscalingv2.ResourceMetricSourceType,
+			Resource: &autoscalingv2.ResourceMetricSource{
+				Name: corev1.ResourceMemory,
+				Target: autoscalingv2.MetricTarget{
+					Type:               autoscalingv2.UtilizationMetricType,
+					AverageUtilization: auto.TargetMemoryUtilizationPercentage,
+				},
+			},
+		})
+	}
+
+	if len(metrics) == 0 {
+		metrics = append(metrics, autoscalingv2.MetricSpec{
+			Type: autoscalingv2.ResourceMetricSourceType,
+			Resource: &autoscalingv2.ResourceMetricSource{
+				Name: corev1.ResourceCPU,
+				Target: autoscalingv2.MetricTarget{
+					Type:               autoscalingv2.UtilizationMetricType,
+					AverageUtilization: &defaultHPACPUUtilization,
+				},
+			},
+		})
+	}
+
+	return metrics
+}
+
+func needsPodDisruptionBudget(instance *llamav1alpha1.LlamaStackDistribution) bool {
+	if instance.Spec.Server.PodDisruptionBudget != nil {
+		return true
+	}
+	return instance.Spec.Replicas > 1
+}
+
+func copyIntOrString(value *intstr.IntOrString) *intstr.IntOrString {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
 }
