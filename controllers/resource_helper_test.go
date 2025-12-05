@@ -32,6 +32,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
+func int32Ptr(val int32) *int32 {
+	return &val
+}
+
 func TestBuildContainerSpec(t *testing.T) {
 	testCases := []struct {
 		name           string
@@ -66,6 +70,9 @@ func TestBuildContainerSpec(t *testing.T) {
 				}},
 				Env: []corev1.EnvVar{
 					{Name: "HF_HOME", Value: "/.llama"},
+					{Name: "LLS_WORKERS", Value: "1"},
+					{Name: "LLS_PORT", Value: "8321"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/run.yaml"},
 				},
 			},
 		},
@@ -111,6 +118,9 @@ func TestBuildContainerSpec(t *testing.T) {
 				},
 				Env: []corev1.EnvVar{
 					{Name: "HF_HOME", Value: "/custom/path"},
+					{Name: "LLS_WORKERS", Value: "1"},
+					{Name: "LLS_PORT", Value: "9000"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/run.yaml"},
 					{Name: "TEST_ENV", Value: "test-value"},
 				},
 				VolumeMounts: []corev1.VolumeMount{{
@@ -152,7 +162,43 @@ func TestBuildContainerSpec(t *testing.T) {
 				}},
 				Env: []corev1.EnvVar{
 					{Name: "HF_HOME", Value: "/.llama"},
+					{Name: "LLS_WORKERS", Value: "1"},
+					{Name: "LLS_PORT", Value: "8321"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/run.yaml"},
 				},
+			},
+		},
+		{
+			name: "uvicorn workers configured",
+			instance: &llamav1alpha1.LlamaStackDistribution{
+				Spec: llamav1alpha1.LlamaStackDistributionSpec{
+					Server: llamav1alpha1.ServerSpec{
+						Workers: int32Ptr(4),
+					},
+				},
+			},
+			image: "test-image:latest",
+			expectedResult: corev1.Container{
+				Name:  llamav1alpha1.DefaultContainerName,
+				Image: "test-image:latest",
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    llamav1alpha1.DefaultServerCPURequest,
+						corev1.ResourceMemory: llamav1alpha1.DefaultServerMemoryRequest,
+					},
+				},
+				Ports:        []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
+				StartupProbe: newDefaultStartupProbe(llamav1alpha1.DefaultServerPort),
+				Env: []corev1.EnvVar{
+					{Name: "HF_HOME", Value: "/.llama"},
+					{Name: "LLS_WORKERS", Value: "4"},
+					{Name: "LLS_PORT", Value: "8321"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/run.yaml"},
+				},
+				VolumeMounts: []corev1.VolumeMount{{
+					Name:      "lls-storage",
+					MountPath: llamav1alpha1.DefaultMountPath,
+				}},
 			},
 		},
 		{
@@ -187,6 +233,9 @@ func TestBuildContainerSpec(t *testing.T) {
 				Args:         []string{},
 				Env: []corev1.EnvVar{
 					{Name: "HF_HOME", Value: llamav1alpha1.DefaultMountPath},
+					{Name: "LLS_WORKERS", Value: "1"},
+					{Name: "LLS_PORT", Value: "8321"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/run.yaml"},
 				},
 				VolumeMounts: []corev1.VolumeMount{
 					{

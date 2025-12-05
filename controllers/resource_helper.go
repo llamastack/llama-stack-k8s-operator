@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
@@ -91,20 +92,25 @@ try:
         print('Using core module path (llama_stack.core.server.server)', file=sys.stderr)
         print(1)
     else:
-        print('Using new CLI command (llama stack run)', file=sys.stderr)
+        print('Using uvicorn CLI command', file=sys.stderr)
         print(2)
 except Exception as e:
     print(f'Version detection failed, defaulting to new CLI: {e}', file=sys.stderr)
     print(2)
 ")
 
+PORT=${LLS_PORT:-8321}
+WORKERS=${LLS_WORKERS:-1}
+
 # Execute the appropriate CLI based on version
 case $VERSION_CODE in
     0) python3 -m llama_stack.distribution.server.server --config /etc/llama-stack/run.yaml ;;
     1) python3 -m llama_stack.core.server.server /etc/llama-stack/run.yaml ;;
-    2) llama stack run /etc/llama-stack/run.yaml ;;
-    *) echo "Invalid version code: $VERSION_CODE, using new CLI"; llama stack run /etc/llama-stack/run.yaml ;;
+    2) exec uvicorn llama_stack.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
+    *) exec uvicorn llama_stack.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
 esac`
+
+const llamaStackConfigPath = "/etc/llama-stack/run.yaml"
 
 // validateConfigMapKeys validates that all ConfigMap keys contain only safe characters.
 // Note: This function validates key names only. PEM content validation is performed
@@ -226,6 +232,27 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 			Value: ManagedCABundleFilePath,
 		})
 	}
+
+	// Always provide worker/port/config env for uvicorn; workers default to 1 when unspecified.
+	workers := instance.Spec.Server.Workers
+	if workers == nil {
+		defaultWorkers := int32(1)
+		workers = &defaultWorkers
+	}
+	container.Env = append(container.Env,
+		corev1.EnvVar{
+			Name:  "LLS_WORKERS",
+			Value: strconv.Itoa(int(*workers)),
+		},
+		corev1.EnvVar{
+			Name:  "LLS_PORT",
+			Value: strconv.Itoa(int(getContainerPort(instance))),
+		},
+		corev1.EnvVar{
+			Name:  "LLAMA_STACK_CONFIG",
+			Value: llamaStackConfigPath,
+		},
+	)
 
 	// Finally, add the user provided env vars
 	container.Env = append(container.Env, instance.Spec.Server.ContainerSpec.Env...)
