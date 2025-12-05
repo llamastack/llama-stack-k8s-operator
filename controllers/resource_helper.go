@@ -560,6 +560,12 @@ func (r *LlamaStackDistributionReconciler) resolveImage(distribution llamav1alph
 		if _, exists := distributionMap[distribution.Name]; !exists {
 			return "", fmt.Errorf("failed to validate distribution name: %s", distribution.Name)
 		}
+		// Check for image override in the operator config ConfigMap
+		// The override is keyed by distribution name only (e.g., "starter")
+		// This allows the same override to apply across all distributions
+		if override, exists := r.ImageMappingOverrides[distribution.Name]; exists {
+			return override, nil
+		}
 		return distributionMap[distribution.Name], nil
 	case distribution.Image != "":
 		return distribution.Image, nil
