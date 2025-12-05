@@ -81,7 +81,12 @@ type LlamaStackDistributionSpec struct {
 type ServerSpec struct {
 	Distribution  DistributionType `json:"distribution"`
 	ContainerSpec ContainerSpec    `json:"containerSpec,omitempty"`
-	PodOverrides  *PodOverrides    `json:"podOverrides,omitempty"` // Optional pod-level overrides
+	// Workers configures the number of uvicorn worker processes to run.
+	// When set, the operator will launch llama-stack using uvicorn with the specified worker count.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	Workers      *int32        `json:"workers,omitempty"`
+	PodOverrides *PodOverrides `json:"podOverrides,omitempty"` // Optional pod-level overrides
 	// PodDisruptionBudget controls voluntary disruption tolerance for the server pods
 	// +optional
 	PodDisruptionBudget *PodDisruptionBudgetSpec `json:"podDisruptionBudget,omitempty"`

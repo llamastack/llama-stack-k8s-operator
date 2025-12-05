@@ -2577,6 +2577,13 @@ spec:
                     required:
                     - configMapName
                     type: object
+                  workers:
+                    description: |-
+                      Workers configures the number of uvicorn worker processes to run.
+                      When set, the operator will launch llama-stack using uvicorn with the specified worker count.
+                    format: int32
+                    minimum: 1
+                    type: integer
                 required:
                 - distribution
                 type: object
