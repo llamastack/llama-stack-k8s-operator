@@ -157,10 +157,13 @@ jobs:
         run: |
           make test
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+
       - name: Validate build release image
         shell: bash
         run: |
-          make image-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ steps.validate.outputs.operator_version }}
+          make image-buildx IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ steps.validate.outputs.operator_version }}
 
       - name: Commit and push changes
         shell: bash
@@ -247,10 +250,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build release image
-        shell: bash
-        run: |
-          make image-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
 
       - name: Log in to Quay.io
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
@@ -259,11 +260,11 @@ jobs:
           username: ${{ secrets.APP_QUAY_USERNAME }}
           password: ${{ secrets.APP_QUAY_TOKEN }}
 
-      - name: Push release image
+      - name: Build and push multi-arch release image
         shell: bash
         run: |
-          make image-push IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
-          echo "✅ Pushed: quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}"
+          make image-buildx IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}
+          echo "✅ Pushed multi-arch image: quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}"
 
       - name: Release complete
         shell: bash

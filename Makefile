@@ -179,21 +179,41 @@ image-push: ## Push image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
-# architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
+# architectures. (i.e. make image-buildx IMG=myregistry/myoperator:0.0.1). To use this option you need to:
 # - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
 # - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
-.PHONY: docker-buildx
-docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name x-builder
+# Note: The Dockerfile uses --platform=$BUILDPLATFORM for native cross-compilation, avoiding QEMU emulation
+# for Go builds which dramatically improves reliability and speed.
+PLATFORMS ?= linux/amd64,linux/arm64
+
+.PHONY: image-buildx
+image-buildx: ## Build and push multi-arch image with the manager (uses native cross-compilation)
+	@echo "Building multi-arch image for platforms: $(PLATFORMS)"
+ifeq ($(CONTAINER_TOOL),docker)
+	- $(CONTAINER_TOOL) buildx create --name x-builder 2>/dev/null || true
 	$(CONTAINER_TOOL) buildx use x-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm x-builder
-	rm Dockerfile.cross
+	$(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} .
+else
+	# Podman: Use manifest-based multi-arch build
+	$(CONTAINER_TOOL) manifest rm ${IMG} 2>/dev/null || true
+	$(CONTAINER_TOOL) manifest create ${IMG}
+	@for platform in $$(echo $(PLATFORMS) | tr ',' ' '); do \
+		echo "Building for $$platform..."; \
+		$(CONTAINER_TOOL) build --platform $$platform --manifest ${IMG} . ; \
+	done
+	$(CONTAINER_TOOL) manifest push ${IMG}
+endif
+	@echo "Successfully pushed multi-arch image: ${IMG}"
+
+.PHONY: image-build-arm
+image-build-arm: ## Build ARM64 image with the manager
+	$(CONTAINER_TOOL) build --platform linux/arm64 -t ${IMG} .
+
+# Legacy docker-buildx target (deprecated, use image-buildx instead)
+.PHONY: docker-buildx
+docker-buildx: image-buildx ## Deprecated: use image-buildx instead
 
 # Installer directory is updated to `release` from operator-sdk default `dist` directory.
 .PHONY: build-installer
