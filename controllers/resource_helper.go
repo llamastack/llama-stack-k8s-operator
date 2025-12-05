@@ -21,14 +21,17 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	ctrlLog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Constants for validation limits.
@@ -91,20 +94,26 @@ try:
         print('Using core module path (llama_stack.core.server.server)', file=sys.stderr)
         print(1)
     else:
-        print('Using new CLI command (llama stack run)', file=sys.stderr)
+        print('Using uvicorn CLI command', file=sys.stderr)
         print(2)
 except Exception as e:
     print(f'Version detection failed, defaulting to new CLI: {e}', file=sys.stderr)
     print(2)
 ")
 
+PORT=${LLS_PORT:-8321}
+WORKERS=${LLS_WORKERS:-1}
+
 # Execute the appropriate CLI based on version
 case $VERSION_CODE in
     0) python3 -m llama_stack.distribution.server.server --config /etc/llama-stack/run.yaml ;;
     1) python3 -m llama_stack.core.server.server /etc/llama-stack/run.yaml ;;
-    2) llama stack run /etc/llama-stack/run.yaml ;;
-    *) echo "Invalid version code: $VERSION_CODE, using new CLI"; llama stack run /etc/llama-stack/run.yaml ;;
+    2) exec uvicorn llama_stack.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
+    *) echo "Invalid version code: $VERSION_CODE, using uvicorn CLI command"; \
+       exec uvicorn llama_stack.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
 esac`
+
+const llamaStackConfigPath = "/etc/llama-stack/run.yaml"
 
 // validateConfigMapKeys validates that all ConfigMap keys contain only safe characters.
 // Note: This function validates key names only. PEM content validation is performed
@@ -152,10 +161,12 @@ func getStartupProbe(instance *llamav1alpha1.LlamaStackDistribution) *corev1.Pro
 
 // buildContainerSpec creates the container specification.
 func buildContainerSpec(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, image string) corev1.Container {
+	workers, workersSet := getEffectiveWorkers(instance)
+
 	container := corev1.Container{
 		Name:         getContainerName(instance),
 		Image:        image,
-		Resources:    resolveContainerResources(instance.Spec.Server.ContainerSpec),
+		Resources:    resolveContainerResources(instance.Spec.Server.ContainerSpec, workers, workersSet),
 		Ports:        []corev1.ContainerPort{{ContainerPort: getContainerPort(instance)}},
 		StartupProbe: getStartupProbe(instance),
 	}
@@ -170,22 +181,59 @@ func buildContainerSpec(ctx context.Context, r *LlamaStackDistributionReconciler
 
 // resolveContainerResources ensures the container always has CPU and memory
 // requests defined so that HPAs using utilization metrics can function.
-func resolveContainerResources(spec llamav1alpha1.ContainerSpec) corev1.ResourceRequirements {
+func resolveContainerResources(spec llamav1alpha1.ContainerSpec, workers int32, workersSet bool) corev1.ResourceRequirements {
 	resources := spec.Resources
 
+	ensureRequests(&resources, workers)
+	if workersSet {
+		ensureLimitsMatchRequests(&resources)
+	}
+
+	cpuReq := resources.Requests[corev1.ResourceCPU]
+	memReq := resources.Requests[corev1.ResourceMemory]
+	cpuLimit := resources.Limits[corev1.ResourceCPU]
+	memLimit := resources.Limits[corev1.ResourceMemory]
+
+	ctrlLog.Log.WithName("resource_helper").WithValues(
+		"workers", workers,
+		"workersEnabled", workersSet,
+	).V(1).Info("Defaulted resource values for llama-stack container",
+		"cpuRequest", cpuReq.String(),
+		"memoryRequest", memReq.String(),
+		"cpuLimit", cpuLimit.String(),
+		"memoryLimit", memLimit.String(),
+	)
+
+	return resources
+}
+
+func ensureRequests(resources *corev1.ResourceRequirements, workers int32) {
 	if resources.Requests == nil {
 		resources.Requests = corev1.ResourceList{}
 	}
 
 	if cpuQty, ok := resources.Requests[corev1.ResourceCPU]; !ok || cpuQty.IsZero() {
-		resources.Requests[corev1.ResourceCPU] = llamav1alpha1.DefaultServerCPURequest
+		// Default to 1 full core per worker unless user overrides.
+		resources.Requests[corev1.ResourceCPU] = resource.MustParse(strconv.Itoa(int(workers)))
 	}
 
 	if memQty, ok := resources.Requests[corev1.ResourceMemory]; !ok || memQty.IsZero() {
 		resources.Requests[corev1.ResourceMemory] = llamav1alpha1.DefaultServerMemoryRequest
 	}
+}
 
-	return resources
+func ensureLimitsMatchRequests(resources *corev1.ResourceRequirements) {
+	if resources.Limits == nil {
+		resources.Limits = corev1.ResourceList{}
+	}
+
+	if cpuLimit, ok := resources.Limits[corev1.ResourceCPU]; !ok || cpuLimit.IsZero() {
+		resources.Limits[corev1.ResourceCPU] = resources.Requests[corev1.ResourceCPU]
+	}
+
+	if memLimit, ok := resources.Limits[corev1.ResourceMemory]; !ok || memLimit.IsZero() {
+		resources.Limits[corev1.ResourceMemory] = resources.Requests[corev1.ResourceMemory]
+	}
 }
 
 // getContainerName returns the container name, using custom name if specified.
@@ -204,9 +252,18 @@ func getContainerPort(instance *llamav1alpha1.LlamaStackDistribution) int32 {
 	return llamav1alpha1.DefaultServerPort
 }
 
+// getEffectiveWorkers returns a positive worker count, defaulting to 1.
+func getEffectiveWorkers(instance *llamav1alpha1.LlamaStackDistribution) (int32, bool) {
+	if instance.Spec.Server.Workers != nil && *instance.Spec.Server.Workers > 0 {
+		return *instance.Spec.Server.Workers, true
+	}
+	return 1, false
+}
+
 // configureContainerEnvironment sets up environment variables for the container.
 func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
 	mountPath := getMountPath(instance)
+	workers, _ := getEffectiveWorkers(instance)
 
 	// Add HF_HOME variable to our mount path so that downloaded models and datasets are stored
 	// on the same volume as the storage. This is not critical but useful if the server is
@@ -226,6 +283,22 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 			Value: ManagedCABundleFilePath,
 		})
 	}
+
+	// Always provide worker/port/config env for uvicorn; workers default to 1 when unspecified.
+	container.Env = append(container.Env,
+		corev1.EnvVar{
+			Name:  "LLS_WORKERS",
+			Value: strconv.Itoa(int(workers)),
+		},
+		corev1.EnvVar{
+			Name:  "LLS_PORT",
+			Value: strconv.Itoa(int(getContainerPort(instance))),
+		},
+		corev1.EnvVar{
+			Name:  "LLAMA_STACK_CONFIG",
+			Value: llamaStackConfigPath,
+		},
+	)
 
 	// Finally, add the user provided env vars
 	container.Env = append(container.Env, instance.Spec.Server.ContainerSpec.Env...)

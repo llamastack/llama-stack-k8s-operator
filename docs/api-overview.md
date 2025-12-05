@@ -218,6 +218,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `distribution` _[DistributionType](#distributiontype)_ |  |  |  |
 | `containerSpec` _[ContainerSpec](#containerspec)_ |  |  |  |
+| `workers` _integer_ | Workers configures the number of uvicorn worker processes to run.<br />When set, the operator will launch llama-stack using uvicorn with the specified worker count.<br />Ref: https://fastapi.tiangolo.com/deployment/server-workers/<br />CPU requests are set to the number of workers when set, otherwise 1 full core |  | Minimum: 1 <br /> |
 | `podOverrides` _[PodOverrides](#podoverrides)_ |  |  |  |
 | `podDisruptionBudget` _[PodDisruptionBudgetSpec](#poddisruptionbudgetspec)_ | PodDisruptionBudget controls voluntary disruption tolerance for the server pods |  |  |
 | `topologySpreadConstraints` _[TopologySpreadConstraint](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#topologyspreadconstraint-v1-core) array_ | TopologySpreadConstraints defines fine-grained spreading rules |  |  |

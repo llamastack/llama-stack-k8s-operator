@@ -344,6 +344,11 @@ func (in *ServerSpec) DeepCopyInto(out *ServerSpec) {
 	*out = *in
 	out.Distribution = in.Distribution
 	in.ContainerSpec.DeepCopyInto(&out.ContainerSpec)
+	if in.Workers != nil {
+		in, out := &in.Workers, &out.Workers
+		*out = new(int32)
+		**out = **in
+	}
 	if in.PodOverrides != nil {
 		in, out := &in.PodOverrides, &out.PodOverrides
 		*out = new(PodOverrides)
