@@ -1044,11 +1044,7 @@ func (r *LlamaStackDistributionReconciler) getVersionInfo(ctx context.Context, i
 // updateStatus refreshes the LlamaStack status.
 func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, reconcileErr error) error {
 	logger := log.FromContext(ctx)
-	// Initialize OperatorVersion if not set
-	if instance.Status.Version.OperatorVersion == "" {
-		instance.Status.Version.OperatorVersion = os.Getenv("OPERATOR_VERSION")
-	}
-
+	instance.Status.Version.OperatorVersion = os.Getenv("OPERATOR_VERSION")
 	// A reconciliation error is the highest priority. It overrides all other status checks.
 	if reconcileErr != nil {
 		instance.Status.Phase = llamav1alpha1.LlamaStackDistributionPhaseFailed
