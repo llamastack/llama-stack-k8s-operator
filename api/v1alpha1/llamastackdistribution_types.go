@@ -75,6 +75,37 @@ type LlamaStackDistributionSpec struct {
 	// +kubebuilder:default:=1
 	Replicas int32      `json:"replicas,omitempty"`
 	Server   ServerSpec `json:"server"`
+	// Network defines network access controls for the LlamaStack service
+	// +optional
+	Network *NetworkSpec `json:"network,omitempty"`
+}
+
+// NetworkSpec defines network access controls for the LlamaStack service.
+type NetworkSpec struct {
+	// ExposeRoute when true, creates an Ingress (or OpenShift Route) for external access.
+	// Default is false (internal access only).
+	// +optional
+	// +kubebuilder:default:=false
+	ExposeRoute bool `json:"exposeRoute,omitempty"`
+
+	// AllowedFrom defines which namespaces are allowed to access the LlamaStack service.
+	// By default, only the LLSD namespace and the operator namespace are allowed.
+	// +optional
+	AllowedFrom *AllowedFromSpec `json:"allowedFrom,omitempty"`
+}
+
+// AllowedFromSpec defines namespace-based access controls for NetworkPolicies.
+type AllowedFromSpec struct {
+	// Namespaces is an explicit list of namespace names allowed to access the service.
+	// Use "*" to allow all namespaces.
+	// +optional
+	Namespaces []string `json:"namespaces,omitempty"`
+
+	// Labels is a list of namespace label keys that are allowed to access the service.
+	// A namespace matching any of these labels will be granted access (OR semantics).
+	// Example: ["myproject/lls-allowed", "team/authorized"]
+	// +optional
+	Labels []string `json:"labels,omitempty"`
 }
 
 // ServerSpec defines the desired state of llama server.
@@ -254,6 +285,8 @@ type LlamaStackDistributionStatus struct {
 	AvailableReplicas int32 `json:"availableReplicas,omitempty"`
 	// ServiceURL is the internal Kubernetes service URL where the distribution is exposed
 	ServiceURL string `json:"serviceURL,omitempty"`
+	// RouteURL is the external URL where the distribution is exposed (when exposeRoute is true)
+	RouteURL string `json:"routeURL,omitempty"`
 }
 
 //+kubebuilder:object:root=true

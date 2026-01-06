@@ -106,17 +106,16 @@ kubectl apply -f config/samples/example-with-configmap.yaml
 
 ## Enabling Network Policies
 
-The operator can create an ingress-only `NetworkPolicy` for every `LlamaStackDistribution` to ensure traffic is limited to:
-- Other pods in the same namespace that are part of the Llama Stack deployment (`app.kubernetes.io/part-of: llama-stack`)
-- Components that run inside the operator namespace (default: `llama-stack-k8s-operator-system`)
+The operator can create an ingress-only `NetworkPolicy` for each `LlamaStackDistribution`. By default, traffic is limited to:
+- Pods with label `app.kubernetes.io/part-of: llama-stack` in the same namespace
+- The operator namespace (`llama-stack-k8s-operator-system`)
 
-This behavior is guarded by a feature flag and is disabled by default to avoid interfering with existing cluster-level policies. To enable it:
+### Enable the Feature Flag
 
-1. Identify the namespace where the operator is running. If you used the provided manifests, it is `llama-stack-k8s-operator-system`.
-2. Create or update the `llama-stack-operator-config` ConfigMap in that namespace so the `featureFlags` entry enables the network policy flag.
+Network policies are disabled by default. Enable via ConfigMap:
 
 ```bash
-cat <<'EOF' > feature-flags.yaml
+kubectl apply -f - <<EOF
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -127,12 +126,38 @@ data:
     enableNetworkPolicy:
       enabled: true
 EOF
-
-kubectl apply -f feature-flags.yaml
 ```
 
-Within the next reconciliation loop the operator will begin creating a `<name>-network-policy` resource for each distribution.
-Set `enabled: false` (or remove the block) to turn the feature back off; the operator will delete the previously managed policies.
+### Configure Per-Instance Access
+
+Use `spec.network` to customize access controls:
+
+```yaml
+apiVersion: llamastack.io/v1alpha1
+kind: LlamaStackDistribution
+metadata:
+  name: my-llsd
+spec:
+  server:
+    distribution:
+      name: starter
+  network:
+    exposeRoute: false          # Set true to create an Ingress for external access
+    allowedFrom:
+      namespaces:               # Explicit namespace names
+        - my-app-namespace
+        - monitoring
+      labels:                   # Namespaces matching these label keys
+        - team=frontend
+```
+
+| Field | Description |
+|-------|-------------|
+| `network.exposeRoute` | When `true`, creates an Ingress for external access (default: `false`) |
+| `network.allowedFrom.namespaces` | List of namespace names allowed to access the service. Use `"*"` to allow all namespaces |
+| `network.allowedFrom.labels` | List of namespace label keys. Namespaces with these labels are allowed |
+
+Set `enabled: false` in the ConfigMap to disable; the operator will delete the managed policies.
 
 ## Image Mapping Overrides
 

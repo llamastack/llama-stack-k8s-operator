@@ -239,7 +239,7 @@ func (r *LlamaStackDistributionReconciler) determineKindsToExclude(instance *lla
 		kinds = append(kinds, "PersistentVolumeClaim")
 	}
 
-	// Exclude NetworkPolicy if the feature is disabled
+	// Exclude NetworkPolicy if the feature is disabled globally
 	if !r.EnableNetworkPolicy {
 		kinds = append(kinds, "NetworkPolicy")
 	}
@@ -333,13 +333,11 @@ func (r *LlamaStackDistributionReconciler) deleteNetworkPolicyIfExists(ctx conte
 	err := r.Get(ctx, key, networkPolicy)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
-			// NetworkPolicy doesn't exist, nothing to delete
 			return nil
 		}
 		return fmt.Errorf("failed to get NetworkPolicy: %w", err)
 	}
 
-	// Check if this NetworkPolicy is owned by our instance
 	if !metav1.IsControlledBy(networkPolicy, instance) {
 		logger.V(1).Info("NetworkPolicy not owned by this instance, skipping deletion",
 			"networkPolicy", networkPolicyName)
@@ -466,9 +464,15 @@ func (r *LlamaStackDistributionReconciler) reconcileResources(ctx context.Contex
 		return err
 	}
 
-	// Reconcile all manifest-based resources including Deployment: PVC, ServiceAccount, Service, NetworkPolicy, Deployment
+	// Reconcile all manifest-based resources including Deployment, PVC, ServiceAccount, Service, NetworkPolicy.
+	// NetworkPolicy ingress rules are configured via the kustomize transformer plugin.
 	if err := r.reconcileAllManifestResources(ctx, instance); err != nil {
 		return err
+	}
+
+	// Reconcile Ingress for external access (not part of kustomize manifests)
+	if err := r.reconcileIngress(ctx, instance); err != nil {
+		return fmt.Errorf("failed to reconcile Ingress: %w", err)
 	}
 
 	return nil
@@ -565,6 +569,7 @@ func (r *LlamaStackDistributionReconciler) SetupWithManager(ctx context.Context,
 		Owns(&autoscalingv2.HorizontalPodAutoscaler{}).
 		Owns(&corev1.Service{}).
 		Owns(&networkingv1.NetworkPolicy{}).
+		Owns(&networkingv1.Ingress{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
 		Watches(
 			&corev1.ConfigMap{},
@@ -1229,6 +1234,9 @@ func (r *LlamaStackDistributionReconciler) updateServiceStatus(ctx context.Conte
 	// Set the service URL in the status
 	serviceURL := r.getServerURL(instance, "")
 	instance.Status.ServiceURL = serviceURL.String()
+
+	// Set the route URL if external access is enabled
+	instance.Status.RouteURL = r.getIngressURL(ctx, instance)
 
 	SetServiceReadyCondition(&instance.Status, true, MessageServiceReady)
 }

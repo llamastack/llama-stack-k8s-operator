@@ -11,6 +11,18 @@ Package v1alpha1 contains API Schema definitions for the  v1alpha1 API group
 - [LlamaStackDistribution](#llamastackdistribution)
 - [LlamaStackDistributionList](#llamastackdistributionlist)
 
+#### AllowedFromSpec
+
+AllowedFromSpec defines namespace-based access controls for NetworkPolicies.
+
+_Appears in:_
+- [NetworkSpec](#networkspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `namespaces` _string array_ | Namespaces is an explicit list of namespace names allowed to access the service.<br />Use "*" to allow all namespaces. |  |  |
+| `labels` _string array_ | Labels is a list of namespace label keys that are allowed to access the service.<br />A namespace matching any of these labels will be granted access (OR semantics).<br />Example: ["myproject/lls-allowed", "team/authorized"] |  |  |
+
 #### AutoscalingSpec
 
 AutoscalingSpec configures HorizontalPodAutoscaler targets.
@@ -138,6 +150,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `replicas` _integer_ |  | 1 |  |
 | `server` _[ServerSpec](#serverspec)_ |  |  |  |
+| `network` _[NetworkSpec](#networkspec)_ | Network defines network access controls for the LlamaStack service |  |  |
 
 #### LlamaStackDistributionStatus
 
@@ -154,6 +167,19 @@ _Appears in:_
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta) array_ | Conditions represent the latest available observations of the distribution's current state |  |  |
 | `availableReplicas` _integer_ | AvailableReplicas is the number of available replicas |  |  |
 | `serviceURL` _string_ | ServiceURL is the internal Kubernetes service URL where the distribution is exposed |  |  |
+| `routeURL` _string_ | RouteURL is the external URL where the distribution is exposed (when exposeRoute is true) |  |  |
+
+#### NetworkSpec
+
+NetworkSpec defines network access controls for the LlamaStack service.
+
+_Appears in:_
+- [LlamaStackDistributionSpec](#llamastackdistributionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `exposeRoute` _boolean_ | ExposeRoute when true, creates an Ingress (or OpenShift Route) for external access.<br />Default is false (internal access only). | false |  |
+| `allowedFrom` _[AllowedFromSpec](#allowedfromspec)_ | AllowedFrom defines which namespaces are allowed to access the LlamaStack service.<br />By default, only the LLSD namespace and the operator namespace are allowed. |  |  |
 
 #### PodDisruptionBudgetSpec
 
