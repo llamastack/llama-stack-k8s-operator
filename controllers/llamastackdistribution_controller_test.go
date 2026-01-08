@@ -160,7 +160,7 @@ func TestConfigMapWatchingFunctionality(t *testing.T) {
 			Namespace: namespace.Name,
 		},
 		Data: map[string]string{
-			"run.yaml": `version: '2'
+			"config.yaml": `version: '2'
 image_name: ollama
 apis:
 - inference
@@ -206,7 +206,7 @@ server:
 	require.NoError(t, k8sClient.Get(t.Context(),
 		types.NamespacedName{Name: configMap.Name, Namespace: configMap.Namespace}, configMap))
 
-	configMap.Data["run.yaml"] = `version: '2'
+	configMap.Data["config.yaml"] = `version: '2'
 image_name: ollama
 apis:
 - inference

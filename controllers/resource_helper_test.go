@@ -72,7 +72,7 @@ func TestBuildContainerSpec(t *testing.T) {
 					{Name: "HF_HOME", Value: "/.llama"},
 					{Name: "LLS_WORKERS", Value: "1"},
 					{Name: "LLS_PORT", Value: "8321"},
-					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/run.yaml"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
 				},
 			},
 		},
@@ -120,7 +120,7 @@ func TestBuildContainerSpec(t *testing.T) {
 					{Name: "HF_HOME", Value: "/custom/path"},
 					{Name: "LLS_WORKERS", Value: "1"},
 					{Name: "LLS_PORT", Value: "9000"},
-					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/run.yaml"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
 					{Name: "TEST_ENV", Value: "test-value"},
 				},
 				VolumeMounts: []corev1.VolumeMount{{
@@ -164,7 +164,7 @@ func TestBuildContainerSpec(t *testing.T) {
 					{Name: "HF_HOME", Value: "/.llama"},
 					{Name: "LLS_WORKERS", Value: "1"},
 					{Name: "LLS_PORT", Value: "8321"},
-					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/run.yaml"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
 				},
 			},
 		},
@@ -197,7 +197,7 @@ func TestBuildContainerSpec(t *testing.T) {
 					{Name: "HF_HOME", Value: "/.llama"},
 					{Name: "LLS_WORKERS", Value: "4"},
 					{Name: "LLS_PORT", Value: "8321"},
-					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/run.yaml"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
 				},
 				VolumeMounts: []corev1.VolumeMount{{
 					Name:      "lls-storage",
@@ -239,7 +239,7 @@ func TestBuildContainerSpec(t *testing.T) {
 					{Name: "HF_HOME", Value: llamav1alpha1.DefaultMountPath},
 					{Name: "LLS_WORKERS", Value: "1"},
 					{Name: "LLS_PORT", Value: "8321"},
-					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/run.yaml"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
 				},
 				VolumeMounts: []corev1.VolumeMount{
 					{
