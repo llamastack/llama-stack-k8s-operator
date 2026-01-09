@@ -167,7 +167,7 @@ _Appears in:_
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta) array_ | Conditions represent the latest available observations of the distribution's current state |  |  |
 | `availableReplicas` _integer_ | AvailableReplicas is the number of available replicas |  |  |
 | `serviceURL` _string_ | ServiceURL is the internal Kubernetes service URL where the distribution is exposed |  |  |
-| `routeURL` _string_ | RouteURL is the external URL where the distribution is exposed (when exposeRoute is true) |  |  |
+| `routeURL` _string_ | RouteURL is the external URL where the distribution is exposed (when exposeRoute is true).<br />nil when external access is not configured, empty string when Ingress exists but URL not ready. |  |  |
 
 #### NetworkSpec
 
