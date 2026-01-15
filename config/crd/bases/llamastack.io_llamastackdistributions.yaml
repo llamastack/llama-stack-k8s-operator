@@ -2739,8 +2739,9 @@ spec:
                 - Terminating
                 type: string
               routeURL:
-                description: RouteURL is the external URL where the distribution is
-                  exposed (when exposeRoute is true)
+                description: |-
+                  RouteURL is the external URL where the distribution is exposed (when exposeRoute is true).
+                  nil when external access is not configured, empty string when Ingress exists but URL not ready.
                 type: string
               serviceURL:
                 description: ServiceURL is the internal Kubernetes service URL where

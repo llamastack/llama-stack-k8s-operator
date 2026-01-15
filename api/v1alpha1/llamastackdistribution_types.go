@@ -285,8 +285,10 @@ type LlamaStackDistributionStatus struct {
 	AvailableReplicas int32 `json:"availableReplicas,omitempty"`
 	// ServiceURL is the internal Kubernetes service URL where the distribution is exposed
 	ServiceURL string `json:"serviceURL,omitempty"`
-	// RouteURL is the external URL where the distribution is exposed (when exposeRoute is true)
-	RouteURL string `json:"routeURL,omitempty"`
+	// RouteURL is the external URL where the distribution is exposed (when exposeRoute is true).
+	// nil when external access is not configured, empty string when Ingress exists but URL not ready.
+	// +optional
+	RouteURL *string `json:"routeURL,omitempty"`
 }
 
 //+kubebuilder:object:root=true

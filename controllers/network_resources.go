@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/go-logr/logr"
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
@@ -95,8 +96,8 @@ func (r *LlamaStackDistributionReconciler) reconcileIngress(
 	ingressName := instance.Name + IngressNameSuffix
 
 	existing := &networkingv1.Ingress{}
-	getErr := r.Get(ctx, types.NamespacedName{Name: ingressName, Namespace: instance.Namespace}, existing)
-	existsAlready := getErr == nil
+	err := r.Get(ctx, types.NamespacedName{Name: ingressName, Namespace: instance.Namespace}, existing)
+	existsAlready := err == nil
 
 	exposeRoute := instance.Spec.Network != nil && instance.Spec.Network.ExposeRoute
 
@@ -104,7 +105,7 @@ func (r *LlamaStackDistributionReconciler) reconcileIngress(
 		return r.handleDisabledIngress(ctx, instance, existing, existsAlready, ingressName)
 	}
 
-	return r.handleEnabledIngress(ctx, instance, existing, getErr, existsAlready, ingressName, logger)
+	return r.handleEnabledIngress(ctx, instance, existing, err, existsAlready, ingressName, logger)
 }
 
 // handleDisabledIngress handles Ingress deletion when exposeRoute is false.
@@ -127,8 +128,8 @@ func (r *LlamaStackDistributionReconciler) handleDisabledIngress(
 	}
 
 	logger.Info("Deleting Ingress as exposeRoute is disabled", "name", ingressName)
-	if delErr := r.Delete(ctx, existing); delErr != nil && !k8serrors.IsNotFound(delErr) {
-		return fmt.Errorf("failed to delete Ingress: %w", delErr)
+	if err := r.Delete(ctx, existing); err != nil && !k8serrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete Ingress: %w", err)
 	}
 
 	return nil
@@ -166,8 +167,8 @@ func (r *LlamaStackDistributionReconciler) handleEnabledIngress(
 	}
 
 	ingress.ResourceVersion = existing.ResourceVersion
-	if updateErr := r.Update(ctx, ingress); updateErr != nil {
-		return fmt.Errorf("failed to update Ingress: %w", updateErr)
+	if err := r.Update(ctx, ingress); err != nil {
+		return fmt.Errorf("failed to update Ingress: %w", err)
 	}
 	logger.V(1).Info("Updated Ingress", "name", ingressName)
 
@@ -178,9 +179,9 @@ func (r *LlamaStackDistributionReconciler) handleEnabledIngress(
 func (r *LlamaStackDistributionReconciler) getIngressURL(
 	ctx context.Context,
 	instance *llamav1alpha1.LlamaStackDistribution,
-) string {
+) *string {
 	if instance.Spec.Network == nil || !instance.Spec.Network.ExposeRoute {
-		return ""
+		return nil
 	}
 
 	ingress := &networkingv1.Ingress{}
@@ -189,26 +190,38 @@ func (r *LlamaStackDistributionReconciler) getIngressURL(
 		Namespace: instance.Namespace,
 	}, ingress)
 	if err != nil {
-		return ""
+		empty := ""
+		return &empty // Ingress not ready yet
 	}
 
 	// Check for LoadBalancer ingress
 	if len(ingress.Status.LoadBalancer.Ingress) > 0 {
 		lb := ingress.Status.LoadBalancer.Ingress[0]
 		if lb.Hostname != "" {
-			return fmt.Sprintf("http://%s", lb.Hostname)
+			return buildURLString(lb.Hostname)
 		}
 		if lb.IP != "" {
-			return fmt.Sprintf("http://%s", lb.IP)
+			return buildURLString(lb.IP)
 		}
 	}
 
 	// Check for host in rules
 	if len(ingress.Spec.Rules) > 0 && ingress.Spec.Rules[0].Host != "" {
-		return fmt.Sprintf("http://%s", ingress.Spec.Rules[0].Host)
+		return buildURLString(ingress.Spec.Rules[0].Host)
 	}
 
-	return ""
+	empty := ""
+	return &empty
+}
+
+// buildURLString constructs an HTTP URL from a host and returns a pointer to it.
+func buildURLString(host string) *string {
+	u := &url.URL{
+		Scheme: "http",
+		Host:   host,
+	}
+	s := u.String()
+	return &s
 }
 
 // BuildIngressForTest is a test helper that exposes buildIngress for unit testing.
