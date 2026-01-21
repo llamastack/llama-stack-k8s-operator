@@ -82,7 +82,7 @@ type LlamaStackDistributionSpec struct {
 
 // NetworkSpec defines network access controls for the LlamaStack service.
 type NetworkSpec struct {
-	// ExposeRoute when true, creates an Ingress (or OpenShift Route) for external access.
+	// ExposeRoute when true, creates an Ingress for external access.
 	// Default is false (internal access only).
 	// +optional
 	// +kubebuilder:default:=false

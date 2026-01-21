@@ -178,7 +178,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `exposeRoute` _boolean_ | ExposeRoute when true, creates an Ingress (or OpenShift Route) for external access.<br />Default is false (internal access only). | false |  |
+| `exposeRoute` _boolean_ | ExposeRoute when true, creates an Ingress for external access.<br />Default is false (internal access only). | false |  |
 | `allowedFrom` _[AllowedFromSpec](#allowedfromspec)_ | AllowedFrom defines which namespaces are allowed to access the LlamaStack service.<br />By default, only the LLSD namespace and the operator namespace are allowed. |  |  |
 
 #### PodDisruptionBudgetSpec
