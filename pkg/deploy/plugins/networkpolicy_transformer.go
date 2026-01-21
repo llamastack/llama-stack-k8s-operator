@@ -30,6 +30,9 @@ const (
 	networkPolicyKind = "NetworkPolicy"
 	// AllNamespacesSelector is the special value to allow all namespaces.
 	AllNamespacesSelector = "*"
+	// Allow traffic from OpenShift router namespaces.
+	openShiftIngressPolicyGroupLabelKey   = "network.openshift.io/policy-group"
+	openShiftIngressPolicyGroupLabelValue = "ingress"
 )
 
 // NetworkPolicyTransformerConfig holds the configuration for the NetworkPolicy transformer.
@@ -145,6 +148,7 @@ func (t *networkPolicyTransformer) buildPeers() []any {
 	peers := t.buildDefaultPeers()
 	peers = append(peers, t.buildNamespacePeers()...)
 	peers = append(peers, t.buildLabelPeers()...)
+	peers = append(peers, t.buildRouterPeers()...)
 
 	return peers
 }
@@ -176,9 +180,8 @@ func (t *networkPolicyTransformer) buildDefaultPeers() []any {
 			},
 			"namespaceSelector": map[string]any{}, // Same namespace
 		},
-		// Allow from operator namespace
+		// Allow from operator namespace (no podSelector to allow all pods in the namespace)
 		map[string]any{
-			"podSelector": map[string]any{}, // All pods in operator namespace
 			"namespaceSelector": map[string]any{
 				"matchLabels": map[string]any{
 					"kubernetes.io/metadata.name": t.config.OperatorNamespace,
@@ -200,8 +203,8 @@ func (t *networkPolicyTransformer) buildNamespacePeers() []any {
 		if ns == AllNamespacesSelector {
 			continue // Already handled separately
 		}
+		// No podSelector - allow all pods in the namespace
 		peers = append(peers, map[string]any{
-			"podSelector": map[string]any{}, // All pods in the namespace
 			"namespaceSelector": map[string]any{
 				"matchLabels": map[string]any{
 					"kubernetes.io/metadata.name": ns,
@@ -222,8 +225,8 @@ func (t *networkPolicyTransformer) buildLabelPeers() []any {
 	labels := t.config.NetworkSpec.AllowedFrom.Labels
 	peers := make([]any, 0, len(labels))
 	for _, labelKey := range labels {
+		// No podSelector - allow all pods in matching namespaces
 		peers = append(peers, map[string]any{
-			"podSelector": map[string]any{}, // All pods in matching namespaces
 			"namespaceSelector": map[string]any{
 				"matchExpressions": []any{
 					map[string]any{
@@ -236,6 +239,24 @@ func (t *networkPolicyTransformer) buildLabelPeers() []any {
 	}
 
 	return peers
+}
+
+// buildRouterPeers builds NetworkPolicy peers for ingress controller traffic.
+func (t *networkPolicyTransformer) buildRouterPeers() []any {
+	if t.config.NetworkSpec == nil {
+		return nil
+	}
+
+	// Allow traffic from OpenShift router namespaces using label selection.
+	return []any{
+		map[string]any{
+			"namespaceSelector": map[string]any{
+				"matchLabels": map[string]any{
+					openShiftIngressPolicyGroupLabelKey: openShiftIngressPolicyGroupLabelValue,
+				},
+			},
+		},
+	}
 }
 
 // Config implements the resmap.TransformerPlugin interface.
