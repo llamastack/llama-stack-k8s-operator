@@ -44,14 +44,14 @@ As a Kubernetes operator, I need to validate that installed provider packages ar
 #### Command Interface
 
 - **FR-001**: Preflight validation MUST be invokable via command-line interface: `llama-stack preflight`
-- **FR-002**: The command MUST accept a run.yaml configuration file path as input
+- **FR-002**: The command MUST accept a config.yaml configuration file path as input
 - **FR-003**: The command MUST exit with code 0 on success, non-zero on failure
-- **FR-004**: The command MUST validate ALL providers defined in run.yaml
+- **FR-004**: The command MUST validate ALL providers defined in config.yaml
 - **FR-005**: The command MUST complete validation within 30 seconds for typical configurations (1-10 providers)
 
 #### Import Validation
 
-- **FR-006**: For each provider in run.yaml, preflight MUST attempt to import the provider module
+- **FR-006**: For each provider in config.yaml, preflight MUST attempt to import the provider module
 - **FR-007**: Import failures MUST be reported with: provider ID, module name, import error message
 - **FR-008**: Main provider module import MUST succeed; optional dependency import failures within the module are allowed (try/except blocks)
 
@@ -100,7 +100,7 @@ As a Kubernetes operator, I need to validate that installed provider packages ar
 
 ### Validation Process
 
-For each provider in run.yaml:
+For each provider in config.yaml:
 
 1. **Architecture Validation Phase**:
    - Check provider packages for native extensions (.so, .pyd files)
@@ -134,7 +134,7 @@ For each provider in run.yaml:
 
 - **0**: All providers validated successfully
 - **1**: Validation failed (import error, spec error, validation error)
-- **2**: Invalid command-line arguments (e.g., missing run.yaml path)
+- **2**: Invalid command-line arguments (e.g., missing config.yaml path)
 
 ### Error Message Format
 
@@ -215,8 +215,8 @@ Note: Update lls-provider-spec.yaml to match runtime implementation for mismatch
 
 ### Measurable Outcomes
 
-- **SC-001**: Preflight command exists and is executable: `llama-stack preflight --run-yaml=<path>`
-- **SC-002**: Preflight validates all providers in run.yaml and exits with code 0 on success
+- **SC-001**: Preflight command exists and is executable: `llama-stack preflight --config=<path>`
+- **SC-002**: Preflight validates all providers in config.yaml and exits with code 0 on success
 - **SC-003**: Architecture mismatches are detected before import and fail with clear error identifying package and architectures
 - **SC-004**: Import failures result in exit code 1 with clear error message and traceback
 - **SC-005**: Invalid ProviderSpec results in exit code 1 with field-specific error message
@@ -261,7 +261,7 @@ None - this is a straightforward validation tool.
 
 Feature is complete when:
 
-- [ ] `llama-stack preflight --run-yaml=<path>` command exists
+- [ ] `llama-stack preflight --config=<path>` command exists
 - [ ] All functional requirements implemented and tested
 - [ ] Architecture validation detects native code mismatches before import
 - [ ] Import validation catches module not found errors
