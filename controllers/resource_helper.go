@@ -20,11 +20,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -435,6 +437,9 @@ func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconcile
 	// Configure user config
 	configureUserConfig(instance, &podSpec)
 
+	// Configure external providers (init containers, volumes, PYTHONPATH)
+	configureExternalProviders(r, instance, &podSpec)
+
 	// Apply pod overrides including ServiceAccount, volumes, and volume mounts
 	configurePodOverrides(instance, &podSpec)
 
@@ -755,4 +760,96 @@ func copyIntOrString(value *intstr.IntOrString) *intstr.IntOrString {
 	}
 	copied := *value
 	return &copied
+}
+
+// configureExternalProviders sets up init containers, volumes, and environment for external providers.
+// This function configures the pod to run init containers that copy provider packages,
+// run config generation to merge provider entries, mount shared volumes, and update PYTHONPATH.
+func configureExternalProviders(r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+	if !deploy.HasExternalProviders(instance) {
+		return
+	}
+
+	// Get operator image for config generation init container
+	operatorImage := getOperatorImage()
+
+	// Get distribution image for config extraction
+	distributionImage, _ := r.resolveImage(instance.Spec.Server.Distribution)
+
+	// Generate init containers for external providers
+	initContainers := deploy.GenerateInitContainers(instance, operatorImage)
+
+	// Add config extraction init container if no user ConfigMap is provided
+	// This extracts config.yaml from the distribution image into base-config volume
+	if instance.Spec.Server.UserConfig == nil || instance.Spec.Server.UserConfig.ConfigMapName == "" {
+		extractContainer := deploy.GenerateExtractConfigInitContainer(distributionImage)
+		// Insert at the beginning, before provider install containers
+		initContainers = append([]corev1.Container{extractContainer}, initContainers...)
+	}
+
+	podSpec.InitContainers = append(podSpec.InitContainers, initContainers...)
+
+	// Add external providers shared volume
+	var sizeLimit *resource.Quantity
+	if instance.Spec.Server.ExternalProviders.VolumeSizeLimit != nil {
+		sizeLimit = instance.Spec.Server.ExternalProviders.VolumeSizeLimit
+	}
+	deploy.AddExternalProvidersVolume(podSpec, sizeLimit)
+
+	// Add base config volume (either from ConfigMap or emptyDir for extraction)
+	var configMapName string
+	if instance.Spec.Server.UserConfig != nil {
+		configMapName = instance.Spec.Server.UserConfig.ConfigMapName
+	}
+	deploy.AddBaseConfigVolume(podSpec, configMapName)
+
+	// Add final config volume (where merged config.yaml will be written)
+	deploy.AddFinalConfigVolume(podSpec)
+
+	// Configure main container
+	if len(podSpec.Containers) > 0 {
+		mainContainer := &podSpec.Containers[0]
+
+		// Mount external providers volume (read-only in main container)
+		deploy.MountExternalProvidersVolume(mainContainer, true)
+
+		// Mount final config volume
+		deploy.MountFinalConfigVolume(mainContainer)
+
+		// Update PYTHONPATH to include external provider packages
+		deploy.UpdatePythonPath(mainContainer)
+
+		// Override config path to use generated config
+		updateConfigPath(mainContainer)
+	}
+}
+
+// getOperatorImage returns the operator container image for use in init containers.
+// It first checks the OPERATOR_IMAGE environment variable, falling back to a default.
+func getOperatorImage() string {
+	if image := os.Getenv("OPERATOR_IMAGE"); image != "" {
+		return image
+	}
+	// Fallback to a reasonable default; this should be set by the operator deployment
+	return "ghcr.io/llama-stack/llama-stack-k8s-operator:latest"
+}
+
+// updateConfigPath updates the LLAMA_STACK_CONFIG environment variable to point to
+// the generated config when external providers are configured.
+func updateConfigPath(container *corev1.Container) {
+	generatedConfigPath := deploy.FinalConfigMountPath + "/config.yaml"
+
+	// Find and update existing LLAMA_STACK_CONFIG or add new
+	for i := range container.Env {
+		if container.Env[i].Name == "LLAMA_STACK_CONFIG" {
+			container.Env[i].Value = generatedConfigPath
+			return
+		}
+	}
+
+	// Add if not found
+	container.Env = append(container.Env, corev1.EnvVar{
+		Name:  "LLAMA_STACK_CONFIG",
+		Value: generatedConfigPath,
+	})
 }
