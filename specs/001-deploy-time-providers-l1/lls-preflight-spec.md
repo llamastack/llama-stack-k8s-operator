@@ -255,7 +255,7 @@ The following are explicitly NOT included:
 
 ## Open Questions
 
-None - this is a straightforward validation tool.
+- [ ] **Implementation timeline**: This spec is a dependency for the main deploy-time providers spec. Timeline depends on llama-stack project acceptance and prioritization. See main spec's "Risk Mitigation Strategy" for fallback options.
 
 ## Acceptance
 

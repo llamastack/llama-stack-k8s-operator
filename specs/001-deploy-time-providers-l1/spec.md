@@ -9,6 +9,16 @@
 
 Enable llama-stack Kubernetes operator users to integrate custom and third-party provider implementations at deployment time without rebuilding distribution container images. This empowers platform engineers and ISV partners to extend llama-stack functionality through a standardized provider packaging and injection mechanism.
 
+## Terminology
+
+**"Phase" Usage in this Specification**:
+
+- **Runtime Phases**: Sequential steps in Pod startup lifecycle (Phase 1-5: Provider Install → Config Extract → Config Generate → Preflight → Server Start)
+- **Implementation Phases** (plan.md): Development sequence for building components (Phase 0-6: CRD → Metadata → Init → Config Gen → Controller → Status → Testing)
+- **Task Phases** (tasks.md): User story grouping for parallel execution (Phase 1-7: Setup → Foundation → US1 → US2 → US3 → Edge Cases → Polish)
+
+These represent different perspectives on the same feature and don't conflict.
+
 ## User Scenarios & Testing
 
 ### User Story 1 - Deploy Custom Provider (Priority: P1)
@@ -113,7 +123,7 @@ As a developer debugging a failed deployment, I need clear error messages when p
 - **FR-017**: The operator MUST generate config.yaml by adding external provider entries (with `module:` field) to the base config's providers section
 - **FR-018**: When the same providerId appears in multiple sources, external providers MUST take precedence
 - **FR-019**: When external provider overrides existing providerId, a WARNING MUST be logged with details
-- **FR-020**: When two external providers declare the same providerId, deployment MUST fail with error listing both images
+- **FR-020**: When two external providers declare the same providerId, config generation init container MUST fail with error listing both images and the duplicate ID
 - **FR-021**: Provider `providerType` and `module` fields MUST come from provider image metadata, not CRD
 - **FR-022**: Provider `config` field MUST come from CRD (user-provided configuration)
 
@@ -141,6 +151,7 @@ As a developer debugging a failed deployment, I need clear error messages when p
 - **NFR-003**: Error messages MUST be actionable (user can resolve without operator knowledge)
 - **NFR-004**: External provider packages MUST take precedence over base packages (PYTHONPATH ordering)
 - **NFR-005**: Metadata validation warnings MUST be non-blocking (deployment continues)
+- **NFR-006**: The shared volume size limit for external providers SHOULD be configurable via LLSD spec (default: 2Gi)
 
 ### Key Entities
 
@@ -241,6 +252,12 @@ type ServerSpec struct {
 }
 
 type ExternalProvidersSpec struct {
+    // +optional
+    // +kubebuilder:default:="2Gi"
+    // VolumeSizeLimit is the size limit for the shared emptyDir volume used by external providers.
+    // Typical provider with dependencies uses 100-500 MB; default supports 4-20 providers.
+    VolumeSizeLimit *resource.Quantity `json:"volumeSizeLimit,omitempty"`
+
     Inference    []ExternalProviderRef `json:"inference,omitempty"`
     Safety       []ExternalProviderRef `json:"safety,omitempty"`
     Agents       []ExternalProviderRef `json:"agents,omitempty"`
@@ -253,7 +270,10 @@ type ExternalProvidersSpec struct {
 }
 
 type ExternalProviderRef struct {
+    // +kubebuilder:validation:Required
+    // +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
     ProviderID      string                   `json:"providerId"`
+    // +kubebuilder:validation:Required
     Image           string                   `json:"image"`
     // +kubebuilder:default:=IfNotPresent
     // +kubebuilder:validation:Enum=Always;Never;IfNotPresent
@@ -414,13 +434,6 @@ but is placed under externalProviders.{placementAPI}
 
 Resolution: Move the provider to externalProviders.{declaredAPI} section in the LLSD spec.
 ```
-
-**Terminology Note - "Phase" Usage**: This specification uses "phase" in three contexts:
-- **Runtime Phases** (this section): Sequential steps in Pod startup lifecycle (Phase 1-5: Provider Install → Config Extract → Config Generate → Preflight → Server Start)
-- **Implementation Phases** (plan.md): Development sequence for building components (Phase 0-6: CRD → Metadata → Init → Config Gen → Controller → Status → Testing)
-- **Task Phases** (tasks.md): User story grouping for parallel execution (Phase 1-7: Setup → Foundation → US1 → US2 → US3 → Edge Cases → Polish)
-
-These represent different perspectives on the same feature and don't conflict.
 
 ### Container Startup Sequence
 
@@ -635,11 +648,11 @@ External provider functionality requires a shared volume for passing provider pa
 volumes:
 - name: external-providers
   emptyDir:
-    sizeLimit: 2Gi  # Sufficient for typical provider packages
+    sizeLimit: 2Gi  # Default, configurable via externalProviders.volumeSizeLimit
 ```
 
 **Size Considerations**:
-- Default limit: 2Gi (configurable via operator)
+- Default limit: 2Gi (configurable via `spec.server.externalProviders.volumeSizeLimit` per NFR-006)
 - Typical provider with dependencies: 100-500 MB
 - Supports 4-20 providers comfortably
 - If limit exceeded, pod evicted with clear error
@@ -877,7 +890,7 @@ This native support means no additional LlamaStack changes are needed for extern
 - **SC-001**: Users can deploy LLSD with external providers without building custom images
 - **SC-002**: Provider installation failures result in clear, actionable error messages in LLSD status
 - **SC-003**: External providers appear in `/v1/providers` API endpoint with correct metadata
-- **SC-004**: External providers are callable and functional through llama-stack API
+- **SC-004**: External providers are callable via llama-stack API and return valid responses to provider info endpoints
 - **SC-005**: Architecture mismatches are detected before server starts with clear error messages
 - **SC-006**: Dependency conflicts are detected and reported before server starts
 - **SC-007**: ALL overlapping metadata fields are compared; mismatches generate warnings but don't block deployment
