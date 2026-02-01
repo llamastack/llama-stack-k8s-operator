@@ -131,7 +131,7 @@ As a developer debugging a failed deployment, I need clear error messages when p
 
 - **FR-023**: The operator MUST validate that provider image's declared API type matches the CRD section it's placed in
 - **FR-024**: Dependency conflicts during pip install MUST cause init container failure with pip's error output captured in container logs and LLSD status
-- **FR-024a**: Each init container MUST record which packages it installed (package name and version) to a shared manifest file for troubleshooting
+- **FR-024.1**: Each init container MUST record which packages it installed (package name and version) to a shared manifest file for troubleshooting
 - **FR-025**: Metadata file missing or invalid MUST cause init container failure
 - **FR-026**: ALL overlapping fields between lls-provider-spec.yaml and get_provider_spec() MUST be compared; mismatches MUST log warnings but continue deployment (see "Metadata Field Comparison" for complete list)
 - **FR-027**: Provider validation MUST occur before llama-stack server starts using `llama-stack preflight` command (see lls-preflight-spec.md for architecture, import, and spec validation)
@@ -282,13 +282,22 @@ type ExternalProviderRef struct {
 }
 
 type ExternalProviderStatus struct {
-    ProviderID         string      `json:"providerId"`
-    Image              string      `json:"image"`
-    Phase              string      `json:"phase"` // Pending, Installing, Ready, Failed
-    Message            string      `json:"message,omitempty"`
-    InitContainerName  string      `json:"initContainerName,omitempty"`
-    LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
+    ProviderID         string             `json:"providerId"`
+    Image              string             `json:"image"`
+    Phase              string             `json:"phase"` // Pending, Installing, Ready, Failed
+    Message            string             `json:"message,omitempty"`
+    InitContainerName  string             `json:"initContainerName,omitempty"`
+    LastTransitionTime metav1.Time        `json:"lastTransitionTime,omitempty"`
+    Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
+
+// Condition types for ExternalProviderStatus
+const (
+    // ExternalProviderInstalled indicates whether provider packages were installed successfully
+    ConditionTypeExternalProviderInstalled = "Installed"
+    // ExternalProviderValidated indicates whether provider passed preflight validation
+    ConditionTypeExternalProviderValidated = "Validated"
+)
 ```
 
 ## Behavioral Contracts
@@ -383,6 +392,10 @@ External provider 'ollama' overrides base provider in API 'inference'
 - Base provider section empty → External providers become the only providers
 
 ### Validation Rules
+
+**CRD Validation**:
+- Empty API sections (e.g., `inference: []`) MUST be treated as no providers for that API, equivalent to omitting the section entirely
+- If `externalProviders` is specified but all API sections are empty or omitted, no provider init containers are created
 
 **Init Container Phase**:
 - Metadata file MUST exist → Fail if missing
@@ -483,7 +496,7 @@ flowchart TD
 
     P1A3 -->|Failure| Fail2[Pod Fails:<br/>Provider installation error]
     P1B3 -->|Failure| Fail2
-    P3E -->|Failure| Fail3[Pod Fails:<br/>Config generation error]
+    P3D -->|Failure| Fail3[Pod Fails:<br/>Config generation error]
     P5A -->|Failure| Fail4[Pod Fails:<br/>Server startup error]
 
     style Start fill:#e1f5e1
@@ -507,6 +520,11 @@ flowchart TD
 - 🟣 Purple: Config generation init container
 - 🟢 Green: Main container execution
 - 🔴 Red: Failure states
+
+**Init Container Naming Convention**:
+- Provider init containers: `install-provider-{providerId}` (e.g., `install-provider-custom-vllm`)
+- Config extraction init container: `extract-distribution-config`
+- Config generation init container: `generate-config`
 
 **Phase 1: Provider Installation (Init Containers)**
 
