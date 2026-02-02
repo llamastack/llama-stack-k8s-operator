@@ -1,0 +1,110 @@
+# Example: Per-Provider Custom Configuration (User Story 3)
+#
+# This example demonstrates the config pass-through field:
+# - Custom provider-specific settings via config field
+# - Simplified fields (endpoint, apiKey) take precedence over config fields
+# - Raw YAML is passed through to config.yaml as-is
+#
+# Use cases:
+# - Provider-specific parameters (timeouts, retries, model options)
+# - Advanced configuration not covered by simplified fields
+# - Integration with custom provider extensions
+#
+apiVersion: llama.stacklok.com/v1alpha1
+kind: LlamaStackDistribution
+metadata:
+  name: custom-config-example
+  namespace: llama-stack
+spec:
+  replicas: 1
+  server:
+    distribution:
+      name: starter
+    providers:
+      inference:
+        provider: vllm
+        endpoint: http://vllm:8000
+        # Custom config fields are passed through to config.yaml
+        config:
+          model: meta-llama/Llama-3.2-3B-Instruct
+          max_tokens: 4096
+          temperature: 0.7
+          tensor_parallel_size: 2
+          gpu_memory_utilization: 0.9
+          quantization: awq
+    resources:
+      models:
+        - name: meta-llama/Llama-3.2-3B-Instruct
+---
+# Example: Multiple providers with custom config each
+apiVersion: llama.stacklok.com/v1alpha1
+kind: LlamaStackDistribution
+metadata:
+  name: multi-custom-config
+  namespace: llama-stack
+spec:
+  replicas: 1
+  server:
+    distribution:
+      name: starter
+    providers:
+      inference:
+        - id: vllm-fast
+          provider: vllm
+          endpoint: http://vllm-fast:8000
+          config:
+            max_tokens: 1024
+            temperature: 0.3
+            # Fast inference with smaller context
+        - id: vllm-quality
+          provider: vllm
+          endpoint: http://vllm-quality:8000
+          config:
+            max_tokens: 8192
+            temperature: 0.7
+            top_p: 0.95
+            # Higher quality with larger context
+      # Vector IO with custom config
+      vectorIo:
+        provider: pgvector
+        host:
+          secretKeyRef:
+            name: postgres-credentials
+            key: host
+        config:
+          port: 5432
+          database: vectors
+          pool_size: 10
+    resources:
+      models:
+        - name: meta-llama/Llama-3.2-3B-Instruct
+          provider: vllm-fast
+        - name: meta-llama/Llama-3.2-70B-Instruct
+          provider: vllm-quality
+---
+# Example: Precedence demonstration
+# Simplified fields (endpoint) override config fields (url)
+apiVersion: llama.stacklok.com/v1alpha1
+kind: LlamaStackDistribution
+metadata:
+  name: precedence-example
+  namespace: llama-stack
+spec:
+  replicas: 1
+  server:
+    distribution:
+      name: starter
+    providers:
+      inference:
+        provider: vllm
+        # This endpoint takes precedence
+        endpoint: http://correct-vllm:8000
+        config:
+          # This url would be ignored because endpoint is set
+          url: http://this-is-ignored:9999
+          # But these custom fields are still applied
+          model: llama-3.2-3b
+          max_tokens: 2048
+    resources:
+      models:
+        - name: meta-llama/Llama-3.2-3B-Instruct

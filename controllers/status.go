@@ -181,3 +181,60 @@ func IsConditionFalse(status *llamav1alpha1.LlamaStackDistributionStatus, condit
 	condition := GetCondition(status, conditionType)
 	return condition != nil && condition.Status == metav1.ConditionFalse
 }
+
+// SetValidationSucceededCondition sets the validation succeeded condition.
+func SetValidationSucceededCondition(status *llamav1alpha1.LlamaStackDistributionStatus, succeeded bool, message string) {
+	condition := metav1.Condition{
+		Type:               ConditionTypeValidationSucceeded,
+		Status:             metav1.ConditionTrue,
+		Reason:             ReasonValidationSucceeded,
+		Message:            MessageValidationSucceeded,
+		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+	}
+
+	if !succeeded {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = ReasonValidationFailed
+		condition.Message = message
+	}
+
+	SetCondition(status, condition)
+}
+
+// SetSecretsResolvedCondition sets the secrets resolved condition.
+func SetSecretsResolvedCondition(status *llamav1alpha1.LlamaStackDistributionStatus, resolved bool, message string) {
+	condition := metav1.Condition{
+		Type:               ConditionTypeSecretsResolved,
+		Status:             metav1.ConditionTrue,
+		Reason:             ReasonSecretsResolved,
+		Message:            MessageSecretsResolved,
+		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+	}
+
+	if !resolved {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = ReasonSecretNotFound
+		condition.Message = message
+	}
+
+	SetCondition(status, condition)
+}
+
+// SetConfigReadyCondition sets the config ready condition.
+func SetConfigReadyCondition(status *llamav1alpha1.LlamaStackDistributionStatus, ready bool, message string) {
+	condition := metav1.Condition{
+		Type:               ConditionTypeConfigReady,
+		Status:             metav1.ConditionTrue,
+		Reason:             ReasonConfigGenerated,
+		Message:            MessageConfigGenerated,
+		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+	}
+
+	if !ready {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = ReasonConfigGenerationFailed
+		condition.Message = message
+	}
+
+	SetCondition(status, condition)
+}

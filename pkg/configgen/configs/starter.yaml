@@ -1,0 +1,40 @@
+# Starter distribution base configuration
+# This is the base config.yaml that gets merged with user-provided overrides
+version: 2
+apis:
+  - inference
+  - safety
+  - agents
+  - memory
+  - telemetry
+
+providers:
+  inference: []
+  safety: []
+  vector_io: []
+  agents:
+    - provider_id: meta-reference
+      provider_type: inline::meta-reference
+      config:
+        persistence_store:
+          type: sqlite
+          namespace: null
+          db_path: /.llama/runtime/agents_store.db
+  memory:
+    - provider_id: meta-reference
+      provider_type: inline::meta-reference
+      config:
+        kvstore:
+          type: sqlite
+          namespace: null
+          db_path: /.llama/runtime/memory_store.db
+  telemetry:
+    - provider_id: meta-reference
+      provider_type: inline::meta-reference
+      config: {}
+
+metadata_store:
+  type: sqlite
+  db_path: /.llama/runtime/metadata.db
+
+registered_resources: {}

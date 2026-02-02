@@ -36,6 +36,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/configgen"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/featureflags"
 	"gopkg.in/yaml.v3"
@@ -100,12 +101,20 @@ type LlamaStackDistributionReconciler struct {
 	// Cluster info
 	ClusterInfo *cluster.ClusterInfo
 	httpClient  *http.Client
+	// Config generator for operator-generated configs
+	configGenerator *configgen.Generator
 }
 
 // hasUserConfigMap checks if the instance has a valid UserConfig with ConfigMapName.
 // Returns true if configured, false otherwise.
 func (r *LlamaStackDistributionReconciler) hasUserConfigMap(instance *llamav1alpha1.LlamaStackDistribution) bool {
 	return instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != ""
+}
+
+// hasOperatorGeneratedConfig checks if the instance uses operator-generated config (providers spec).
+// Returns true if providers are configured and no userConfig.configMapName is set.
+func (r *LlamaStackDistributionReconciler) hasOperatorGeneratedConfig(instance *llamav1alpha1.LlamaStackDistribution) bool {
+	return instance.Spec.Server.Providers != nil && !r.hasUserConfigMap(instance)
 }
 
 // getUserConfigMapNamespace returns the resolved ConfigMap namespace.
@@ -487,7 +496,249 @@ func (r *LlamaStackDistributionReconciler) reconcileConfigMaps(ctx context.Conte
 		return err
 	}
 
+	// Reconcile operator-generated config if using providers spec
+	if err := r.reconcileGeneratedConfig(ctx, instance); err != nil {
+		return err
+	}
+
 	return r.reconcileManagedCABundle(ctx, instance)
+}
+
+// reconcileGeneratedConfig generates and reconciles the operator-generated ConfigMap.
+// This is used when spec.server.providers is set instead of spec.server.userConfig.configMapName.
+func (r *LlamaStackDistributionReconciler) reconcileGeneratedConfig(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution) error {
+	logger := log.FromContext(ctx)
+
+	// Skip if not using operator-generated config
+	if !r.hasOperatorGeneratedConfig(instance) {
+		logger.V(1).Info("Not using operator-generated config, skipping")
+		return nil
+	}
+
+	// Validate all secrets exist before generating config
+	if err := r.validateSecretsExist(ctx, instance); err != nil {
+		SetSecretsResolvedCondition(&instance.Status, false, err.Error())
+		return fmt.Errorf("failed to validate secrets: %w", err)
+	}
+	SetSecretsResolvedCondition(&instance.Status, true, "")
+
+	// Generate config using the generator
+	result, err := r.configGenerator.Generate(instance)
+	if err != nil {
+		SetValidationSucceededCondition(&instance.Status, false, err.Error())
+		SetConfigReadyCondition(&instance.Status, false, err.Error())
+		return fmt.Errorf("failed to generate config: %w", err)
+	}
+	SetValidationSucceededCondition(&instance.Status, true, "")
+
+	logger.V(1).Info("Generated config",
+		"configMapName", result.ConfigMapName,
+		"configSize", len(result.ConfigYAML),
+		"envVarCount", len(result.EnvVars))
+
+	// Log warnings for non-fatal issues (FR-035)
+	for _, warning := range result.Warnings {
+		logger.Info("Config generation warning", "warning", warning)
+	}
+
+	// Create or update the ConfigMap
+	if err := r.reconcileGeneratedConfigMap(ctx, instance, result); err != nil {
+		SetConfigReadyCondition(&instance.Status, false, err.Error())
+		return err
+	}
+
+	// Update status with generated ConfigMap name
+	instance.Status.GeneratedConfigMap = result.ConfigMapName
+	SetConfigReadyCondition(&instance.Status, true, "")
+
+	logger.Info("Successfully reconciled operator-generated config",
+		"configMapName", result.ConfigMapName)
+
+	return nil
+}
+
+// validateSecretsExist checks that all referenced secrets exist before generating config.
+func (r *LlamaStackDistributionReconciler) validateSecretsExist(
+	ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution,
+) error {
+	secretResolver := configgen.NewSecretResolver(r.Client, instance.Namespace)
+
+	if err := r.validateProviderSecrets(ctx, secretResolver, instance.Spec.Server.Providers); err != nil {
+		return err
+	}
+
+	return r.validateStorageSecret(ctx, secretResolver, instance.Spec.Server.ConfigStorage)
+}
+
+// validateProviderSecrets validates secrets for all provider types.
+func (r *LlamaStackDistributionReconciler) validateProviderSecrets(
+	ctx context.Context, resolver *configgen.SecretResolver, providers *llamav1alpha1.ProvidersSpec,
+) error {
+	if providers == nil {
+		return nil
+	}
+
+	providerTypes := map[string]*llamav1alpha1.ProviderConfigOrList{
+		"inference":    providers.Inference,
+		"safety":       providers.Safety,
+		"vector_io":    providers.VectorIo,
+		"agents":       providers.Agents,
+		"memory":       providers.Memory,
+		"tool_runtime": providers.ToolRuntime,
+		"telemetry":    providers.Telemetry,
+	}
+
+	for providerType, providerConfig := range providerTypes {
+		if err := r.validateProviderConfigSecrets(ctx, resolver, providerType, providerConfig); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateProviderConfigSecrets validates secrets for a single provider type.
+func (r *LlamaStackDistributionReconciler) validateProviderConfigSecrets(
+	ctx context.Context, resolver *configgen.SecretResolver, providerType string, config *llamav1alpha1.ProviderConfigOrList,
+) error {
+	if config == nil {
+		return nil
+	}
+
+	entries := config.GetEntries()
+	for i, entry := range entries {
+		if entry.APIKey != nil {
+			if err := resolver.ValidateSecretExists(ctx,
+				entry.APIKey.SecretKeyRef.Name,
+				entry.APIKey.SecretKeyRef.Key); err != nil {
+				return fmt.Errorf("failed to validate spec.server.providers.%s[%d].apiKey: %w", providerType, i, err)
+			}
+		}
+		if entry.Host != nil {
+			if err := resolver.ValidateSecretExists(ctx,
+				entry.Host.SecretKeyRef.Name,
+				entry.Host.SecretKeyRef.Key); err != nil {
+				return fmt.Errorf("failed to validate spec.server.providers.%s[%d].host: %w", providerType, i, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// validateStorageSecret validates the storage connection string secret.
+func (r *LlamaStackDistributionReconciler) validateStorageSecret(
+	ctx context.Context, resolver *configgen.SecretResolver, storage *llamav1alpha1.StorageConfigSpec,
+) error {
+	if storage == nil || storage.ConnectionString == nil {
+		return nil
+	}
+
+	if err := resolver.ValidateSecretExists(ctx,
+		storage.ConnectionString.SecretKeyRef.Name,
+		storage.ConnectionString.SecretKeyRef.Key); err != nil {
+		return fmt.Errorf("failed to validate spec.server.configStorage.connectionString: %w", err)
+	}
+
+	return nil
+}
+
+// reconcileGeneratedConfigMap creates or updates the generated ConfigMap.
+func (r *LlamaStackDistributionReconciler) reconcileGeneratedConfigMap(
+	ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, result *configgen.GeneratorResult,
+) error {
+	logger := log.FromContext(ctx)
+
+	// Create the ConfigMap
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      result.ConfigMapName,
+			Namespace: instance.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "llama-stack-operator",
+				"app.kubernetes.io/instance":   instance.Name,
+				"app.kubernetes.io/component":  "generated-config",
+			},
+		},
+		Data: map[string]string{
+			"config.yaml": string(result.ConfigYAML),
+		},
+	}
+
+	// Set owner reference so the ConfigMap is deleted when the LlamaStackDistribution is deleted
+	if err := ctrl.SetControllerReference(instance, configMap, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set controller reference on generated ConfigMap: %w", err)
+	}
+
+	// Check if ConfigMap exists
+	existingConfigMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      result.ConfigMapName,
+		Namespace: instance.Namespace,
+	}, existingConfigMap)
+
+	switch {
+	case k8serrors.IsNotFound(err):
+		// Create new ConfigMap
+		logger.Info("Creating generated ConfigMap", "configMap", result.ConfigMapName)
+		if createErr := r.Create(ctx, configMap); createErr != nil {
+			return fmt.Errorf("failed to create generated ConfigMap: %w", createErr)
+		}
+		logger.Info("Successfully created generated ConfigMap", "configMap", result.ConfigMapName)
+	case err != nil:
+		return fmt.Errorf("failed to get generated ConfigMap: %w", err)
+	default:
+		// ConfigMap exists, check if it needs update
+		if existingConfigMap.Data["config.yaml"] != string(result.ConfigYAML) {
+			logger.Info("Updating generated ConfigMap", "configMap", result.ConfigMapName)
+			patch := client.MergeFrom(existingConfigMap.DeepCopy())
+			existingConfigMap.Data = configMap.Data
+			existingConfigMap.Labels = configMap.Labels
+			if patchErr := r.Patch(ctx, existingConfigMap, patch); patchErr != nil {
+				return fmt.Errorf("failed to update generated ConfigMap: %w", patchErr)
+			}
+			logger.Info("Successfully updated generated ConfigMap", "configMap", result.ConfigMapName)
+		} else {
+			logger.V(1).Info("Generated ConfigMap is up to date", "configMap", result.ConfigMapName)
+		}
+	}
+
+	// Clean up old ConfigMaps (if ConfigMap name changed due to content hash)
+	if cleanupErr := r.cleanupOldGeneratedConfigMaps(ctx, instance, result.ConfigMapName); cleanupErr != nil {
+		logger.Error(cleanupErr, "Failed to cleanup old ConfigMaps")
+		// Don't fail reconciliation for cleanup errors
+	}
+
+	return nil
+}
+
+// cleanupOldGeneratedConfigMaps removes old generated ConfigMaps that are no longer needed.
+func (r *LlamaStackDistributionReconciler) cleanupOldGeneratedConfigMaps(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, currentConfigMapName string) error {
+	logger := log.FromContext(ctx)
+
+	// List all ConfigMaps in the namespace with our labels
+	configMapList := &corev1.ConfigMapList{}
+	if err := r.List(ctx, configMapList,
+		client.InNamespace(instance.Namespace),
+		client.MatchingLabels{
+			"app.kubernetes.io/managed-by": "llama-stack-operator",
+			"app.kubernetes.io/instance":   instance.Name,
+			"app.kubernetes.io/component":  "generated-config",
+		}); err != nil {
+		return fmt.Errorf("failed to list ConfigMaps: %w", err)
+	}
+
+	// Delete any ConfigMaps that don't match the current name
+	for _, cm := range configMapList.Items {
+		if cm.Name != currentConfigMapName {
+			logger.Info("Deleting old generated ConfigMap", "configMap", cm.Name)
+			if err := r.Delete(ctx, &cm); err != nil && !k8serrors.IsNotFound(err) {
+				return fmt.Errorf("failed to delete old ConfigMap %s: %w", cm.Name, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (r *LlamaStackDistributionReconciler) validateCABundleKeys(instance *llamav1alpha1.LlamaStackDistribution) error {
@@ -1807,6 +2058,7 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 		ImageMappingOverrides: imageMappingOverrides,
 		ClusterInfo:           clusterInfo,
 		httpClient:            &http.Client{Timeout: 5 * time.Second},
+		configGenerator:       configgen.NewGenerator(),
 	}, nil
 }
 
@@ -1883,5 +2135,6 @@ func NewTestReconciler(client client.Client, scheme *runtime.Scheme, clusterInfo
 		httpClient:            httpClient,
 		EnableNetworkPolicy:   enableNetworkPolicy,
 		ImageMappingOverrides: make(map[string]string),
+		configGenerator:       configgen.NewGenerator(),
 	}
 }

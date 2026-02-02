@@ -168,6 +168,33 @@ _Appears in:_
 | `availableReplicas` _integer_ | AvailableReplicas is the number of available replicas |  |  |
 | `serviceURL` _string_ | ServiceURL is the internal Kubernetes service URL where the distribution is exposed |  |  |
 | `routeURL` _string_ | RouteURL is the external URL where the distribution is exposed (when exposeRoute is true).<br />nil when external access is not configured, empty string when Ingress exists but URL not ready. |  |  |
+| `generatedConfigMap` _string_ | GeneratedConfigMap is the name of the operator-generated ConfigMap<br />Format: <llsd-name>-config-<hash> |  |  |
+
+#### ModelEntry
+
+ModelEntry defines a model registration
+Can be specified as just a string (model name) or detailed config
+
+_Appears in:_
+- [ResourcesSpec](#resourcesspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name of the model (simple form: just the model name) |  | Required: \{\} <br /> |
+| `provider` _string_ | Provider ID to use for this model<br />If not specified, uses first configured inference provider |  |  |
+| `metadata` _[ModelMetadata](#modelmetadata)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+
+#### ModelMetadata
+
+ModelMetadata contains model-specific configuration
+
+_Appears in:_
+- [ModelEntry](#modelentry)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `contextLength` _integer_ | ContextLength is the maximum context window size |  |  |
+| `embeddingDimension` _integer_ | EmbeddingDimension for embedding models |  |  |
 
 #### NetworkSpec
 
@@ -206,6 +233,15 @@ _Appears in:_
 | `volumes` _[Volume](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volume-v1-core) array_ |  |  |  |
 | `volumeMounts` _[VolumeMount](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volumemount-v1-core) array_ |  |  |  |
 
+#### ProviderConfigOrList
+
+ProviderConfigOrList allows either a single provider or a list of providers
+When single: auto-generates provider_id from type
+When list: requires explicit id field on each entry
+
+_Appears in:_
+- [ProvidersSpec](#providersspec)
+
 #### ProviderHealthStatus
 
 HealthStatus represents the health status of a provider
@@ -233,6 +269,48 @@ _Appears in:_
 | `config` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ |  |  |  |
 | `health` _[ProviderHealthStatus](#providerhealthstatus)_ |  |  |  |
 
+#### ProvidersSpec
+
+ProvidersSpec contains configuration for all provider types
+
+_Appears in:_
+- [ServerSpec](#serverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `inference` _[ProviderConfigOrList](#providerconfigorlist)_ | Inference configures LLM inference providers<br />Accepts single provider object or list of providers |  |  |
+| `safety` _[ProviderConfigOrList](#providerconfigorlist)_ | Safety configures content moderation providers |  |  |
+| `vectorIo` _[ProviderConfigOrList](#providerconfigorlist)_ | VectorIo configures vector database providers |  |  |
+| `agents` _[ProviderConfigOrList](#providerconfigorlist)_ | Agents configures agent orchestration providers |  |  |
+| `memory` _[ProviderConfigOrList](#providerconfigorlist)_ | Memory configures memory/conversation persistence |  |  |
+| `toolRuntime` _[ProviderConfigOrList](#providerconfigorlist)_ | ToolRuntime configures tool execution providers |  |  |
+| `telemetry` _[ProviderConfigOrList](#providerconfigorlist)_ | Telemetry configures observability providers |  |  |
+
+#### ResourcesSpec
+
+ResourcesSpec defines registered resources (models, tools, shields)
+
+_Appears in:_
+- [ServerSpec](#serverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `models` _[ModelEntry](#modelentry) array_ | Models to register with inference providers<br />Accepts simple strings or detailed model configurations |  |  |
+| `tools` _string array_ | Tools (tool groups) to register |  |  |
+| `shields` _string array_ | Shields to register with safety providers |  |  |
+
+#### SecretKeyRefSource
+
+SecretKeyRefSource references a key in a Kubernetes Secret
+
+_Appears in:_
+- [ProviderEntry](#providerentry)
+- [StorageConfigSpec](#storageconfigspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `secretKeyRef` _[SecretKeySelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#secretkeyselector-v1-core)_ | SecretKeyRef references a specific key in a Secret |  | Required: \{\} <br /> |
+
 #### ServerSpec
 
 ServerSpec defines the desired state of llama server.
@@ -252,6 +330,36 @@ _Appears in:_
 | `storage` _[StorageSpec](#storagespec)_ | Storage defines the persistent storage configuration |  |  |
 | `userConfig` _[UserConfigSpec](#userconfigspec)_ | UserConfig defines the user configuration for the llama-stack server |  |  |
 | `tlsConfig` _[TLSConfig](#tlsconfig)_ | TLSConfig defines the TLS configuration for the llama-stack server |  |  |
+| `providers` _[ProvidersSpec](#providersspec)_ | Providers configures inference, safety, and other API providers<br />Mutually exclusive with UserConfig.ConfigMapName |  |  |
+| `disabled` _string array_ | Disabled lists provider types to exclude from configuration<br />Uses same keys as Providers (inference, safety, vectorIo, etc.) |  |  |
+| `configStorage` _[StorageConfigSpec](#storageconfigspec)_ | ConfigStorage configures the persistence backend for config generation |  |  |
+| `resources` _[ResourcesSpec](#resourcesspec)_ | Resources registers models, tools, and shields |  |  |
+| `port` _integer_ | Port for the llama-stack server (default: 8321) | 8321 |  |
+| `serverTLS` _[ServerTLSConfig](#servertlsconfig)_ | ServerTLS configures TLS for the server endpoint |  |  |
+
+#### ServerTLSConfig
+
+ServerTLSConfig defines TLS configuration for the server
+
+_Appears in:_
+- [ServerSpec](#serverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ | Enabled indicates whether TLS is enabled |  |  |
+| `secretName` _string_ | SecretName references a TLS secret (type kubernetes.io/tls) |  |  |
+
+#### StorageConfigSpec
+
+StorageConfigSpec defines the storage backend configuration
+
+_Appears in:_
+- [ServerSpec](#serverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `type` _string_ | Type specifies the storage backend type | sqlite | Enum: [sqlite postgres] <br /> |
+| `connectionString` _[SecretKeyRefSource](#secretkeyrefsource)_ | ConnectionString references a secret containing the database URL<br />Required when Type is postgres |  |  |
 
 #### StorageSpec
 

@@ -122,6 +122,54 @@ spec:
                     required:
                     - maxReplicas
                     type: object
+                  configStorage:
+                    description: ConfigStorage configures the persistence backend
+                      for config generation
+                    properties:
+                      connectionString:
+                        description: |-
+                          ConnectionString references a secret containing the database URL
+                          Required when Type is postgres
+                        properties:
+                          secretKeyRef:
+                            description: SecretKeyRef references a specific key in
+                              a Secret
+                            properties:
+                              key:
+                                description: The key of the secret to select from.  Must
+                                  be a valid secret key.
+                                type: string
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                              optional:
+                                description: Specify whether the Secret or its key
+                                  must be defined
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                        required:
+                        - secretKeyRef
+                        type: object
+                      type:
+                        default: sqlite
+                        description: Type specifies the storage backend type
+                        enum:
+                        - sqlite
+                        - postgres
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: connectionString is required when storage type is postgres
+                      rule: self.type != 'postgres' || has(self.connectionString)
                   containerSpec:
                     description: ContainerSpec defines the llama-stack server container
                       configuration.
@@ -358,6 +406,13 @@ spec:
                             type: object
                         type: object
                     type: object
+                  disabled:
+                    description: |-
+                      Disabled lists provider types to exclude from configuration
+                      Uses same keys as Providers (inference, safety, vectorIo, etc.)
+                    items:
+                      type: string
+                    type: array
                   distribution:
                     description: DistributionType defines the distribution configuration
                       for llama-stack.
@@ -2365,6 +2420,99 @@ spec:
                           type: object
                         type: array
                     type: object
+                  port:
+                    default: 8321
+                    description: 'Port for the llama-stack server (default: 8321)'
+                    format: int32
+                    type: integer
+                  providers:
+                    description: |-
+                      Providers configures inference, safety, and other API providers
+                      Mutually exclusive with UserConfig.ConfigMapName
+                    properties:
+                      agents:
+                        description: Agents configures agent orchestration providers
+                        type: object
+                      inference:
+                        description: |-
+                          Inference configures LLM inference providers
+                          Accepts single provider object or list of providers
+                        type: object
+                      memory:
+                        description: Memory configures memory/conversation persistence
+                        type: object
+                      safety:
+                        description: Safety configures content moderation providers
+                        type: object
+                      telemetry:
+                        description: Telemetry configures observability providers
+                        type: object
+                      toolRuntime:
+                        description: ToolRuntime configures tool execution providers
+                        type: object
+                      vectorIo:
+                        description: VectorIo configures vector database providers
+                        type: object
+                    type: object
+                  resources:
+                    description: Resources registers models, tools, and shields
+                    properties:
+                      models:
+                        description: |-
+                          Models to register with inference providers
+                          Accepts simple strings or detailed model configurations
+                        items:
+                          description: |-
+                            ModelEntry defines a model registration
+                            Can be specified as just a string (model name) or detailed config
+                          properties:
+                            metadata:
+                              description: Metadata contains model-specific properties
+                              properties:
+                                contextLength:
+                                  description: ContextLength is the maximum context
+                                    window size
+                                  format: int64
+                                  type: integer
+                                embeddingDimension:
+                                  description: EmbeddingDimension for embedding models
+                                  format: int32
+                                  type: integer
+                              type: object
+                            name:
+                              description: 'Name of the model (simple form: just the
+                                model name)'
+                              type: string
+                            provider:
+                              description: |-
+                                Provider ID to use for this model
+                                If not specified, uses first configured inference provider
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                      shields:
+                        description: Shields to register with safety providers
+                        items:
+                          type: string
+                        type: array
+                      tools:
+                        description: Tools (tool groups) to register
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  serverTLS:
+                    description: ServerTLS configures TLS for the server endpoint
+                    properties:
+                      enabled:
+                        description: Enabled indicates whether TLS is enabled
+                        type: boolean
+                      secretName:
+                        description: SecretName references a TLS secret (type kubernetes.io/tls)
+                        type: string
+                    type: object
                   storage:
                     description: Storage defines the persistent storage configuration
                     properties:
@@ -2612,6 +2760,10 @@ spec:
                 required:
                 - distribution
                 type: object
+                x-kubernetes-validations:
+                - message: spec.server.providers and spec.server.userConfig.configMapName
+                    are mutually exclusive
+                  rule: '!(has(self.providers) && has(self.userConfig) && has(self.userConfig.configMapName))'
             required:
             - server
             type: object
@@ -2729,6 +2881,11 @@ spec:
                       type: object
                     type: array
                 type: object
+              generatedConfigMap:
+                description: |-
+                  GeneratedConfigMap is the name of the operator-generated ConfigMap
+                  Format: <llsd-name>-config-<hash>
+                type: string
               phase:
                 description: Phase represents the current phase of the distribution
                 enum:

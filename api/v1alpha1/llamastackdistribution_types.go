@@ -109,6 +109,7 @@ type AllowedFromSpec struct {
 }
 
 // ServerSpec defines the desired state of llama server.
+// +kubebuilder:validation:XValidation:rule="!(has(self.providers) && has(self.userConfig) && has(self.userConfig.configMapName))",message="spec.server.providers and spec.server.userConfig.configMapName are mutually exclusive"
 type ServerSpec struct {
 	Distribution  DistributionType `json:"distribution"`
 	ContainerSpec ContainerSpec    `json:"containerSpec,omitempty"`
@@ -138,6 +139,34 @@ type ServerSpec struct {
 	// TLSConfig defines the TLS configuration for the llama-stack server
 	// +optional
 	TLSConfig *TLSConfig `json:"tlsConfig,omitempty"`
+
+	// Providers configures inference, safety, and other API providers
+	// Mutually exclusive with UserConfig.ConfigMapName
+	// +optional
+	Providers *ProvidersSpec `json:"providers,omitempty"`
+
+	// Disabled lists provider types to exclude from configuration
+	// Uses same keys as Providers (inference, safety, vectorIo, etc.)
+	// +optional
+	// +kubebuilder:validation:Items:Enum=inference;safety;vectorIo;agents;memory;toolRuntime;telemetry;datasetio;scoring;eval;postTraining
+	Disabled []string `json:"disabled,omitempty"`
+
+	// ConfigStorage configures the persistence backend for config generation
+	// +optional
+	ConfigStorage *StorageConfigSpec `json:"configStorage,omitempty"`
+
+	// Resources registers models, tools, and shields
+	// +optional
+	Resources *ResourcesSpec `json:"resources,omitempty"`
+
+	// Port for the llama-stack server (default: 8321)
+	// +optional
+	// +kubebuilder:default:=8321
+	Port int32 `json:"port,omitempty"`
+
+	// ServerTLS configures TLS for the server endpoint
+	// +optional
+	ServerTLS *ServerTLSConfig `json:"serverTLS,omitempty"`
 }
 
 type UserConfigSpec struct {
@@ -289,6 +318,10 @@ type LlamaStackDistributionStatus struct {
 	// nil when external access is not configured, empty string when Ingress exists but URL not ready.
 	// +optional
 	RouteURL *string `json:"routeURL,omitempty"`
+	// GeneratedConfigMap is the name of the operator-generated ConfigMap
+	// Format: <llsd-name>-config-<hash>
+	// +optional
+	GeneratedConfigMap string `json:"generatedConfigMap,omitempty"`
 }
 
 //+kubebuilder:object:root=true

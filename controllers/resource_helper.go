@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/configgen"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -262,6 +263,7 @@ func getEffectiveWorkers(instance *llamav1alpha1.LlamaStackDistribution) (int32,
 
 // configureContainerEnvironment sets up environment variables for the container.
 func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
+	logger := ctrlLog.Log.WithName("resource_helper")
 	mountPath := getMountPath(instance)
 	workers, _ := getEffectiveWorkers(instance)
 
@@ -300,8 +302,28 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 		},
 	)
 
+	// Add generated config env vars (secret references) if using operator-generated config
+	if hasOperatorGeneratedConfig(instance) {
+		generatedEnvVars := getGeneratedConfigEnvVars(instance)
+		container.Env = append(container.Env, generatedEnvVars...)
+		logger.V(1).Info("Added generated config env vars", "count", len(generatedEnvVars))
+	}
+
 	// Finally, add the user provided env vars
 	container.Env = append(container.Env, instance.Spec.Server.ContainerSpec.Env...)
+}
+
+// getGeneratedConfigEnvVars returns environment variables for secret references in operator-generated config.
+func getGeneratedConfigEnvVars(instance *llamav1alpha1.LlamaStackDistribution) []corev1.EnvVar {
+	// Re-generate to get the env vars
+	// This is efficient since config generation is fast and we need the env vars for the deployment
+	generator := configgen.NewGenerator()
+	result, err := generator.Generate(instance)
+	if err != nil {
+		// If generation fails, return empty (error will be caught during config reconciliation)
+		return nil
+	}
+	return result.EnvVars
 }
 
 // configureContainerMounts sets up volume mounts for the container.
@@ -311,6 +333,9 @@ func configureContainerMounts(ctx context.Context, r *LlamaStackDistributionReco
 
 	// Add ConfigMap volume mount if user config is specified
 	addUserConfigVolumeMount(instance, container)
+
+	// Add generated config volume mount if using operator-generated config
+	addGeneratedConfigVolumeMount(instance, container)
 
 	// Add CA bundle volume mount if TLS config is specified or auto-detected
 	addCABundleVolumeMount(ctx, r, instance, container)
@@ -335,8 +360,9 @@ func hasAnyCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, in
 
 // configureContainerCommands sets up container commands and args.
 func configureContainerCommands(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
-	// Override the container entrypoint to use the custom config file if user config is specified
-	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != "" {
+	// Override the container entrypoint to use the custom config file if user config or generated config is specified
+	if (instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != "") ||
+		hasOperatorGeneratedConfig(instance) {
 		// Override the container entrypoint to use the custom config file instead of the default
 		// template. The script will determine the llama-stack version and use the appropriate module
 		// path to start the server.
@@ -381,6 +407,27 @@ func addUserConfigVolumeMount(instance *llamav1alpha1.LlamaStackDistribution, co
 			ReadOnly:  true,
 		})
 	}
+}
+
+// addGeneratedConfigVolumeMount adds the operator-generated config volume mount to the container.
+func addGeneratedConfigVolumeMount(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
+	// Only add if using operator-generated config (providers set, no userConfig)
+	if !hasOperatorGeneratedConfig(instance) {
+		return
+	}
+
+	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+		Name:      "generated-config",
+		MountPath: "/etc/llama-stack/",
+		ReadOnly:  true,
+	})
+}
+
+// hasOperatorGeneratedConfig checks if instance uses operator-generated config.
+func hasOperatorGeneratedConfig(instance *llamav1alpha1.LlamaStackDistribution) bool {
+	// Use operator-generated config if providers are specified and no userConfig.configMapName is set
+	return instance.Spec.Server.Providers != nil &&
+		(instance.Spec.Server.UserConfig == nil || instance.Spec.Server.UserConfig.ConfigMapName == "")
 }
 
 // addCABundleVolumeMount adds the managed CA bundle volume mount to the container.
@@ -434,6 +481,9 @@ func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconcile
 
 	// Configure user config
 	configureUserConfig(instance, &podSpec)
+
+	// Configure generated config (operator-generated)
+	configureGeneratedConfig(instance, &podSpec)
 
 	// Apply pod overrides including ServiceAccount, volumes, and volume mounts
 	configurePodOverrides(instance, &podSpec)
@@ -504,6 +554,34 @@ func configureUserConfig(instance *llamav1alpha1.LlamaStackDistribution, podSpec
 			ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{
 					Name: userConfig.ConfigMapName,
+				},
+			},
+		},
+	})
+}
+
+// configureGeneratedConfig handles operator-generated configuration setup.
+func configureGeneratedConfig(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+	if !hasOperatorGeneratedConfig(instance) {
+		return
+	}
+
+	// ConfigMap name is stored in status after generation
+	// Use a placeholder that will be updated by the deployment controller
+	configMapName := instance.Status.GeneratedConfigMap
+	if configMapName == "" {
+		// If not yet generated, use a predictable name format
+		// The actual ConfigMap will be created during reconciliation
+		return
+	}
+
+	// Add ConfigMap volume for generated config
+	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+		Name: "generated-config",
+		VolumeSource: corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: configMapName,
 				},
 			},
 		},

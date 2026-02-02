@@ -1,0 +1,153 @@
+# Example: Comprehensive Provider Configuration
+#
+# This example demonstrates all operator-generated config features:
+# - Multiple provider types with detailed configuration
+# - Resource registration (models, tools, shields)
+# - Storage configuration
+# - Server settings (port, TLS)
+# - Disabled provider types
+#
+# For simpler examples, see:
+# - example-minimal-inference.yaml (single provider)
+# - example-multiple-providers.yaml (multiple providers)
+# - example-custom-config.yaml (config pass-through)
+# - example-with-resources.yaml (models, tools, shields)
+# - example-with-disabled.yaml (disable providers)
+#
+apiVersion: llama.stacklok.com/v1alpha1
+kind: LlamaStackDistribution
+metadata:
+  name: full-stack
+  namespace: llama-stack
+spec:
+  replicas: 2
+  server:
+    distribution:
+      name: starter
+
+    # Custom port
+    port: 8443
+
+    # TLS configuration
+    serverTLS:
+      enabled: true
+      secretName: llama-stack-tls
+
+    # Storage configuration
+    configStorage:
+      type: postgres
+      connectionString:
+        secretKeyRef:
+          name: postgres-credentials
+          key: connection-string
+
+    # Provider configurations
+    providers:
+      # Multiple inference providers
+      inference:
+        - id: vllm-primary
+          provider: vllm
+          endpoint: http://vllm-primary:8000
+          config:
+            model: meta-llama/Llama-3.2-70B-Instruct
+            max_tokens: 8192
+        - id: vllm-secondary
+          provider: vllm
+          endpoint: http://vllm-secondary:8000
+          config:
+            model: meta-llama/Llama-3.2-3B-Instruct
+            max_tokens: 4096
+        - id: openai-backup
+          provider: openai
+          apiKey:
+            secretKeyRef:
+              name: openai-credentials
+              key: api-key
+
+      # Safety provider
+      safety:
+        provider: llama-guard
+        endpoint: http://llama-guard:8000
+
+      # Vector database for RAG
+      vectorIo:
+        provider: pgvector
+        host:
+          secretKeyRef:
+            name: postgres-credentials
+            key: host
+        config:
+          port: 5432
+          database: vectors
+
+      # Agent orchestration
+      agents:
+        provider: meta-reference
+        config:
+          persistence_store:
+            type: postgres
+
+      # Telemetry
+      telemetry:
+        provider: meta-reference
+        config:
+          service_name: llama-stack
+
+    # Disable unused providers
+    disabled:
+      - postTraining
+      - scoring
+      - eval
+
+    # Resource registration
+    resources:
+      models:
+        # Large model on primary GPU
+        - name: meta-llama/Llama-3.2-70B-Instruct
+          provider: vllm-primary
+          metadata:
+            contextLength: 8192
+        # Smaller model on secondary
+        - name: meta-llama/Llama-3.2-3B-Instruct
+          provider: vllm-secondary
+          metadata:
+            contextLength: 4096
+        # Embedding model
+        - name: BAAI/bge-large-en-v1.5
+          provider: vllm-secondary
+          metadata:
+            embeddingDimension: 1024
+        # OpenAI fallback
+        - name: gpt-4o
+          provider: openai-backup
+
+      tools:
+        - builtin::code_interpreter
+        - builtin::websearch
+        - builtin::memory
+
+      shields:
+        - meta-llama/Llama-Guard-3-8B
+---
+# Required secrets (create with actual values)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-credentials
+  namespace: llama-stack
+type: Opaque
+stringData:
+  host: "postgres.llama-stack.svc.cluster.local"
+  connection-string: "postgresql://llama:password@postgres:5432/llamastack"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openai-credentials
+  namespace: llama-stack
+type: Opaque
+stringData:
+  api-key: "your-openai-api-key-here"
+---
+# TLS certificate (create separately with actual cert/key)
+# kubectl create secret tls llama-stack-tls --cert=tls.crt --key=tls.key -n llama-stack

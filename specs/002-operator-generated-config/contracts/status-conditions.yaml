@@ -1,0 +1,137 @@
+# Status Condition Definitions for Operator-Generated Config
+# Follows Kubernetes metav1.Condition standard
+
+---
+# ValidationSucceeded condition
+condition: ValidationSucceeded
+description: |
+  Indicates whether CRD schema validation passed, including:
+  - CEL validation rules
+  - Provider type validation
+  - Required field checks for specific providers
+  - Mutual exclusivity checks
+
+status_values:
+  - value: "True"
+    reason: ValidationSucceeded
+    message: "CRD schema validation passed"
+  - value: "False"
+    reason: ValidationFailed
+    message: "CRD validation failed: {specific error}"
+  - value: "Unknown"
+    reason: ValidationPending
+    message: "Validation in progress"
+
+---
+# SecretsResolved condition
+condition: SecretsResolved
+description: |
+  Indicates whether all secretKeyRef references in the spec could be resolved.
+  Checks for existence of:
+  - apiKey.secretKeyRef in provider entries
+  - host.secretKeyRef in provider entries
+  - connectionString.secretKeyRef in storage config
+  - TLS secret in tls.secretName
+
+status_values:
+  - value: "True"
+    reason: SecretsResolved
+    message: "All secret references resolved successfully"
+  - value: "False"
+    reason: SecretNotFound
+    message: "Secret {namespace}/{name} not found for {field path}"
+  - value: "False"
+    reason: SecretKeyNotFound
+    message: "Key {key} not found in secret {namespace}/{name}"
+  - value: "Unknown"
+    reason: SecretResolutionPending
+    message: "Secret resolution in progress"
+
+---
+# ConfigReady condition
+condition: ConfigReady
+description: |
+  Indicates whether the config.yaml was successfully generated and
+  the ConfigMap was created/updated. This is the final gate before
+  the Deployment can reference the configuration.
+
+status_values:
+  - value: "True"
+    reason: ConfigGenerated
+    message: "Configuration generated successfully"
+    additional_context:
+      - generatedConfigMap: "{llsd-name}-config-{hash}"
+  - value: "False"
+    reason: ConfigGenerationFailed
+    message: "Failed to generate config: {error details}"
+  - value: "False"
+    reason: DistributionConfigNotFound
+    message: "Distribution {name} does not have embedded config template"
+  - value: "False"
+    reason: ConfigMapCreationFailed
+    message: "Failed to create ConfigMap: {error}"
+  - value: "Unknown"
+    reason: ConfigGenerationPending
+    message: "Configuration generation in progress"
+
+---
+# Condition update flow
+flow:
+  order:
+    1. ValidationSucceeded
+    2. SecretsResolved
+    3. ConfigReady
+
+  dependencies:
+    SecretsResolved:
+      requires: ValidationSucceeded == True
+    ConfigReady:
+      requires:
+        - ValidationSucceeded == True
+        - SecretsResolved == True
+
+  rollback:
+    on_failure: |
+      If any condition transitions to False:
+      1. Set downstream conditions to Unknown
+      2. Update status.phase to appropriate value
+      3. Emit event with failure details
+
+---
+# Go constants to generate
+constants:
+  condition_types:
+    - name: ConditionTypeValidationSucceeded
+      value: "ValidationSucceeded"
+    - name: ConditionTypeSecretsResolved
+      value: "SecretsResolved"
+    - name: ConditionTypeConfigReady
+      value: "ConfigReady"
+
+  reasons:
+    - name: ReasonValidationSucceeded
+      value: "ValidationSucceeded"
+    - name: ReasonValidationFailed
+      value: "ValidationFailed"
+    - name: ReasonSecretsResolved
+      value: "SecretsResolved"
+    - name: ReasonSecretNotFound
+      value: "SecretNotFound"
+    - name: ReasonSecretKeyNotFound
+      value: "SecretKeyNotFound"
+    - name: ReasonConfigGenerated
+      value: "ConfigGenerated"
+    - name: ReasonConfigGenerationFailed
+      value: "ConfigGenerationFailed"
+    - name: ReasonDistributionConfigNotFound
+      value: "DistributionConfigNotFound"
+    - name: ReasonConfigMapCreationFailed
+      value: "ConfigMapCreationFailed"
+
+  messages:
+    - name: MessageValidationSucceeded
+      value: "CRD schema validation passed"
+    - name: MessageSecretsResolved
+      value: "All secret references resolved successfully"
+    - name: MessageConfigGenerated
+      value: "Configuration generated successfully"

@@ -1,0 +1,104 @@
+# Example: Multiple providers configuration (User Story 2)
+#
+# This example demonstrates configuring multiple inference providers:
+# - Explicit IDs required when using multiple providers of the same type
+# - Each provider has its own endpoint and optional configuration
+# - Models can be assigned to specific providers via provider field
+#
+# Use cases:
+# - Multiple vLLM instances (GPU vs CPU, different models)
+# - Mixed provider types (vLLM + Ollama + cloud)
+# - Load distribution across inference backends
+#
+apiVersion: llama.stacklok.com/v1alpha1
+kind: LlamaStackDistribution
+metadata:
+  name: multi-provider-inference
+  namespace: llama-stack
+spec:
+  replicas: 1
+  server:
+    distribution:
+      name: starter
+    # Multiple providers require list syntax with explicit IDs
+    providers:
+      inference:
+        - id: vllm-gpu
+          provider: vllm
+          endpoint: http://vllm-gpu:8000
+        - id: vllm-cpu
+          provider: vllm
+          endpoint: http://vllm-cpu:8000
+        - id: ollama-local
+          provider: ollama
+          endpoint: http://ollama:11434
+    # Register models with specific providers
+    resources:
+      models:
+        - name: meta-llama/Llama-3.2-70B-Instruct
+          provider: vllm-gpu
+        - name: meta-llama/Llama-3.2-3B-Instruct
+          provider: vllm-cpu
+        - name: llama3.2:3b
+          provider: ollama-local
+---
+# Example: Mixed cloud and self-hosted providers
+apiVersion: llama.stacklok.com/v1alpha1
+kind: LlamaStackDistribution
+metadata:
+  name: hybrid-inference
+  namespace: llama-stack
+spec:
+  replicas: 1
+  server:
+    distribution:
+      name: starter
+    providers:
+      inference:
+        # Self-hosted vLLM for private data
+        - id: vllm-private
+          provider: vllm
+          endpoint: http://vllm:8000
+        # OpenAI for general tasks
+        - id: openai-main
+          provider: openai
+          apiKey:
+            secretKeyRef:
+              name: openai-credentials
+              key: api-key
+        # Anthropic as alternative
+        - id: anthropic-backup
+          provider: anthropic
+          apiKey:
+            secretKeyRef:
+              name: anthropic-credentials
+              key: api-key
+    resources:
+      models:
+        - name: meta-llama/Llama-3.2-3B-Instruct
+          provider: vllm-private
+        - name: gpt-4o
+          provider: openai-main
+        - name: claude-3-5-sonnet-20241022
+          provider: anthropic-backup
+---
+# Secrets (create separately with actual values)
+# kubectl create secret generic openai-credentials --from-literal=api-key=sk-...
+# kubectl create secret generic anthropic-credentials --from-literal=api-key=sk-ant-...
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openai-credentials
+  namespace: llama-stack
+type: Opaque
+stringData:
+  api-key: "your-openai-api-key-here"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: anthropic-credentials
+  namespace: llama-stack
+type: Opaque
+stringData:
+  api-key: "your-anthropic-api-key-here"

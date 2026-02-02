@@ -1,0 +1,86 @@
+# CEL Validation Rules for Operator-Generated Config
+# These rules will be implemented as kubebuilder XValidation markers
+
+---
+# Mutual exclusivity between providers and userConfig
+rule: mutual-exclusivity
+target: ServerSpec
+expression: |
+  !(has(self.providers) && has(self.userConfig) && has(self.userConfig.configMapName))
+message: "spec.server.providers and spec.server.userConfig.configMapName are mutually exclusive"
+
+---
+# Provider ID required when list form is used
+rule: provider-id-required-for-list
+target: ProvidersSpec.Inference (and other provider fields)
+expression: |
+  # For list form, every entry must have id
+  # For single form, id is optional (auto-generated)
+  !isList(self) || self.all(e, has(e.id) && size(e.id) > 0)
+message: "Multiple providers require explicit 'id' field for each entry"
+
+---
+# Unique provider IDs within a provider type
+rule: unique-provider-ids
+target: ProvidersSpec.Inference (and other provider fields)
+expression: |
+  !isList(self) || size(self) == size(self.map(e, e.id).unique())
+message: "Provider IDs must be unique within each provider type"
+
+---
+# Bedrock requires region
+rule: bedrock-requires-region
+target: ProviderEntry
+expression: |
+  self.provider != 'bedrock' || (has(self.region) && size(self.region) > 0)
+message: "region is required for bedrock provider"
+
+---
+# Azure requires deploymentName
+rule: azure-requires-deployment-name
+target: ProviderEntry
+expression: |
+  self.provider != 'azure' || (has(self.deploymentName) && size(self.deploymentName) > 0)
+message: "deploymentName is required for azure provider"
+
+---
+# Postgres storage requires connectionString
+rule: postgres-requires-connection-string
+target: StorageConfigSpec
+expression: |
+  self.type != 'postgres' || has(self.connectionString)
+message: "connectionString is required when storage type is postgres"
+
+---
+# Disabled must use valid provider type names
+rule: valid-disabled-provider-types
+target: ServerSpec
+expression: |
+  !has(self.disabled) || self.disabled.all(d,
+    d in ['inference', 'safety', 'vectorIo', 'agents', 'memory',
+          'toolRuntime', 'telemetry', 'datasetio', 'scoring',
+          'eval', 'postTraining']
+  )
+message: "disabled list contains invalid provider type"
+
+---
+# Port must be in valid range
+rule: valid-port-range
+target: ServerSpec
+expression: |
+  !has(self.port) || (self.port >= 1 && self.port <= 65535)
+message: "port must be between 1 and 65535"
+
+---
+# Model provider reference must be valid
+rule: model-provider-exists
+target: ResourcesSpec
+note: |
+  This validation would require cross-field access to ProvidersSpec.
+  May need to be enforced at controller level rather than CEL.
+  CEL version (if parent access available):
+  !has(self.models) || self.models.all(m,
+    !has(m.provider) || parent.providers.hasProvider(m.provider)
+  )
+message: "Model references non-existent provider ID"
+enforcement: controller-level
