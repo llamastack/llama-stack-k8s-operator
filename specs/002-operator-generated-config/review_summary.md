@@ -44,17 +44,17 @@ spec:
 |----------|--------|-----------|
 | Config extraction | OCI image labels | Single-phase reconcile, works with imagePullSecrets |
 | Secret handling | Environment variables | Never embed secrets in ConfigMap |
-| Multiple providers | Explicit `id` required | Avoid ambiguity in provider references |
+| Multiple providers | Explicit `id` required for providers 2..N | Avoid ambiguity in provider references |
 | Backward compat | Conversion webhook | v1alpha1 CRs continue working |
 | Override escape hatch | `overrideConfig` field | Power users can bypass generation |
 
 ## Configuration Tiers
 
-| Tier | Users | Mechanism |
-|------|-------|-----------|
-| Simple (80%) | Most users | Inline provider fields |
-| Advanced (15%) | Platform engineers | Per-provider `settings` |
-| Full Control (5%) | Power users | ConfigMap override |
+| Tier | Mechanism |
+|------|-----------|
+| Simple (80%) | Inline provider fields |
+| Advanced (15%) | Per-provider `settings` |
+| Full Control (5%) | ConfigMap override |
 
 ## New Spec Sections
 
@@ -76,7 +76,7 @@ spec:
 2. **Polymorphic Fields**: Single object vs list forms (providers, models)
 3. **Storage Abstraction**: Is kv/sql split intuitive?
 4. **Edge Cases**: Are the 6 documented edge cases reasonable?
-5. **External Dependencies**: Is the OCI label approach for base config extraction acceptable?
+5. **External Dependencies**: Is the OCI label approach for base config extraction acceptable? Any better idea how to extract the `config.yaml` from the distribution OCI image ?
 
 ## Requirements Summary
 
@@ -101,8 +101,8 @@ spec:
 
 ## Dependencies
 
-- **Spec 001**: External providers merge into generated config
-- **Distribution images**: Must include OCI labels with base config
+- **Spec 001**: External providers merge into generated config (not mandatory, but was already included in this design)
+- **Distribution images**: Must include OCI labels with base config (check: build system must support this, registry must support label queries (check for disconnected))
 
 ## Open Questions for Review
 
