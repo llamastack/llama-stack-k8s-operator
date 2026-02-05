@@ -177,14 +177,24 @@ func patchResource(ctx context.Context, cli client.Client, desired, existing *un
 		return nil
 	}
 
-	if existing.GetKind() == "PersistentVolumeClaim" {
+	switch existing.GetKind() {
+	case "PersistentVolumeClaim":
 		logger.V(1).Info("Skipping PVC patch - PVCs are immutable after creation",
 			"name", existing.GetName(),
 			"namespace", existing.GetNamespace())
 		return nil
-	} else if existing.GetKind() == "Service" {
+	case "Service":
 		if err := compare.CheckAndLogServiceChanges(ctx, cli, desired); err != nil {
 			return fmt.Errorf("failed to validate resource mutations while patching: %w", err)
+		}
+	case deploymentKind:
+		// Check for legacy CA bundle volumes and use full replacement to avoid SSA conflicts
+		if hasLegacyCABundleVolumes(ctx, existing) {
+			logger.Info("Detected legacy CA bundle volumes, using full replacement instead of SSA",
+				"deployment", existing.GetName(),
+				"namespace", existing.GetNamespace())
+			desired.SetResourceVersion(existing.GetResourceVersion())
+			return cli.Update(ctx, desired)
 		}
 	}
 
@@ -659,6 +669,46 @@ func FilterExcludeKinds(resMap *resmap.ResMap, kindsToExclude []string) (*resmap
 		}
 	}
 	return &filteredResMap, nil
+}
+
+// hasLegacyCABundleVolumes detects if a deployment has legacy CA bundle volumes
+// from the old operator that used emptyDir + ConfigMap pattern.
+func hasLegacyCABundleVolumes(ctx context.Context, deployment *unstructured.Unstructured) bool {
+	logger := log.FromContext(ctx)
+
+	volumes, found, err := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "volumes")
+	if err != nil || !found {
+		return false
+	}
+
+	for _, vol := range volumes {
+		volumeMap, ok := vol.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		volumeName, _, _ := unstructured.NestedString(volumeMap, "name")
+
+		// Legacy pattern: volume named "ca-bundle" with emptyDir
+		if volumeName == "ca-bundle" {
+			if _, hasEmptyDir := volumeMap["emptyDir"]; hasEmptyDir {
+				logger.V(1).Info("Found legacy ca-bundle emptyDir volume",
+					"deployment", deployment.GetName(),
+					"namespace", deployment.GetNamespace())
+				return true
+			}
+		}
+
+		// Legacy pattern: volume named "ca-bundle-source" (ConfigMap source)
+		if volumeName == "ca-bundle-source" {
+			logger.V(1).Info("Found legacy ca-bundle-source volume",
+				"deployment", deployment.GetName(),
+				"namespace", deployment.GetNamespace())
+			return true
+		}
+	}
+
+	return false
 }
 
 // CheckClusterRoleExists checks if a RoleBinding should be skipped due to missing SCC ClusterRole.
