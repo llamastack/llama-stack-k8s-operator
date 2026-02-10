@@ -1,12 +1,105 @@
 # Implementation Plan: Operator-Generated Server Configuration (v1alpha2)
 
-**Spec**: 002-operator-generated-config
-**Created**: 2026-02-02
+**Branch**: `002-operator-generated-config` | **Date**: 2026-02-02 | **Spec**: [spec.md](spec.md)
 **Status**: Ready for Implementation
 
-## Overview
+## Summary
 
-This plan outlines the implementation strategy for the Operator-Generated Server Configuration feature, introducing the v1alpha2 API version with config generation capabilities.
+Introduce a v1alpha2 API version for the LlamaStackDistribution CRD that enables the operator to generate server configuration (config.yaml) from a high-level, abstracted CR specification. Users configure providers, resources, and storage with minimal YAML while the operator handles config generation, secret resolution, and atomic Deployment updates.
+
+## Technical Context
+
+**Language/Version**: Go 1.25 (go.mod)
+**Primary Dependencies**: controller-runtime v0.22.4, kubebuilder, kustomize/api v0.21.0, client-go v0.34.3, go-containerregistry v0.20.7
+**Storage**: Kubernetes ConfigMaps (generated), Secrets (referenced via secretKeyRef)
+**Testing**: Go test, envtest (controller-runtime), testify v1.11.1
+**Target Platform**: Kubernetes 1.30+
+**Project Type**: Kubernetes operator (single binary)
+**Performance Goals**: Config generation < 5 seconds (NFR-002)
+**Constraints**: Namespace-scoped RBAC (constitution §1.1), air-gapped registry support, deterministic output (NFR-001)
+**Scale/Scope**: Single CRD with 2 API versions, ~8 new Go packages
+
+## Constitution Check
+
+*GATE: PASS (1 documented deviation, 0 unresolved violations)*
+
+| # | Principle | Status | Notes |
+|---|-----------|--------|-------|
+| §1.1 Namespace-Scoped | DEVIATION | ValidatingWebhookConfiguration is cluster-scoped (standard operator pattern). Documented in spec.md Security Considerations. |
+| §1.2 Idempotent Reconciliation | PASS | Deterministic config generation (NFR-001). Hash-based change detection. |
+| §1.3 Owner References | PASS | FR-025 requires owner refs on generated ConfigMaps. |
+| §2.1 Kubebuilder Validation | PASS | CEL (FR-070-072), webhook (FR-076-078), kubebuilder tags. |
+| §2.2 Optional Fields | PASS | Pointer types for optional structs throughout. |
+| §2.3 Defaults | PASS | Constants for DefaultServerPort, storage type defaults. |
+| §2.4 Status Subresource | PASS | New conditions: ConfigGenerated, DeploymentUpdated, Available, SecretsResolved. |
+| §3.2 Conditions | PASS | Standard metav1.Condition with defined constants for types, reasons, messages. |
+| §4.1 Error Wrapping | PASS | All errors wrapped with %w and context. |
+| §6.1 Table-Driven Tests | PASS | Test plan follows constitution patterns. |
+| §6.4 Builder Pattern | PASS | Existing test builders extended for v1alpha2. |
+| §13.2 AI Attribution | PASS | Assisted-by format (no Co-Authored-By). |
+
+## Project Structure
+
+### Documentation (this feature)
+
+```text
+specs/002-operator-generated-config/
+├── spec.md              # Feature specification
+├── plan.md              # This file
+├── research.md          # Phase 0 research decisions
+├── data-model.md        # Entity definitions and relationships
+├── quickstart.md        # Usage examples
+├── contracts/           # Interface contracts
+│   ├── crd-schema.yaml
+│   ├── config-generation.yaml
+│   └── status-conditions.yaml
+├── tasks.md             # Implementation tasks
+├── review_summary.md    # Executive brief
+└── alternatives/        # Alternative approaches evaluated
+```
+
+### Source Code (repository root)
+
+```text
+api/
+├── v1alpha1/            # Existing types + conversion spoke
+│   ├── llamastackdistribution_types.go
+│   └── llamastackdistribution_conversion.go  # New: v1alpha1 spoke
+└── v1alpha2/            # New API version
+    ├── groupversion_info.go
+    ├── llamastackdistribution_types.go
+    ├── llamastackdistribution_webhook.go      # Validating webhook
+    ├── llamastackdistribution_conversion.go   # Hub (no-op)
+    └── zz_generated.deepcopy.go               # Generated
+
+pkg/config/              # New: config generation engine
+├── config.go            # Main orchestration
+├── generator.go         # YAML generation
+├── resolver.go          # Base config resolution
+├── provider.go          # Provider expansion
+├── resource.go          # Resource expansion
+├── storage.go           # Storage configuration
+├── secret_resolver.go   # Secret reference resolution
+├── version.go           # Config schema version handling
+├── types.go             # Internal config types
+└── oci_extractor.go     # Phase 2: OCI label extraction
+
+configs/                 # New: embedded default configs
+├── starter/config.yaml
+├── remote-vllm/config.yaml
+├── meta-reference-gpu/config.yaml
+└── postgres-demo/config.yaml
+
+controllers/             # Extended for v1alpha2
+├── llamastackdistribution_controller.go  # Updated reconciliation
+└── status.go                             # New conditions
+
+config/webhook/          # New: webhook kustomize config
+└── manifests.yaml
+
+tests/e2e/               # Extended
+└── config_generation_test.go  # New: v1alpha2 e2e tests
+```
 
 ## Implementation Phases
 
@@ -60,7 +153,6 @@ type ProviderConfig struct {
     Provider string                 `json:"provider"`
     Endpoint string                 `json:"endpoint,omitempty"`
     ApiKey   *SecretKeyRef          `json:"apiKey,omitempty"`
-    Host     *SecretKeyRef          `json:"host,omitempty"`
     Settings map[string]interface{} `json:"settings,omitempty"`
 }
 ```
@@ -156,6 +248,7 @@ type WorkloadOverrides struct {
 // +kubebuilder:validation:XValidation:rule="!(has(self.providers) && has(self.overrideConfig))",message="providers and overrideConfig are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!(has(self.resources) && has(self.overrideConfig))",message="resources and overrideConfig are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!(has(self.storage) && has(self.overrideConfig))",message="storage and overrideConfig are mutually exclusive"
+// +kubebuilder:validation:XValidation:rule="!(has(self.disabled) && has(self.overrideConfig))",message="disabled and overrideConfig are mutually exclusive"
 ```
 
 #### 1.8 Generate CRD Manifests
@@ -197,7 +290,8 @@ make manifests
 pkg/config/
 ├── config.go           # Main orchestration
 ├── generator.go        # YAML generation
-├── extractor.go        # Base config extraction from images
+├── resolver.go         # Base config resolution (embedded + OCI)
+├── oci_extractor.go    # Phase 2: OCI label extraction
 ├── provider.go         # Provider expansion
 ├── resource.go         # Resource expansion
 ├── storage.go          # Storage configuration
@@ -206,17 +300,142 @@ pkg/config/
 └── types.go            # Internal config types
 ```
 
-#### 2.2 Implement Base Config Extraction (OCI Label Approach)
+#### 2.2 Implement Base Config Resolution (Phased)
 
-**File**: `pkg/config/extractor.go`
+**Files**:
+- `pkg/config/resolver.go` - BaseConfigResolver with resolution priority logic
+- `configs/` - Embedded default config directory (one `config.yaml` per named distribution)
+- `pkg/config/oci_extractor.go` - Phase 2: OCI label extraction
 
-**Approach**: Extract the distribution's base `config.yaml` from OCI image labels, using the `k8schain` authenticator for registry access. This enables single-phase reconciliation and works with imagePullSecrets in air-gapped environments.
+**Approach**: Base config resolution follows a phased strategy. Phase 1 (MVP) uses configs embedded in the operator binary via `go:embed`, requiring no changes to distribution image builds. Phase 2 (Enhancement) adds OCI label-based extraction as an optional override when distribution images support it.
 
-> **Alternative**: An init container approach is documented in `alternatives/init-container-extraction.md` for cases where OCI labels are not available.
+> **Alternative**: An init container approach is documented in `alternatives/init-container-extraction.md` for cases where neither embedded configs nor OCI labels are available.
+
+**Resolution Priority**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  1. (Phase 2) Check OCI labels on resolved image            │
+│     └── If present: extract config from labels              │
+│         (takes precedence over embedded)                    │
+│                                                             │
+│  2. (Phase 1) Check embedded configs for distribution.name  │
+│     └── If found: use go:embed config for that distribution │
+│                                                             │
+│  3. No config available:                                    │
+│     ├── distribution.name → should not happen (build error) │
+│     └── distribution.image → require overrideConfig         │
+│         (set ConfigGenerated=False, reason BaseConfigReq.)  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+##### Phase 1: Embedded Default Configs (MVP)
+
+The operator binary embeds default configs for all named distributions via `go:embed`:
+
+```go
+// pkg/config/resolver.go
+
+import "embed"
+
+//go:embed configs
+var embeddedConfigs embed.FS
+
+type BaseConfigResolver struct {
+    distributionImages map[string]string // from distributions.json
+    imageOverrides     map[string]string // from operator ConfigMap
+    ociExtractor       *ImageConfigExtractor // nil in Phase 1
+}
+
+func NewBaseConfigResolver(distImages, overrides map[string]string) *BaseConfigResolver {
+    return &BaseConfigResolver{
+        distributionImages: distImages,
+        imageOverrides:     overrides,
+    }
+}
+
+func (r *BaseConfigResolver) Resolve(ctx context.Context, dist DistributionSpec) (*BaseConfig, string, error) {
+    // Resolve distribution to concrete image reference
+    image, err := r.resolveImage(dist)
+    if err != nil {
+        return nil, "", err
+    }
+
+    // Phase 2: Check OCI labels first (when ociExtractor is configured)
+    if r.ociExtractor != nil {
+        config, err := r.ociExtractor.Extract(ctx, image)
+        if err == nil {
+            return config, image, nil
+        }
+        // Fall through to embedded if OCI extraction fails
+        log.FromContext(ctx).V(1).Info("OCI config extraction failed, falling back to embedded",
+            "image", image, "error", err)
+    }
+
+    // Phase 1: Use embedded config for named distributions
+    if dist.Name != "" {
+        config, err := r.loadEmbeddedConfig(dist.Name)
+        if err != nil {
+            return nil, "", fmt.Errorf("failed to load embedded config for distribution %q: %w", dist.Name, err)
+        }
+        return config, image, nil
+    }
+
+    // distribution.image without OCI labels or embedded config
+    return nil, "", fmt.Errorf("direct image references require either overrideConfig.configMapName or OCI config labels on the image")
+}
+
+func (r *BaseConfigResolver) loadEmbeddedConfig(name string) (*BaseConfig, error) {
+    data, err := embeddedConfigs.ReadFile(fmt.Sprintf("configs/%s/config.yaml", name))
+    if err != nil {
+        return nil, fmt.Errorf("no embedded config for distribution %q: %w", name, err)
+    }
+
+    var config BaseConfig
+    if err := yaml.Unmarshal(data, &config); err != nil {
+        return nil, fmt.Errorf("invalid embedded config for distribution %q: %w", name, err)
+    }
+
+    return &config, nil
+}
+
+func (r *BaseConfigResolver) resolveImage(dist DistributionSpec) (string, error) {
+    if dist.Image != "" {
+        return dist.Image, nil
+    }
+
+    // Check image-overrides first (downstream builds)
+    if override, ok := r.imageOverrides[dist.Name]; ok {
+        return override, nil
+    }
+
+    // Look up in distributions.json
+    if image, ok := r.distributionImages[dist.Name]; ok {
+        return image, nil
+    }
+
+    return "", fmt.Errorf("unknown distribution name %q: not found in distributions.json", dist.Name)
+}
+```
+
+**Embedded config directory** (created at build time):
+```
+configs/
+├── starter/config.yaml
+├── remote-vllm/config.yaml
+├── meta-reference-gpu/config.yaml
+└── postgres-demo/config.yaml
+```
+
+**Air-gapped support**: Embedded configs work regardless of registry access. The `image-overrides` mechanism allows downstream builds (e.g., RHOAI) to remap distribution names to internal registry images without rebuilding the operator.
+
+##### Phase 2: OCI Label Extraction (Enhancement)
+
+**File**: `pkg/config/oci_extractor.go`
+
+When distribution images include OCI config labels, the extracted config takes precedence over embedded defaults. This enables `distribution.image` usage without `overrideConfig`.
 
 **OCI Label Convention**:
-
-Distribution images embed config.yaml in OCI labels using a tiered strategy:
 
 | Label | Purpose | When Used |
 |-------|---------|-----------|
@@ -224,22 +443,6 @@ Distribution images embed config.yaml in OCI labels using a tiered strategy:
 | `io.llamastack.config.layer` | Layer digest containing config | Large configs |
 | `io.llamastack.config.path` | Path within the layer | Used with layer reference |
 | `io.llamastack.config.version` | Config schema version | Always |
-
-**Extraction Priority**:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  1. Check io.llamastack.config.base64                       │
-│     └── If present: decode and return (~10KB manifest fetch)│
-│                                                             │
-│  2. Check io.llamastack.config.layer + .path                │
-│     └── If present: fetch specific layer, extract file      │
-│         (~10-100KB single layer fetch)                      │
-│                                                             │
-│  3. No labels: Return error with guidance                   │
-│     └── Distribution image must include config labels       │
-└─────────────────────────────────────────────────────────────┘
-```
 
 **Registry Authentication**:
 
@@ -261,7 +464,7 @@ import (
 **Implementation**:
 
 ```go
-// pkg/config/extractor.go
+// pkg/config/oci_extractor.go
 
 type ConfigLocation struct {
     Base64      string  // Inline base64 encoded config
@@ -308,7 +511,7 @@ func (e *ImageConfigExtractor) Extract(ctx context.Context, imageRef string) (*B
     }
 
     // Fetch config location from image labels
-    loc, err := e.getConfigLocation(ctx, imageRef, keychain)
+    loc, err := e.getConfigLocation(imageRef, keychain)
     if err != nil {
         return nil, err
     }
@@ -338,7 +541,7 @@ func (e *ImageConfigExtractor) Extract(ctx context.Context, imageRef string) (*B
     return config, nil
 }
 
-func (e *ImageConfigExtractor) getConfigLocation(ctx context.Context, imageRef string, kc authn.Keychain) (*ConfigLocation, error) {
+func (e *ImageConfigExtractor) getConfigLocation(imageRef string, kc authn.Keychain) (*ConfigLocation, error) {
     configJSON, err := crane.Config(imageRef, crane.WithAuthFromKeychain(kc))
     if err != nil {
         return nil, fmt.Errorf("failed to fetch image config: %w", err)
@@ -427,9 +630,9 @@ func (e *ImageConfigExtractor) extractFromLayer(
 }
 ```
 
-**Distribution Image Build Integration**:
+**Distribution Image Build Integration** (Phase 2):
 
-Labels are added post-build using `crane mutate` (solves the chicken-and-egg problem):
+Labels are added post-build using `crane mutate` (solves the chicken-and-egg problem where layer digests are only known after build):
 
 ```bash
 #!/bin/bash
@@ -479,7 +682,7 @@ fi
 - Labels added after build, so layer digest is known
 - Works with any registry that supports OCI manifests
 
-**Air-Gapped / OpenShift Support**:
+**Air-Gapped / OpenShift Support** (Phase 2):
 
 The `k8schain` authenticator handles:
 - imagePullSecrets from ServiceAccount
@@ -509,9 +712,9 @@ The `k8schain` authenticator handles:
 - In-memory caching by digest (fast for repeated reconciles)
 
 **Cons**:
-- Requires distribution images to include config labels
+- Phase 2 requires distribution images to include config labels
 - Requires `go-containerregistry` dependency
-- Distribution build process must use `crane mutate`
+- Distribution build process must use `crane mutate` (Phase 2)
 
 #### 2.3 Implement Provider Expansion
 
@@ -730,10 +933,9 @@ func (r *Reconciler) ShouldExposeRoute(spec *v1alpha2.NetworkingSpec) bool {
     if spec.Expose.Enabled != nil {
         return *spec.Expose.Enabled
     }
-    if spec.Expose.Hostname != "" {
-        return true
-    }
-    return false
+    // expose: {} (non-nil pointer, all zero-valued fields) is treated as
+    // expose: true per edge case "Polymorphic expose with empty object"
+    return true
 }
 ```
 
@@ -800,18 +1002,13 @@ type ConfigGenerationStatus struct {
 
 **File**: `api/v1alpha2/llamastackdistribution_conversion.go`
 
-**Approach**: v1alpha2 is the hub (storage version)
+**Approach**: v1alpha2 is the hub (storage version). In controller-runtime, the Hub type only implements a `Hub()` marker method. Conversion logic (`ConvertTo`/`ConvertFrom`) lives on the Spoke (v1alpha1).
 
 ```go
-func (src *LlamaStackDistribution) ConvertTo(dstRaw conversion.Hub) error {
-    // v1alpha2 is hub, this is a no-op
-    return nil
-}
-
-func (dst *LlamaStackDistribution) ConvertFrom(srcRaw conversion.Hub) error {
-    // v1alpha2 is hub, this is a no-op
-    return nil
-}
+// Hub marks v1alpha2 as the storage version for conversion.
+// The Hub interface requires only this marker method.
+// All conversion logic is implemented on the v1alpha1 spoke.
+func (dst *LlamaStackDistribution) Hub() {}
 ```
 
 #### 4.2 Implement v1alpha1 Spoke Conversion
@@ -859,7 +1056,7 @@ func (dst *LlamaStackDistribution) ConvertFrom(srcRaw conversion.Hub) error {
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: llamastackdistributions.llamastack.ai
+  name: llamastackdistributions.llamastack.io
 spec:
   conversion:
     strategy: Webhook

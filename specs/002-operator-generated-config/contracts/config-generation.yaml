@@ -1,0 +1,115 @@
+# Config Generation Contract
+#
+# Defines the interface between the CRD spec and the generated config.yaml.
+# This contract specifies how CRD fields map to config.yaml structure.
+
+# --- Input: v1alpha2 Spec ---
+# The config generator receives the full LlamaStackDistributionSpec
+# plus the resolved container image reference.
+
+# --- Output: GeneratedConfig ---
+output:
+  configYAML: "string"        # Final config.yaml content (YAML format)
+  envVars: "[]EnvVar"         # Environment variable definitions for Deployment
+  contentHash: "string"       # SHA256 of configYAML (for change detection)
+  providerCount: "int"        # Count of configured providers (for status)
+  resourceCount: "int"        # Count of registered resources (for status)
+  configVersion: "int"        # Detected config.yaml schema version
+
+# --- Provider Field Mapping ---
+provider_mapping:
+  # CRD field → config.yaml field
+  provider: provider_type     # With "remote::" prefix (e.g., vllm → remote::vllm)
+  endpoint: config.url
+  apiKey: config.api_key      # Via env var substitution: ${env.LLSD_<PROVIDER_ID>_API_KEY}
+  settings.*: config.*        # Merged into provider config section
+  id: provider_id             # Direct mapping
+
+# --- Env Var Naming Convention ---
+env_var_naming:
+  pattern: "LLSD_{PROVIDER_ID}_{FIELD}"
+  normalization:
+    - Uppercase all characters
+    - Replace hyphens (-) with underscores (_)
+  examples:
+    - provider_id: "vllm-primary"
+      field: "apiKey"
+      result: "LLSD_VLLM_PRIMARY_API_KEY"
+    - provider_id: "pgvector"
+      field: "host"
+      result: "LLSD_PGVECTOR_HOST"
+
+# --- Resource Registration Mapping ---
+resource_mapping:
+  models:
+    simple_string:
+      # "llama3.2-8b" → registered with first inference provider
+      provider_assignment: first_inference_provider_in_list_order
+    object_form:
+      # {name: "llama3.2-70b", provider: "vllm-primary"} → registered with specified provider
+      provider_assignment: explicit_provider_id
+
+  tools:
+    # "websearch" → registered as tool group with toolRuntime provider
+    registration: tool_group
+    provider_assignment: first_toolRuntime_provider  # From user config or base config
+    error_when_missing: "resources.tools requires at least one toolRuntime provider to be configured"
+
+  shields:
+    # "llama-guard" → registered with safety provider
+    registration: shield
+    provider_assignment: first_safety_provider  # From user config or base config
+    error_when_missing: "resources.shields requires at least one safety provider to be configured"
+
+# --- Merge Rules ---
+merge_rules:
+  providers:
+    strategy: replace_by_api_type
+    description: "User providers fully replace base config providers for that API type"
+
+  storage:
+    strategy: merge_by_subsection
+    description: "kv and sql independently replaced if specified"
+
+  resources:
+    strategy: additive
+    description: "User resources added to base registered_resources"
+
+  disabled:
+    strategy: subtractive
+    description: "Remove disabled APIs from generated config"
+
+  scalars:
+    strategy: override
+    description: "User value replaces base value"
+
+# --- Settings SecretKeyRef Discovery ---
+settings_secret_resolution:
+  depth: top_level_only
+  description: "secretKeyRef is recognized only at the top level of settings values"
+  recognized_pattern: "settings.<fieldName>.secretKeyRef"
+  ignored_pattern: "settings.<fieldName>.<nested>.<...>.secretKeyRef"
+  examples:
+    - path: "settings.host.secretKeyRef"
+      resolved: true
+      description: "Top-level value, resolved to env var"
+    - path: "settings.database.connection.secretKeyRef"
+      resolved: false
+      description: "Nested value, passed through as literal map"
+
+# --- ConfigMap Naming ---
+configmap:
+  pattern: "{cr-name}-config-{hash[:8]}"
+  hash_algorithm: SHA256
+  hash_input: configYAML content
+  immutable: true
+  owner_reference: true
+  retention: 2  # Keep last 2 for debugging
+
+# --- Determinism Guarantee ---
+determinism:
+  constraint: "Same inputs MUST produce identical configYAML output"
+  implications:
+    - Map iteration must use sorted keys
+    - No timestamps or random values in output
+    - YAML serialization must be stable

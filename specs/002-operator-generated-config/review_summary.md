@@ -16,7 +16,7 @@ Introduce v1alpha2 API with high-level abstractions that the operator expands in
 
 **After (v1alpha2):**
 ```yaml
-apiVersion: llamastack.ai/v1alpha2
+apiVersion: llamastack.io/v1alpha2
 kind: LlamaStackDistribution
 metadata:
   name: my-stack
@@ -75,8 +75,9 @@ spec:
 1. **API Design**: Does the field structure make sense? Any awkward names?
 2. **Polymorphic Fields**: Single object vs list forms (providers, models)
 3. **Storage Abstraction**: Is kv/sql split intuitive?
-4. **Edge Cases**: Are the 6 documented edge cases reasonable?
-5. **External Dependencies**: Is the OCI label approach for base config extraction acceptable? Any better idea how to extract the `config.yaml` from the distribution OCI image ?
+4. **Edge Cases**: Are the 12 documented edge cases reasonable?
+5. **Phased Base Config**: Is the embedded configs (Phase 1) + OCI labels (Phase 2) approach acceptable? Any better idea how to extract the `config.yaml` from the distribution OCI image?
+6. **OQ-004**: Should the operator auto-create a default LLSD instance on install?
 
 ## Requirements Summary
 
@@ -104,15 +105,84 @@ spec:
 - **Spec 001**: External providers merge into generated config (not mandatory, but was already included in this design)
 - **Distribution images**: Must include OCI labels with base config (check: build system must support this, registry must support label queries (check for disconnected))
 
-## Open Questions for Review
+## Open Questions
 
-1. Should `expose: {}` (empty object) be treated as `expose: true`?
-2. Should disabled API + provider config conflict cause validation error or warning?
-3. Is the `LLSD_<PROVIDER>_<FIELD>` env var naming convention clear?
+Previously open questions (OQ-001 through OQ-003) have been resolved:
+
+- **OQ-001** (Resolved): `expose: {}` is treated as `expose: true`
+- **OQ-002** (Resolved): Disabled API + provider config conflict produces a warning (not error). Disabled takes precedence.
+- **OQ-003** (Resolved): Env var naming uses provider ID: `LLSD_<PROVIDER_ID>_<FIELD>` (unique, collision-free)
+
+Currently open:
+
+- **OQ-004**: Should the operator create a default LlamaStackDistribution instance when installed? If adopted, it should be opt-in via operator configuration (e.g., a Helm value or OLM parameter).
 
 ## Implementation Estimate
 
-5 phases, 33 tasks (see [tasks.md](tasks.md) for details)
+5 phases, 38 tasks (see [tasks.md](tasks.md) for details)
+
+---
+
+## Changes Since Initial Spec (2026-02-10)
+
+The following spec.md updates were applied after a cross-artifact consistency analysis. These are additive refinements, not structural redesigns.
+
+### New: User Story 8 (Runtime Configuration Updates, P1)
+
+Covers day-2 operations: CR updates trigger config regeneration, no-op detection (skip restart when config unchanged), failure preservation (current Deployment kept running on error), and atomic image+config updates on distribution changes.
+
+### New: Phased Base Config Extraction (FR-027a to FR-027j)
+
+Replaced the single "OCI label extraction" approach with a two-phase strategy:
+- **Phase 1 (MVP)**: Embedded default configs via `go:embed`, no distribution image changes needed
+- **Phase 2 (Enhancement)**: OCI label extraction takes precedence when labels are present
+
+This introduces new **Operator Build Requirements**: the operator binary must ship with `distributions.json` (mapping distribution names to image references) and a `configs/<name>/config.yaml` for each named distribution. These are maintained together and updated as part of the operator release process. Downstream builds (e.g., RHOAI) use the existing `image-overrides` mechanism to remap image references without rebuilding the operator.
+
+### New: Runtime Configuration Requirements (FR-095 to FR-101)
+
+- **FR-095-096**: Regenerate on spec change; skip restart when content hash is identical
+- **FR-097**: On failure, preserve the current running Deployment unchanged
+- **FR-098-099**: Atomic updates when distribution changes; status conditions reflect update state
+- **FR-100**: Image + config updated in a single Deployment update (no intermediate mismatch)
+- **FR-101**: Operator upgrade failure handling with `UpgradeConfigFailure` reason
+
+### New: Validation Webhook Requirements (FR-076 to FR-078)
+
+Validating admission webhook for constraints beyond CEL: Secret existence, ConfigMap references, cross-field provider ID validation. Deployed via kustomize. Cluster-scoped `ValidatingWebhookConfiguration` documented as an accepted deviation from constitution §1.1.
+
+### Expanded: Six New Edge Cases
+
+- CR update during active rollout (supersedes in-progress rollout)
+- Operator upgrade with running instances (atomic image+config update)
+- Config generation failure on update (preserve current Deployment)
+- Deeply nested secretKeyRef (top-level only, deeper nesting passed through)
+- Tools without toolRuntime provider (fallback to base config, then error)
+- Shields without safety provider (same fallback pattern)
+
+### Refined: Existing Requirements
+
+- **FR-005**: secretKeyRef discovery depth constrained to top-level settings values only
+- **FR-013**: overrideConfig ConfigMap must be in the same namespace as the CR
+- **FR-020**: Expanded into FR-020/020a/020b/020c covering distribution resolution, status tracking, and image+config consistency
+- **FR-032**: Env var naming clarified with provider ID example (`LLSD_VLLM_PRIMARY_API_KEY`)
+- **FR-043/FR-044**: Tool/shield provider assignment now falls back to base config before erroring
+- **FR-070**: Mutual exclusivity expanded to cover all four fields (`providers`, `resources`, `storage`, `disabled`)
+
+### New: Printer Columns (constitution §2.5)
+
+Default `kubectl get llsd`: Phase, Providers, Available, Age. Wide output adds Distribution image and Config name.
+
+### New: Status Fields
+
+- `resolvedDistribution` (image, configSource, configHash) for change detection across reconciliations and operator upgrades
+- `DeploymentUpdated` and `Available` conditions added alongside existing `ConfigGenerated` and `SecretsResolved`
+
+### CRD Schema Corrections
+
+- API group fixed: `llamastack.io` (was `llamastack.ai` in draft)
+- `targetCPUUtilizationPercentage` aligned with existing v1alpha1 naming
+- Provider `host` field moved into `settings` (uniform provider schema)
 
 ---
 

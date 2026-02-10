@@ -110,6 +110,21 @@ As an existing user, I want my v1alpha1 CRs to continue working after the operat
 2. **Given** a v1alpha1 CR, **When** I retrieve it as v1alpha2, **Then** the conversion webhook translates fields correctly
 3. **Given** a v1alpha2 CR, **When** I retrieve it as v1alpha1, **Then** the conversion webhook translates fields correctly (where mappable)
 
+### User Story 8 - Runtime Configuration Updates (Priority: P1)
+
+As a platform operator, I want to update the LLSD CR (e.g., add a provider, change storage) and have the running LlamaStack instance pick up the changes automatically, so that I can manage configuration declaratively without manual restarts.
+
+**Why this priority**: Day-2 operations are essential for production use. Without this, users must delete and recreate CRs to change configuration.
+
+**Independent Test**: Deploy a LLSD CR, wait for Ready, modify the CR's providers section, verify the Pod restarts with the updated config.yaml.
+
+**Acceptance Scenarios**:
+
+1. **Given** a running LLSD instance, **When** I add a new provider to `spec.providers`, **Then** the operator regenerates config.yaml, creates a new ConfigMap, and triggers a rolling update
+2. **Given** a running LLSD instance, **When** I modify `spec.providers` but the generated config.yaml is identical (e.g., whitespace-only change), **Then** the operator does NOT restart the Pod
+3. **Given** a running LLSD instance, **When** I update `spec.providers` with an invalid configuration, **Then** the operator preserves the current running config, reports the error in status, and does NOT disrupt the running instance
+4. **Given** a running LLSD instance, **When** I change `spec.distribution.name` to a different distribution, **Then** the operator updates both the image and config atomically in a single Deployment update
+
 ### Edge Cases
 
 - **Provider with settings escape hatch**:
@@ -136,6 +151,30 @@ As an existing user, I want my v1alpha1 CRs to continue working after the operat
   - What: Distribution image has unsupported config.yaml version
   - Expected: Reconciliation fails with clear error about version incompatibility
 
+- **CR update during active rollout**:
+  - What: User updates the CR while a previous config change is still rolling out
+  - Expected: Operator generates config from the latest CR spec, superseding the in-progress rollout. The Deployment converges to the newest desired state.
+
+- **Operator upgrade with running LLSD instances**:
+  - What: Operator is upgraded from v1 to v2, changing the image that `distribution.name: rh-dev` resolves to
+  - Expected: Operator detects the image change, regenerates config using the new base config matching the new image, and updates the Deployment atomically (new image + new config together). If config generation fails for the new image, the operator preserves the current running Deployment and reports the error in status.
+
+- **Config generation failure on update**:
+  - What: User changes CR in a way that produces an invalid merged config (e.g., references a provider type not supported by the distribution)
+  - Expected: Operator keeps the current running config and Deployment unchanged, sets `ConfigGenerated=False` with a descriptive error, and does not trigger a Pod restart
+
+- **Deeply nested secretKeyRef in settings**:
+  - What: User specifies `settings: {database: {connection: {secretKeyRef: {name: db, key: url}}}}`
+  - Expected: The nested secretKeyRef is NOT resolved as a secret reference. Only top-level settings values are inspected for secretKeyRef (e.g., `settings.host.secretKeyRef`). The deeply nested object is passed through to config.yaml as a literal map.
+
+- **Tools specified without toolRuntime provider**:
+  - What: User specifies `resources.tools: [websearch]` but does not configure `providers.toolRuntime`
+  - Expected: If the base config provides a default toolRuntime provider, tools are registered with it. If no toolRuntime provider exists in either user config or base config, validation fails with: "resources.tools requires at least one toolRuntime provider to be configured"
+
+- **Shields specified without safety provider**:
+  - What: User specifies `resources.shields: [llama-guard]` but does not configure `providers.safety`
+  - Expected: If the base config provides a default safety provider, shields are registered with it. If no safety provider exists in either user config or base config, validation fails with: "resources.shields requires at least one safety provider to be configured"
+
 ## Requirements
 
 ### Functional Requirements
@@ -146,7 +185,7 @@ As an existing user, I want my v1alpha1 CRs to continue working after the operat
 - **FR-002**: The `spec.distribution` field MUST support both `name` (mapped) and `image` (direct) forms, mutually exclusive
 - **FR-003**: The `spec.providers` section MUST support provider types: `inference`, `safety`, `vectorIo`, `toolRuntime`, `telemetry`
 - **FR-004**: Each provider MUST support polymorphic form: single object OR list of objects with explicit `id` field
-- **FR-005**: Each provider MUST support fields: `provider` (type), `endpoint`, `apiKey` (secretKeyRef), `settings` (escape hatch)
+- **FR-005**: Each provider MUST support fields: `provider` (type), `endpoint`, `apiKey` (secretKeyRef), `settings` (escape hatch). Provider-specific connection fields (e.g., `host` for vectorIo) MUST use `secretKeyRef` within `settings` rather than top-level named fields, keeping the provider schema uniform. The operator MUST recognize `secretKeyRef` objects only at the top level of `settings` values (i.e., `settings.<fieldName>.secretKeyRef`), not at arbitrary nesting depth. Deeper nesting is passed through to config.yaml as-is without secret resolution.
 - **FR-006**: The `spec.resources` section MUST support: `models`, `tools`, `shields`
 - **FR-007**: Resources MUST support polymorphic form: simple string OR object with metadata
 - **FR-008**: The `spec.storage` section MUST have subsections: `kv` (key-value) and `sql` (relational)
@@ -154,12 +193,15 @@ As an existing user, I want my v1alpha1 CRs to continue working after the operat
 - **FR-010**: The `spec.networking` section MUST consolidate: `port`, `tls`, `expose`, `allowedFrom`
 - **FR-011**: The `networking.expose` field MUST support polymorphic form: boolean OR object with `hostname`
 - **FR-012**: The `spec.workload` section MUST contain K8s deployment settings: `replicas`, `workers`, `resources`, `autoscaling`, `storage`, `podDisruptionBudget`, `topologySpreadConstraints`, `overrides`
-- **FR-013**: The `spec.overrideConfig` field MUST be mutually exclusive with `providers`, `resources`, `storage`, `disabled`
+- **FR-013**: The `spec.overrideConfig` field MUST be mutually exclusive with `providers`, `resources`, `storage`, `disabled`. The referenced ConfigMap MUST reside in the same namespace as the LLSD CR (consistent with namespace-scoped RBAC, constitution section 1.1)
 - **FR-014**: The `spec.externalProviders` field MUST remain for integration with spec 001
 
 #### Configuration Generation
 
-- **FR-020**: The operator MUST extract base config.yaml from the distribution container image
+- **FR-020**: The operator MUST resolve `distribution.name` to a concrete image reference using the embedded distribution registry (`distributions.json`) and operator config overrides (`image-overrides`)
+- **FR-020a**: The operator MUST record the resolved image reference in `status.resolvedDistribution.image` after successful resolution
+- **FR-020b**: When the resolved image changes between reconciliations (e.g., after operator upgrade changes the `distributions.json` mapping), the operator MUST regenerate config.yaml using the base config matching the new image and update the Deployment atomically (image + config in a single update)
+- **FR-020c**: The operator MUST NOT update a running LLSD's config without also updating its image to match. Image and base config MUST always be consistent.
 - **FR-021**: The operator MUST generate a complete config.yaml by merging user configuration over base defaults
 - **FR-022**: The operator MUST resolve `secretKeyRef` references to environment variables with deterministic naming
 - **FR-023**: The operator MUST create a ConfigMap containing the generated config.yaml
@@ -170,36 +212,48 @@ As an existing user, I want my v1alpha1 CRs to continue working after the operat
 - **FR-028**: The operator MUST support config.yaml schema versions n and n-1 (current and previous)
 - **FR-029**: The operator MUST reject unsupported config.yaml versions with error: "Unsupported config.yaml version {version}. Supported versions: {list}"
 
-#### Base Config Extraction from OCI Images
+#### Base Config Extraction (Phased Approach)
 
-- **FR-027a**: Distribution images SHOULD include `config.yaml` in OCI labels using one of:
+The base config extraction follows a phased approach. Phase 1 provides an implementation that works without changes to distribution image build processes. Phase 2 adds OCI label-based extraction for distributions that support it.
+
+**Phase 1 - Embedded Default Configs (MVP)**
+
+- **FR-027a**: The operator MUST include embedded default configurations for all distribution names defined in `distributions.json`, shipped as part of the operator binary
+- **FR-027b**: When `distribution.name` is specified, the operator MUST use the embedded config for that distribution as the base for config generation
+- **FR-027c**: When `distribution.image` is specified (direct image reference, no named distribution), the operator MUST require `overrideConfig.configMapName` to provide the base configuration. If `overrideConfig` is not set and no OCI config labels are found (see Phase 2), the operator MUST set `ConfigGenerated=False` with reason `BaseConfigRequired` and message: "Direct image references require either overrideConfig.configMapName or OCI config labels on the image. See docs/configuration.md for details."
+- **FR-027d**: The embedded configs MUST be versioned together with the distribution image mappings in `distributions.json`, ensuring each distribution name maps to a consistent (image, config) pair per operator release
+- **FR-027e**: The operator MUST support air-gapped environments where images are mirrored to internal registries. The embedded config is used regardless of where the image is pulled from.
+
+**Phase 2 - OCI Label Extraction (Enhancement)**
+
+- **FR-027f**: Distribution images MAY include `config.yaml` in OCI labels using one of:
   - `io.llamastack.config.base64`: Base64-encoded config (for configs < 50KB)
   - `io.llamastack.config.layer` + `io.llamastack.config.path`: Layer digest and path reference (for larger configs)
-- **FR-027b**: The operator MUST extract base config from OCI labels in priority order: `base64` → `layer reference`
-- **FR-027c**: The operator MUST use `k8schain` authentication to access registries using the same credentials as kubelet (imagePullSecrets, ServiceAccount)
-- **FR-027d**: The operator MUST cache extracted configs by image digest to avoid repeated registry fetches
-- **FR-027e**: When distribution image lacks config labels, the operator MUST:
-  1. Set status condition `ConfigGenerated=False` with reason `MissingConfigLabels`
-  2. Return error: "Distribution image {image} missing config labels. Add labels using `crane mutate` or use `overrideConfig` to provide configuration manually. See docs/configuration.md for details."
-- **FR-027f**: The operator MUST support air-gapped environments where images are mirrored to internal registries
-- **FR-027g**: When OCI labels are missing, users MAY use `overrideConfig.configMapName` as a workaround to provide full configuration manually
+- **FR-027g**: When OCI config labels are present on the resolved image, the operator MUST use the label-provided config as the base, taking precedence over embedded defaults
+- **FR-027h**: The operator MUST use `k8schain` authentication to access registries using the same credentials as kubelet (imagePullSecrets, ServiceAccount)
+- **FR-027i**: The operator MUST cache extracted configs by image digest to avoid repeated registry fetches
+- **FR-027j**: OCI label extraction enables `distribution.image` usage without `overrideConfig`, since the image itself provides the base config
 
 #### Provider Configuration
 
 - **FR-030**: Provider `provider` field MUST map to `provider_type` with `remote::` prefix (e.g., `vllm` becomes `remote::vllm`)
 - **FR-031**: Provider `endpoint` field MUST map to `config.url` in config.yaml
-- **FR-032**: Provider `apiKey.secretKeyRef` MUST be resolved to an environment variable and referenced as `${env.LLSD_<PROVIDER>_API_KEY}`
+- **FR-032**: Provider `apiKey.secretKeyRef` MUST be resolved to an environment variable and referenced as `${env.LLSD_<PROVIDER_ID>_<FIELD>}`, where `<PROVIDER_ID>` is the provider's unique `id` (explicit or auto-generated per FR-035), uppercased with hyphens replaced by underscores. Example: provider ID `vllm-primary` with field `apiKey` produces `LLSD_VLLM_PRIMARY_API_KEY`.
 - **FR-033**: Provider `settings` MUST be merged into the provider's `config` section in config.yaml
 - **FR-034**: When multiple providers are specified, each MUST have an explicit `id` field
 - **FR-035**: Single provider without `id` MUST auto-generate `provider_id` from the `provider` field value
+
+#### Telemetry Provider
+
+- **FR-036**: Telemetry providers follow the same schema as other provider types (FR-004, FR-005). The `provider` field maps to the telemetry backend (e.g., `opentelemetry`). The `endpoint` and `settings` fields configure the telemetry destination. No telemetry-specific fields are defined beyond the standard provider schema.
 
 #### Resource Registration
 
 - **FR-040**: Simple model strings MUST be registered with the inference provider. When multiple inference providers are configured (list form), the first provider in list order is used. When a single provider is configured (object form), that provider is used.
 - **FR-041**: Model objects with explicit `provider` MUST be registered with the specified provider
 - **FR-042**: Model objects MAY include metadata fields: `contextLength`, `modelType`, `quantization`
-- **FR-043**: Tools MUST be registered as tool groups with default provider configuration
-- **FR-044**: Shields MUST be registered with the configured safety provider
+- **FR-043**: Tools MUST be registered as tool groups with the configured toolRuntime provider. When no explicit toolRuntime provider is configured in the CR, the base config's toolRuntime provider is used. If no toolRuntime provider exists in either source, controller validation MUST fail with an actionable error
+- **FR-044**: Shields MUST be registered with the configured safety provider. When no explicit safety provider is configured in the CR, the base config's safety provider is used. If no safety provider exists in either source, controller validation MUST fail with an actionable error
 
 #### Storage Configuration
 
@@ -223,12 +277,15 @@ As an existing user, I want my v1alpha1 CRs to continue working after the operat
 
 #### Validation
 
-- **FR-070**: CEL validation MUST enforce mutual exclusivity between `providers` and `overrideConfig`
+- **FR-070**: CEL validation MUST enforce mutual exclusivity between `overrideConfig` and each of `providers`, `resources`, `storage`, and `disabled`
 - **FR-071**: CEL validation MUST require explicit `id` when multiple providers are specified for the same API
 - **FR-072**: CEL validation MUST enforce unique provider IDs across all provider types
 - **FR-073**: Controller validation MUST verify referenced Secrets exist before generating config
 - **FR-074**: Controller validation MUST verify referenced ConfigMaps exist for `overrideConfig` and `caBundle`
 - **FR-075**: Validation errors MUST include actionable messages with field paths
+- **FR-076**: A validating admission webhook MUST validate CR creation and update operations for constraints that cannot be expressed in CEL (e.g., Secret existence checks, ConfigMap existence for `overrideConfig`, cross-field semantic validation such as provider ID references in resources)
+- **FR-077**: The validating webhook MUST return structured error responses with field paths and actionable messages following Kubernetes API conventions
+- **FR-078**: The validating webhook MUST be deployed as part of the operator installation and configured via the operator's kustomize manifests with appropriate certificate management
 
 #### API Version Conversion
 
@@ -243,6 +300,19 @@ As an existing user, I want my v1alpha1 CRs to continue working after the operat
 - **FR-091**: External providers (from spec 001) MUST be additive to inline providers
 - **FR-092**: When external provider ID conflicts with inline provider, external MUST override with warning
 
+#### Runtime Configuration Updates
+
+- **FR-095**: When the CR `spec` changes, the operator MUST regenerate config.yaml, create a new ConfigMap with an updated content hash, and update the Deployment to reference the new ConfigMap
+- **FR-096**: The operator MUST NOT restart Pods if the generated config.yaml content is identical to the currently deployed config (content hash comparison)
+- **FR-097**: If config generation or validation fails during a CR update, the operator MUST preserve the current running Deployment (image, ConfigMap, env vars) unchanged and set status condition `ConfigGenerated=False` with the failure reason. The running instance MUST NOT be disrupted.
+- **FR-098**: When `spec.distribution` changes (name or image), the operator MUST update the Deployment atomically per FR-100
+- **FR-099**: Status conditions MUST reflect the reconciliation state during updates: `ConfigGenerated` (config.yaml created successfully), `DeploymentUpdated` (Deployment spec updated), `Available` (at least one Pod is ready with the current config)
+
+#### Distribution Lifecycle
+
+- **FR-100**: The operator MUST update the Deployment's container image and its generated config atomically in a single Deployment update. There MUST be no intermediate state where the running image and config are mismatched.
+- **FR-101**: When config generation fails after an operator upgrade (e.g., the new base config is incompatible with the user's CR fields), the operator MUST preserve the running Deployment per FR-097 and report the failure with reason `UpgradeConfigFailure`
+
 ### Non-Functional Requirements
 
 - **NFR-001**: Configuration generation MUST be deterministic (same inputs produce same outputs)
@@ -254,9 +324,20 @@ As an existing user, I want my v1alpha1 CRs to continue working after the operat
 
 ### External Dependencies
 
-#### Distribution Image Build Requirements
+#### Operator Build Requirements (Phase 1)
 
-Distribution images must include OCI labels for base config extraction. These labels are added post-build using `crane mutate`:
+The operator binary MUST embed default configs for all named distributions:
+
+| Artifact | Description | Required |
+|----------|-------------|----------|
+| `distributions.json` | Maps distribution names to image references | Yes |
+| `configs/<name>/config.yaml` | Default config.yaml for each named distribution | Yes |
+
+The `distributions.json` and corresponding config files are maintained together and updated as part of the operator release process. For downstream builds (e.g., RHOAI), the `image-overrides` mechanism in the operator ConfigMap allows overriding the embedded image references without rebuilding the operator.
+
+#### Distribution Image Build Requirements (Phase 2)
+
+Distribution images MAY include OCI labels for base config extraction. These labels are added post-build using `crane mutate`:
 
 | Label | Description | Required |
 |-------|-------------|----------|
@@ -279,6 +360,8 @@ crane mutate ${IMAGE}:build \
 
 **Why post-build**: Labels containing layer digests cannot be added during build (the layer digest is only known after build). `crane mutate` solves this by updating only the config blob without modifying layers.
 
+**Adoption path**: OCI labels are optional in Phase 1. Distributions that adopt labels gain the ability to be used with `distribution.image` without `overrideConfig`. A future "LLS Distribution Image Specification" document will formalize the label contract.
+
 ### Key Entities
 
 - **ProviderSpec**: Configuration for a single provider (inference, safety, vectorIo, etc.)
@@ -287,13 +370,14 @@ crane mutate ${IMAGE}:build \
 - **NetworkingSpec**: Configuration for network exposure (port, TLS, expose, allowedFrom)
 - **WorkloadSpec**: Kubernetes deployment settings (replicas, resources, autoscaling)
 - **ExposeConfig**: Polymorphic expose configuration (bool or object with hostname)
+- **ResolvedDistributionStatus**: Tracks the resolved image reference, config source (embedded/oci-label), and config hash for change detection
 
 ## CRD Schema
 
 ### Complete v1alpha2 Spec Structure
 
 ```yaml
-apiVersion: llamastack.ai/v1alpha2
+apiVersion: llamastack.io/v1alpha2
 kind: LlamaStackDistribution
 metadata:
   name: my-stack
@@ -303,18 +387,20 @@ spec:
 
   providers:
     inference:
-      provider: vllm
-      endpoint: "http://vllm:8000"
-      apiKey:
-        secretKeyRef: {name: vllm-creds, key: token}
-      settings:
-        max_tokens: 8192
+      - id: vllm-primary
+        provider: vllm
+        endpoint: "http://vllm:8000"
+        apiKey:
+          secretKeyRef: {name: vllm-creds, key: token}
+        settings:
+          max_tokens: 8192
     safety:
       provider: llama-guard
     vectorIo:
       provider: pgvector
-      host:
-        secretKeyRef: {name: pg-creds, key: host}
+      settings:
+        host:
+          secretKeyRef: {name: pg-creds, key: host}
 
   resources:
     models:
@@ -362,7 +448,7 @@ spec:
     autoscaling:
       minReplicas: 1
       maxReplicas: 5
-      targetCPUUtilization: 80
+      targetCPUUtilizationPercentage: 80
     storage:
       size: "10Gi"
       mountPath: "/.llama"
@@ -422,47 +508,68 @@ spec:
 1. Fetch LLSD CR
         │
         ▼
-2. Validate Configuration
-   ├── Check mutual exclusivity (providers vs overrideConfig)
-   ├── Validate secret references exist
-   └── Validate ConfigMap references exist
+2. Resolve Distribution
+   ├── distribution.name → lookup in distributions.json
+   │   └── Check image-overrides in operator ConfigMap
+   ├── distribution.image → use directly
+   └── Record resolved image in status.resolvedDistribution
         │
         ▼
-3. Determine Config Source
+3. Validate Configuration (webhook + controller)
+   ├── Check mutual exclusivity (providers vs overrideConfig)
+   ├── Validate secret references exist
+   ├── Validate ConfigMap references exist
+   └── Validate provider ID references in resources
+        │
+        ▼
+4. Determine Config Source
    ├── If overrideConfig: Use referenced ConfigMap directly
    └── If providers/resources: Generate config
         │
         ▼
-4. Generate Configuration (if not using overrideConfig)
-   ├── Extract base config.yaml from distribution image
-   ├── Expand providers to full config.yaml format
+5. Obtain Base Config
+   ├── Check OCI labels on resolved image (Phase 2)
+   ├── Fall back to embedded config for distribution name (Phase 1)
+   └── Require overrideConfig if neither is available
+        │
+        ▼
+6. Generate Configuration (if not using overrideConfig)
+   ├── Merge user providers over base config providers
    ├── Expand resources to registered_resources format
    ├── Apply storage configuration
    ├── Apply disabled APIs
-   └── Resolve secretKeyRef to environment variables
-        │
-        ▼
-5. Create/Update ConfigMap
-   ├── Generate ConfigMap with content hash in name
-   ├── Set owner reference
-   └── Create new ConfigMap (immutable pattern)
-        │
-        ▼
-6. Update Deployment
-   ├── Mount generated ConfigMap
-   ├── Inject environment variables for secrets
-   └── Add hash annotation for rollout trigger
+   ├── Resolve secretKeyRef to environment variables
+   └── Validate generated config structure
         │
         ▼
 7. Merge External Providers (from spec 001)
-   ├── Add external providers to config
+   ├── Add external providers to generated config
    └── Override on ID conflict (with warning)
         │
         ▼
-8. Update Status
-   ├── Set phase
-   ├── Update conditions
-   └── Record config generation details
+8. Compare with Current State
+   ├── Hash merged config against current ConfigMap
+   ├── If identical → skip update, no Pod restart
+   └── If different → proceed to update
+        │
+        ▼
+9. Create ConfigMap + Update Deployment (atomic)
+   ├── Create new ConfigMap with content hash in name
+   ├── Set owner reference on ConfigMap
+   ├── Update Deployment atomically:
+   │   ├── Container image (from resolved distribution)
+   │   ├── ConfigMap volume mount
+   │   ├── Environment variables for secrets
+   │   └── Hash annotation for rollout trigger
+   └── On failure → preserve current Deployment, report error
+        │
+        ▼
+10. Update Status
+    ├── Set phase
+    ├── Update conditions (ConfigGenerated, DeploymentUpdated,
+    │   Available)
+    ├── Record resolvedDistribution (image, configHash)
+    └── Record config generation details
 ```
 
 ## Configuration Tiers
@@ -475,6 +582,30 @@ spec:
 
 ## Status Reporting
 
+### Printer Columns
+
+The v1alpha2 CRD MUST define the following printer columns for `kubectl get` output (constitution §2.5):
+
+```go
+//+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+//+kubebuilder:printcolumn:name="Distribution",type="string",JSONPath=".status.resolvedDistribution.image",priority=1
+//+kubebuilder:printcolumn:name="Config",type="string",JSONPath=".status.configGeneration.configMapName",priority=1
+//+kubebuilder:printcolumn:name="Providers",type="integer",JSONPath=".status.configGeneration.providerCount"
+//+kubebuilder:printcolumn:name="Available",type="integer",JSONPath=".status.availableReplicas"
+//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+```
+
+Default `kubectl get llsd` output:
+
+```
+NAME       PHASE   PROVIDERS   AVAILABLE   AGE
+my-stack   Ready   3           1           5m
+```
+
+Wide output (`kubectl get llsd -o wide`) includes `priority=1` columns (Distribution, Config).
+
+### Status Fields
+
 The status MUST include:
 
 ```yaml
@@ -485,10 +616,22 @@ status:
       status: "True"
       reason: ConfigGenerationSucceeded
       message: "Generated config.yaml with 3 providers and 2 models"
+    - type: DeploymentUpdated
+      status: "True"
+      reason: DeploymentUpdateSucceeded
+      message: "Deployment updated with config my-stack-config-abc123"
+    - type: Available
+      status: "True"
+      reason: MinimumReplicasAvailable
+      message: "1/1 replicas available with current config"
     - type: SecretsResolved
       status: "True"
       reason: AllSecretsFound
       message: "Resolved 2 secret references"
+  resolvedDistribution:
+    image: "docker.io/llamastack/distribution-starter@sha256:abc123"
+    configSource: embedded        # or "oci-label" (Phase 2)
+    configHash: "sha256:def456"
   configGeneration:
     configMapName: my-stack-config-abc123
     generatedAt: "2026-02-02T12:00:00Z"
@@ -499,9 +642,17 @@ status:
 ## Security Considerations
 
 - **Secret Handling**: Secret values MUST only be passed via environment variables, never embedded in ConfigMap
-- **Environment Variable Naming**: Use deterministic, prefixed names: `LLSD_<PROVIDER>_<FIELD>` (e.g., `LLSD_INFERENCE_API_KEY`)
+- **Environment Variable Naming**: Use deterministic, prefixed names: `LLSD_<PROVIDER_ID>_<FIELD>` (e.g., `LLSD_VLLM_PRIMARY_API_KEY`). Provider ID is uppercased with hyphens replaced by underscores.
 - **ConfigMap Permissions**: Generated ConfigMaps inherit namespace RBAC
 - **Image Extraction**: Config extraction from images uses read-only operations
+- **Webhook Permissions**: The `ValidatingWebhookConfiguration` is a cluster-scoped resource, installed by OLM or kustomize during operator setup (not by the operator at runtime). This is a standard pattern for Kubernetes operators with admission webhooks and is an accepted deviation from constitution §1.1. The operator itself remains namespace-scoped at runtime.
+
+## Open Questions
+
+- ~~**OQ-001**~~: Resolved. `expose: {}` is treated as `expose: true` (see Edge Cases).
+- ~~**OQ-002**~~: Resolved. Disabled API + provider config conflict produces a **warning** (not an error). The `disabled` list takes precedence: the provider config is accepted but ignored at runtime. Warning is logged and reported in status conditions. (From PR #242 review; resolved per edge case "Disabled APIs conflict with providers")
+- ~~**OQ-003**~~: Resolved. Environment variable naming uses the **provider ID** (not provider type or API type): `LLSD_<PROVIDER_ID>_<FIELD>`. The provider ID is unique across all providers (enforced by FR-072), ensuring no collisions. For single providers without explicit `id`, the auto-generated ID from FR-035 is used. Examples: `LLSD_VLLM_PRIMARY_API_KEY`, `LLSD_PGVECTOR_HOST`. Characters not valid in env var names (hyphens) are replaced with underscores and uppercased. (From PR #242 review)
+- **OQ-004**: Should the operator create a default LlamaStackDistribution instance when installed? This is uncommon for Kubernetes operators but could improve the getting-started experience. If adopted, it should be opt-in via operator configuration (e.g., a Helm value or OLM parameter). (From team discussion, 2026-02-10)
 
 ## References
 

@@ -5,13 +5,13 @@
 
 ## Task Overview
 
-| Phase | Tasks | Priority | Estimated Effort |
-|-------|-------|----------|------------------|
-| Phase 1: CRD Schema | 8 tasks | P1 | Medium |
-| Phase 2: Config Generation | 8 tasks | P1 | Large |
-| Phase 3: Controller Integration | 8 tasks | P1 | Large |
-| Phase 4: Conversion Webhook | 4 tasks | P2 | Medium |
-| Phase 5: Testing & Docs | 5 tasks | P2 | Medium |
+| Phase | Tasks | Priority |
+|-------|-------|----------|
+| Phase 1: CRD Schema | 8 tasks | P1 |
+| Phase 2: Config Generation | 8 tasks | P1 |
+| Phase 3: Controller Integration | 12 tasks | P1 |
+| Phase 4: Conversion Webhook | 4 tasks | P2 |
+| Phase 5: Testing & Docs | 6 tasks | P2 |
 
 ---
 
@@ -31,7 +31,7 @@ Create the v1alpha2 API package with groupversion_info.go and base types.
 
 **Acceptance criteria**:
 - [ ] v1alpha2 package compiles
-- [ ] GroupVersion is `llamastack.ai/v1alpha2`
+- [ ] GroupVersion is `llamastack.io/v1alpha2`
 - [ ] Scheme registration works
 
 ---
@@ -46,7 +46,7 @@ Define ProvidersSpec and ProviderConfig types with polymorphic support.
 
 **Types to define**:
 - `ProvidersSpec` (inference, safety, vectorIo, toolRuntime, telemetry)
-- `ProviderConfig` (id, provider, endpoint, apiKey, host, settings)
+- `ProviderConfig` (id, provider, endpoint, apiKey, settings)
 - `ProviderConfigOrList` (polymorphic wrapper using json.RawMessage)
 - `SecretKeyRef` (name, key)
 
@@ -161,19 +161,28 @@ Create the main LlamaStackDistributionSpec with all sections and add CEL validat
 - `LlamaStackDistributionSpec` (distribution, providers, resources, storage, disabled, networking, workload, externalProviders, overrideConfig)
 - `LlamaStackDistribution` (main CRD type)
 - `LlamaStackDistributionList`
-- `OverrideConfigSpec` (configMapName, configMapNamespace)
+- `OverrideConfigSpec` (configMapName; must be in same namespace as CR)
 
 **CEL validations**:
 - Mutual exclusivity: providers vs overrideConfig
 - Mutual exclusivity: resources vs overrideConfig
 - Mutual exclusivity: storage vs overrideConfig
+- Mutual exclusivity: disabled vs overrideConfig
 
 **Requirements covered**: FR-001, FR-002, FR-009, FR-013, FR-014, FR-070
+
+**Printer columns** (constitution §2.5):
+- `Phase` (`.status.phase`)
+- `Distribution` (`.status.resolvedDistribution.image`, priority=1, wide output only)
+- `Config` (`.status.configGeneration.configMapName`, priority=1, wide output only)
+- `Providers` (`.status.configGeneration.providerCount`)
+- `Available` (`.status.availableReplicas`)
+- `Age` (`.metadata.creationTimestamp`)
 
 **Acceptance criteria**:
 - [ ] Complete spec structure compiles
 - [ ] CEL validations reject invalid combinations
-- [ ] Printer columns defined for kubectl output
+- [ ] Printer columns defined: Phase, Providers, Available, Age (default); Distribution, Config (wide)
 
 ---
 
@@ -220,63 +229,47 @@ Create the pkg/config package directory structure with basic types.
 
 ---
 
-### Task 2.2: Implement Base Config Extraction (OCI Label Approach)
+### Task 2.2: Implement Base Config Resolution (Phased)
 
 **Priority**: P1
 **Blocked by**: 2.1
 
 **Description**:
-Implement extraction of base config.yaml from distribution images using OCI labels.
-Uses `k8schain` for registry authentication (same credentials as kubelet).
+Implement base config resolution with a phased approach. Phase 1 (MVP) uses configs embedded in the operator binary via `go:embed`. Phase 2 (Enhancement) adds OCI label-based extraction as an optional override.
 
-**File**: `pkg/config/extractor.go`
+**Files**:
+- `pkg/config/resolver.go` - BaseConfigResolver with resolution priority logic
+- `configs/` - Embedded default config directory (one `config.yaml` per named distribution)
+- `Makefile` - Build-time validation target (`validate-configs`)
 
-**Approach**:
-1. Fetch image config blob (contains labels) using `crane.Config()`
-2. Check for `io.llamastack.config.base64` label (inline config)
-3. If not present, check for `io.llamastack.config.layer` + `.path` (layer reference)
-4. Extract config from appropriate source
-5. Cache by image digest
+**Phase 1 (MVP) Approach**:
+1. Create `configs/<name>/config.yaml` for each distribution in `distributions.json`
+2. Embed via `//go:embed configs` in the resolver package
+3. On resolution: lookup embedded config by `distribution.name`
+4. For `distribution.image` without OCI labels: require `overrideConfig`
 
-**Dependencies**:
-- `github.com/google/go-containerregistry/pkg/crane`
-- `github.com/google/go-containerregistry/pkg/authn/k8schain`
-
-**Types**:
-```go
-type ConfigLocation struct {
-    Base64      string  // Inline base64 encoded config
-    LayerDigest string  // Layer digest containing config
-    Path        string  // Path within layer
-    Version     string  // Config schema version
-}
-
-type ImageConfigExtractor struct {
-    k8sClient      client.Client
-    namespace      string
-    serviceAccount string
-    cache          *sync.Map // digest -> BaseConfig
-}
-```
+**Phase 2 (Enhancement) Approach**:
+1. Add `pkg/config/oci_extractor.go` using `k8schain` for registry auth
+2. Check OCI labels on resolved image first (takes precedence over embedded)
+3. Fall back to embedded config if no labels found
+4. Cache by image digest
 
 **Functions**:
-- `NewImageConfigExtractor(client, namespace, sa) *ImageConfigExtractor`
-- `(e *ImageConfigExtractor) Extract(ctx, imageRef) (*BaseConfig, error)`
-- `(e *ImageConfigExtractor) getConfigLocation(ctx, imageRef, keychain) (*ConfigLocation, error)`
-- `(e *ImageConfigExtractor) extractFromBase64(b64) (*BaseConfig, error)`
-- `(e *ImageConfigExtractor) extractFromLayer(ctx, imageRef, layerDigest, path, keychain) (*BaseConfig, error)`
+- `NewBaseConfigResolver(distributionImages, imageOverrides) *BaseConfigResolver`
+- `(r *BaseConfigResolver) Resolve(ctx, distribution) (*BaseConfig, string, error)`
+- `(r *BaseConfigResolver) loadEmbeddedConfig(name) (*BaseConfig, error)`
+- `(r *BaseConfigResolver) resolveImage(distribution) (string, error)`
 
-**Requirements covered**: FR-020, FR-027a through FR-027f, NFR-006
-
-**Alternative**: See `alternatives/init-container-extraction.md` for init container approach
+**Requirements covered**: FR-020, FR-027a through FR-027e (Phase 1), FR-027f through FR-027j (Phase 2), NFR-006
 
 **Acceptance criteria**:
-- [ ] Can extract config from `io.llamastack.config.base64` label
-- [ ] Can extract config from layer using `io.llamastack.config.layer` + `.path` labels
-- [ ] Uses k8schain for registry authentication (respects imagePullSecrets)
-- [ ] Caching by image digest prevents repeated extraction
-- [ ] Clear error message when distribution image lacks config labels
-- [ ] Unit tests for both extraction strategies
+- [ ] Embedded configs loaded via `go:embed` for all named distributions
+- [ ] `distribution.name` resolves to embedded config
+- [ ] `distribution.image` without OCI labels returns clear error requiring `overrideConfig`
+- [ ] Build-time validation ensures all distributions have configs
+- [ ] (Phase 2) OCI label extraction takes precedence over embedded when available
+- [ ] (Phase 2) Caching by image digest prevents repeated extraction
+- [ ] Unit tests for resolution priority logic
 
 ---
 
@@ -352,6 +345,8 @@ Implement resource spec expansion to registered_resources format.
 - [ ] Model objects expand correctly
 - [ ] Default provider assignment works
 - [ ] Tools and shields expand correctly
+- [ ] Tools fail with actionable error when no toolRuntime provider exists (user or base config)
+- [ ] Shields fail with actionable error when no safety provider exists (user or base config)
 
 ---
 
@@ -641,8 +636,10 @@ Add config generation status fields and conditions.
 **File**: `controllers/status.go`
 
 **New conditions**:
-- `ConfigGenerated`
-- `SecretsResolved`
+- `ConfigGenerated`: True when config successfully generated
+- `DeploymentUpdated`: True when Deployment spec updated with current config
+- `Available`: True when at least one Pod is ready with current config
+- `SecretsResolved`: True when all secret references valid
 
 **New status fields**:
 ```go
@@ -653,12 +650,187 @@ type ConfigGenerationStatus struct {
     ResourceCount  int
     ConfigVersion  int
 }
+
+type ResolvedDistributionStatus struct {
+    Image        string // Resolved image from distribution.name
+    ConfigSource string // "embedded" or "oci-label"
+    ConfigHash   string // Hash of current base config
+}
 ```
+
+**Requirements covered**: FR-020a, FR-099
 
 **Acceptance criteria**:
 - [ ] New conditions set correctly
 - [ ] Config generation details in status
+- [ ] `resolvedDistribution` recorded in status
 - [ ] Status updated on each reconcile
+
+---
+
+### Task 3.9: Implement Validating Admission Webhook
+
+**Priority**: P1
+**Blocked by**: 1.7
+
+**Description**:
+Implement a validating webhook for constraints that cannot be expressed in CEL, complementing the CEL rules added in Phase 1 (Task 1.7).
+
+**File**: `api/v1alpha2/llamastackdistribution_webhook.go`
+
+**Validation logic**:
+- Verify referenced Secrets exist in the namespace (fast admission-time feedback)
+- Verify referenced ConfigMaps exist for `overrideConfig` and `caBundle`
+- Validate provider ID references in `resources.models[].provider`
+- Cross-field semantic validation (e.g., model provider references valid provider IDs)
+
+**Configuration**:
+- Webhook deployment via kustomize manifests (`config/webhook/`)
+- Certificate management using cert-manager or operator-managed self-signed certs
+- Failure policy: `Fail` (reject CR if webhook unreachable)
+
+```go
+func (r *LlamaStackDistribution) ValidateCreate() (admission.Warnings, error) {
+    return r.validate()
+}
+
+func (r *LlamaStackDistribution) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
+    return r.validate()
+}
+
+func (r *LlamaStackDistribution) validate() (admission.Warnings, error) {
+    var allErrs field.ErrorList
+    // Validate secret references exist
+    // Validate ConfigMap references exist
+    // Validate provider ID cross-references
+    return nil, allErrs.ToAggregate()
+}
+```
+
+**Requirements covered**: FR-076, FR-077, FR-078
+
+**Acceptance criteria**:
+- [ ] Webhook validates Secret existence at admission time
+- [ ] Webhook validates ConfigMap references
+- [ ] Webhook validates cross-field provider ID references
+- [ ] Clear error messages with field paths
+- [ ] Webhook kustomize manifests configured
+
+---
+
+### Task 3.10: Implement Runtime Configuration Update Logic
+
+**Priority**: P1
+**Blocked by**: 3.3
+
+**Description**:
+On every reconciliation, compare the generated config hash with the currently deployed config hash. Only update the Deployment when content actually changes. On failure, preserve the current running Deployment.
+
+**File**: `controllers/llamastackdistribution_controller.go`
+
+**Logic**:
+```
+Reconcile()
+├── Generate config (or use overrideConfig)
+├── Compute content hash of generated config
+├── Compare with status.configGeneration.configMapName hash
+├── If identical → skip update, no Pod restart
+└── If different:
+    ├── Create new ConfigMap
+    ├── Update Deployment atomically (image + config + env)
+    ├── On success → update status
+    └── On failure → preserve current Deployment, report error
+```
+
+**Failure preservation**:
+```go
+func (r *Reconciler) reconcileConfig(ctx context.Context, instance *v1alpha2.LlamaStackDistribution) error {
+    generated, err := config.GenerateConfig(ctx, instance.Spec, resolvedImage)
+    if err != nil {
+        // Preserve current running state, report error
+        meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+            Type:    "ConfigGenerated",
+            Status:  metav1.ConditionFalse,
+            Reason:  "ConfigGenerationFailed",
+            Message: err.Error(),
+        })
+        return nil  // Don't requeue, let user fix the CR
+    }
+    // ... proceed with update
+}
+```
+
+**Requirements covered**: FR-095, FR-096, FR-097
+
+**Acceptance criteria**:
+- [ ] Config hash comparison prevents unnecessary restarts
+- [ ] Failed config generation preserves current Deployment
+- [ ] Error reported in status conditions on failure
+- [ ] Successful update reflected in status
+
+---
+
+### Task 3.11: Implement Atomic Deployment Updates
+
+**Priority**: P1
+**Blocked by**: 3.10
+
+**Description**:
+When the Deployment needs updating, apply all changes (image, ConfigMap mount, env vars, hash annotation) in a single `client.Update()` call to prevent intermediate states where the running image and config are mismatched.
+
+**File**: `controllers/llamastackdistribution_controller.go`
+
+```go
+func (r *Reconciler) updateDeploymentAtomically(
+    ctx context.Context,
+    deployment *appsv1.Deployment,
+    resolvedImage string,
+    configMapName string,
+    envVars []corev1.EnvVar,
+    configHash string,
+) error {
+    // Update all fields in one mutation
+    deployment.Spec.Template.Spec.Containers[0].Image = resolvedImage
+    // ... update ConfigMap volume, env vars, hash annotation
+    return r.Client.Update(ctx, deployment)
+}
+```
+
+**Operator upgrade handling**: When the operator is upgraded and `distributions.json` maps a name to a new image, the reconciler detects the image change via `status.resolvedDistribution.image` comparison and triggers an atomic update with the new base config.
+
+**Requirements covered**: FR-098, FR-100, FR-101
+
+**Acceptance criteria**:
+- [ ] Image + ConfigMap + env vars updated in single API call
+- [ ] No intermediate state where image and config mismatch
+- [ ] Operator upgrade triggers atomic update when image changes
+- [ ] Failed update preserves current Deployment (see FR-097)
+
+---
+
+### Task 3.12: Implement Distribution Resolution Tracking
+
+**Priority**: P1
+**Blocked by**: 3.3
+
+**Description**:
+Track the resolved image in `status.resolvedDistribution` so the controller can detect changes across reconciliations (e.g., after operator upgrade where `distributions.json` maps a name to a new image).
+
+**File**: `controllers/llamastackdistribution_controller.go`
+
+**Logic**:
+1. Resolve `distribution.name` to concrete image using `distributions.json` + `image-overrides`
+2. Compare with `status.resolvedDistribution.image`
+3. If different: regenerate config with new base, update atomically
+4. Record new resolved image in status
+
+**Requirements covered**: FR-020a, FR-020b, FR-020c
+
+**Acceptance criteria**:
+- [ ] Resolved image recorded in `status.resolvedDistribution`
+- [ ] Image change detected between reconciliations
+- [ ] Image change triggers config regeneration and atomic update
+- [ ] Config source ("embedded" or "oci-label") recorded in status
 
 ---
 
@@ -675,21 +847,19 @@ Mark v1alpha2 as the conversion hub (storage version).
 **File**: `api/v1alpha2/llamastackdistribution_conversion.go`
 
 **Implementation**:
-```go
-func (src *LlamaStackDistribution) ConvertTo(dstRaw conversion.Hub) error {
-    return nil  // v1alpha2 is hub
-}
 
-func (dst *LlamaStackDistribution) ConvertFrom(srcRaw conversion.Hub) error {
-    return nil  // v1alpha2 is hub
-}
+In controller-runtime, the Hub only implements a marker method. Conversion logic lives on the Spoke (v1alpha1).
+
+```go
+// Hub marks v1alpha2 as the storage version for conversion.
+func (dst *LlamaStackDistribution) Hub() {}
 ```
 
 **Requirements covered**: FR-081
 
 **Acceptance criteria**:
-- [ ] v1alpha2 implements Hub interface
-- [ ] No-op conversion for hub
+- [ ] v1alpha2 implements `conversion.Hub` interface via `Hub()` marker method
+- [ ] No conversion logic on the hub (all conversion is on the v1alpha1 spoke)
 
 ---
 
@@ -811,11 +981,18 @@ Write integration tests for v1alpha2 controller logic.
 - Network exposure
 - Override config
 - Validation errors
+- Runtime config updates (US8): CR update triggers config regeneration
+- Atomic Deployment updates: image + config updated together
+- Webhook validation: invalid references rejected at admission
+- Distribution resolution tracking: operator upgrade triggers update
+- Config generation failure: current Deployment preserved
 
 **Acceptance criteria**:
-- [ ] All user stories have tests
+- [ ] All user stories have tests (including US8)
 - [ ] Edge cases covered
 - [ ] Error scenarios tested
+- [ ] Webhook validation tested
+- [ ] Atomic update scenarios tested
 
 ---
 
@@ -884,6 +1061,30 @@ Update documentation for v1alpha2.
 
 ---
 
+### Task 5.6: Performance Benchmarks
+
+**Priority**: P2
+**Blocked by**: 2.8
+
+**Description**:
+Write Go benchmark tests to verify config generation completes within the NFR-002 threshold (5 seconds for typical configurations).
+
+**File**: `pkg/config/config_benchmark_test.go`
+
+**Benchmark scenarios**:
+- Single provider, single model (minimal config)
+- 5 providers, 10 models, storage, networking (typical production)
+- 10 providers, 50 models, all features enabled (stress test)
+
+**Requirements covered**: NFR-002
+
+**Acceptance criteria**:
+- [ ] Benchmark tests pass under 5 seconds for typical configuration
+- [ ] Results documented in test output
+- [ ] CI runs benchmarks (optional, for regression detection)
+
+---
+
 ## Task Dependencies Graph
 
 ```
@@ -905,12 +1106,18 @@ Phase 2 (Config Generation)
 Phase 3 (Controller)
 ├── 3.1 ─► 3.2, 3.5, 3.6
 ├── 3.2 ─► 3.3
-├── 3.3 ─► 3.4, 3.7, 3.8
-└── ...
+├── 3.3 ─► 3.4, 3.7, 3.8, 3.10, 3.12
+├── 3.10 ─► 3.11
+├── 3.9 (blocked by 1.7)
+└── 3.12 (parallel with 3.10)
 
 Phase 4 (Webhook)
 └── 4.1 ─► 4.2, 4.3 ─► 4.4
 
 Phase 5 (Testing)
-└── Depends on respective phases
+├── 5.1 (blocked by Phase 2)
+├── 5.2 (blocked by Phase 3)
+├── 5.3 (blocked by Phase 4)
+├── 5.4, 5.5 (blocked by Phase 3, 4)
+└── 5.6 (blocked by 2.8)
 ```
