@@ -96,7 +96,7 @@ func (c *BaseConfigCache) GetOrCreate(ctx context.Context, name, image string) (
     }
 
     // Verify image matches (invalidate cache if distribution changed)
-    if cm.Annotations["llamastack.ai/source-image"] != image {
+    if cm.Annotations["llamastack.io/source-image"] != image {
         // Image changed, delete cached config to trigger re-extraction
         if err := c.client.Delete(ctx, &cm); err != nil {
             return nil, err
