@@ -195,8 +195,8 @@ WARNING: Provider metadata mismatch for 'custom-vllm'
 **Decision**: External providers override user ConfigMap and distribution defaults.
 
 **Merge Order** (later overwrites earlier):
-1. Base `run.yaml` from distribution image
-2. User ConfigMap `run.yaml` (completely replaces base if specified)
+1. Base `config.yaml` from distribution image
+2. User ConfigMap `config.yaml` (completely replaces base if specified)
 3. External providers (merged into providers section)
 
 **Rationale**:
@@ -221,7 +221,7 @@ Action: Return error, set LLSD status to Failed
 Message: "Duplicate provider_id 'my-provider' in externalProviders: found in inference[0] and inference[1]"
 ```
 
-**Implementation Detail**: User ConfigMap completely replaces base run.yaml (not merged), then external providers are merged into whichever exists.
+**Implementation Detail**: User ConfigMap completely replaces base config.yaml (not merged), then external providers are merged into whichever exists.
 
 ---
 
@@ -353,7 +353,7 @@ Resolution: Move the provider to externalProviders.safety section in the LLSD sp
 ### Python Package Import Mechanics
 
 **How llama-stack discovers providers**:
-1. Looks for module specified in `run.yaml` `module:` field
+1. Looks for module specified in `config.yaml` `module:` field
 2. Imports module: `importlib.import_module(module_name)`
 3. Calls `get_provider_spec()` to get provider metadata
 4. Validates provider implements required API interface

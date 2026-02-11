@@ -1,9 +1,73 @@
+<!--
+================================================================================
+SYNC IMPACT REPORT
+================================================================================
+
+Version Change: 1.0.0 → 2.0.0
+Change Type: MAJOR (consolidation of duplicate constitution files)
+Date: 2026-01-30
+
+Modified Principles:
+- All principles updated to comprehensive format from specs/constitution.md
+
+Added Sections (from specs/constitution.md):
+- Quick Reference: Top 10 Critical Rules
+- API Design (CRD) with detailed validation patterns
+- Status Reporting with conditions helpers
+- Error Handling with detailed patterns
+- Logging with structured patterns
+- Testing with comprehensive strategies
+- Code Organization file structure
+- Naming Conventions
+- Dependencies and Imports
+- Documentation standards
+- Feature Flags
+- API Versioning
+- Git Commit Guidelines
+- Enforcement (automated tooling and code review)
+
+Preserved from .specify/memory/constitution.md:
+- SYNC IMPACT REPORT header format
+- Kustomize-Based Manifests (Principle VIII details)
+- ConfigMap Content-Based Rolling Updates (Principle X details)
+- Security by Default specifics (FSGroup, init containers, ServiceAccount)
+- Code Quality Standards (linter configuration)
+- Build & Release Standards
+- Governance section
+
+Removed Files:
+- specs/constitution.md (merged into this file)
+
+Template Alignment Status:
+- ✅ plan-template.md: Constitution Check section present
+- ✅ spec-template.md: No constitution-specific sections required
+- ✅ tasks-template.md: Task organization aligns with test isolation principle
+- ✅ README.md: Existing structure matches documentation standards
+
+Follow-up TODOs:
+- None - consolidation complete
+
+Constitutional Principles Summary:
+1. Spec-First Reconciliation (NON-NEGOTIABLE)
+2. Immutable Field Respect
+3. Owner Reference Discipline
+4. Error Handling Standard (NON-NEGOTIABLE)
+5. Test Isolation & Anti-Fragility
+6. Structured Logging & Observability
+7. Feature Flag Pattern
+8. Kustomize-Based Manifests
+9. Security by Default
+10. ConfigMap Content-Based Rolling Updates
+
+================================================================================
+-->
+
 # Project Constitution: llama-stack-k8s-operator
 
 **Purpose**: Define project-wide principles, patterns, and standards that guide all specifications and implementations.
 
-**Last Updated**: 2025-11-15
-**Version**: 1.4
+**Last Updated**: 2026-01-30
+**Version**: 2.0.0
 
 ---
 
@@ -72,10 +136,42 @@ Quick lookup for the most important rules during day-to-day development:
 - **PATTERN**: Separate reconciliation logic (`reconcileResources`) from status updates (`updateStatus`)
 - **RATIONALE**: Ensures observable state even during failures
 
+**Spec-First Reconciliation (NON-NEGOTIABLE)**:
+- Reconcile loops process spec → desired state → apply changes → update status
+- Status updates happen at the end of reconciliation, always (even on errors)
+- Never modify spec during reconciliation; spec changes come from users only
+- Phase-based state management with clear transitions (Pending → Initializing → Ready → Failed)
+- Separate conditions track individual component concerns (Deployment, Health, Storage, Service)
+
 ### 1.3 Resource Ownership
 - **MUST**: Owned resources MUST use owner references for garbage collection
 - **MUST**: Resources owned by the operator MUST have consistent labeling (see Naming Conventions)
 - **RATIONALE**: Enables automatic cleanup on CR deletion
+- **MUST**: Never set owner references on cluster-scoped resources
+- **MUST**: Use controller-runtime's owner reference helpers for consistency
+
+### 1.4 Immutable Field Respect
+- **MUST**: Never modify immutable Kubernetes fields; preserve them across updates
+- **MUST**: Deployment selectors are immutable and MUST be preserved during updates
+- **MUST**: Use server-side apply with ForceOwnership for safe updates
+- **MUST**: Validate immutable fields before attempting updates
+- **MUST**: Fail fast with clear errors when immutable constraints are violated
+
+### 1.5 Kustomize-Based Manifests
+- **PATTERN**: Use Kustomize with plugin transformations over template rendering
+- Embedded YAML manifests with kustomization.yaml
+- Custom plugins for namespace, name-prefix, field mutations
+- Runtime transformations based on CR spec
+- Conditional resource inclusion/exclusion (e.g., PVC only if storage defined)
+- Delete excluded resources from previous reconciliations for cleanup
+
+### 1.6 ConfigMap Content-Based Rolling Updates
+- **PATTERN**: Hash ConfigMap contents in pod annotations to trigger rolling updates on config changes
+- Watch referenced ConfigMaps with custom predicates
+- Calculate hash of ConfigMap data and inject into pod annotations
+- Hash change triggers Deployment rolling update automatically
+- Field indexing for efficient ConfigMap lookups with fallback
+- Only reconcile on spec changes (not status/metadata updates)
 
 ---
 
@@ -234,7 +330,8 @@ Quick lookup for the most important rules during day-to-day development:
   return fmt.Errorf("failed to fetch ConfigMap %s/%s: %w", namespace, name, err)
   ```
 
-- **RATIONALE**: Preserves error chain for debugging, provides context
+- **MUST**: All wrapped errors MUST start with "failed to" prefix for consistency and tooling
+- **RATIONALE**: Preserves error chain for debugging, provides context, enforced by pre-commit hooks
 
 ### 4.2 Error Messages
 
@@ -313,6 +410,8 @@ Quick lookup for the most important rules during day-to-day development:
       "deployment", deploymentName,
       "replicas", replicas)
   ```
+
+- **PATTERN**: Dual output for diffs: fmt.Printf for readability + logger for structured data
 
 ---
 
@@ -410,6 +509,15 @@ Quick lookup for the most important rules during day-to-day development:
 
 - **RATIONALE**: Test name documents expected behavior
 
+### 6.7 Test Isolation & Anti-Fragility
+
+- **MUST**: Tests MUST be isolated, intention-revealing, and resistant to implementation changes
+- **DAMP + DRY together**: Descriptive test scenarios (DAMP) with DRY setup utilities
+- **AAA pattern**: Arrange, Act, Assert with clear separation
+- **Unique namespaces**: Each test gets isolated namespace, no shared state
+- **Production constants in integration tests**: Verify defaults are applied correctly
+- **Test-owned constants in E2E**: Focus on behavior, not implementation details
+
 ---
 
 ## 7. Code Organization
@@ -461,6 +569,26 @@ Quick lookup for the most important rules during day-to-day development:
   )
   ```
 
+### 7.5 Package Structure
+
+```
+/api/v1alpha1          - CRD types and generated code (pure data types)
+/controllers           - Main reconciler logic (orchestration, status management)
+/pkg/deploy           - Resource rendering and application
+/pkg/compare          - Resource comparison utilities
+/pkg/cluster          - Cluster configuration management
+/pkg/featureflags     - Feature flag definitions
+/tests/e2e            - End-to-end tests
+```
+
+### 7.6 Separation of Concerns
+
+- **API layer**: Pure data types in api/v1alpha1, minimal methods
+- **Controller layer**: Orchestration logic, no business domain logic
+- **Package layer**: Reusable utilities and domain logic
+- **Manifest layer**: Declarative Kubernetes resources only
+- **Test layer**: Isolated with dedicated builders and utilities
+
 ---
 
 ## 8. Naming Conventions
@@ -499,6 +627,16 @@ Quick lookup for the most important rules during day-to-day development:
   ```
 
 - **EXCEPTION**: Loop variables can be short (`i`, `j`, `k`)
+
+### 8.4 Go Coding Standards
+
+- **Package names**: Lowercase, descriptive (deploy, compare, cluster, featureflags)
+- **Exported constants**: PascalCase with descriptive prefixes
+- **Private functions**: camelCase with clear verb prefixes
+- **Receiver names**: Single letter (r for reconciler) or short abbreviations
+- **Error early returns**: Fail fast pattern throughout
+- **No naked returns**: Named returns only when clarity demands
+- **Context propagation**: Context passed through call chains
 
 ---
 
@@ -600,6 +738,15 @@ Quick lookup for the most important rules during day-to-day development:
 
 - **RATIONALE**: Allows gradual rollout and easy disablement
 
+### 11.2 ConfigMap-Based Feature Flags
+
+- **PATTERN**: Use ConfigMap-based feature flags with YAML structure for gradual rollouts
+- Feature flags defined in dedicated ConfigMap
+- YAML-based structure with enable/disable semantics
+- Features can be toggled without code changes or redeployments
+- Optional features (e.g., NetworkPolicy) respect flag state
+- Default values documented in code for clarity
+
 ---
 
 ## 12. API Versioning
@@ -624,15 +771,28 @@ Quick lookup for the most important rules during day-to-day development:
 
 ---
 
-## 13. Git Commit Guidelines
+## 13. Security
 
-### 13.1 Commit Messages
+### 13.1 Security by Default
+
+- **MUST**: Apply restrictive security contexts and validate all security-related inputs
+- **Pod-level FSGroup**: Set to 1001 for volume write access
+- **Init containers**: AllowPrivilegeEscalation=false, RunAsNonRoot=true, drop ALL capabilities
+- **PEM validation**: Validate certificate format before use
+- **ServiceAccount per instance**: Following instance-name-sa pattern
+- **SSL/TLS injection**: Proper CA bundle handling with auto-detection
+
+---
+
+## 14. Git Commit Guidelines
+
+### 14.1 Commit Messages
 
 - **MUST**: Use conventional commit format when applicable (feat:, fix:, docs:, etc.)
 - **SHOULD**: Include context and reasoning in commit body for non-trivial changes
 - **SHOULD**: Reference related issues/PRs when applicable
 
-### 13.2 AI-Assisted Commits
+### 14.2 AI-Assisted Commits
 
 - **MUST NOT**: Include `Co-Authored-By: Claude <noreply@anthropic.com>` or similar AI co-author attributions
 - **RATIONALE**: AI co-authorship causes Contributor License Agreement (CLA) check failures
@@ -641,7 +801,7 @@ Quick lookup for the most important rules during day-to-day development:
 
 **AI Attribution Format**:
 ```
-Assisted-by: Claude Code
+Assisted-by: 🤖 Claude Code
 ```
 
 **Example commit message**:
@@ -650,13 +810,13 @@ git commit -s -m "feat: add new feature
 
 This feature implements...
 
-Assisted-by: Claude Code
+Assisted-by: 🤖 Claude Code
 Signed-off-by: Your Name <your.email@example.com>"
 ```
 
 **Rationale**: The `Assisted-by:` trailer provides a consistent format for acknowledging AI assistance while maintaining CLA compliance and avoiding co-authorship issues.
 
-### 13.3 Commit Sign-Off
+### 14.3 Commit Sign-Off
 
 - **MUST**: All commits MUST be signed off using `git commit --signoff` (or `-s`)
 - **RATIONALE**: Sign-off indicates agreement with Developer Certificate of Origin (DCO)
@@ -672,7 +832,7 @@ git commit -s -m "feat: add new feature"
 # Signed-off-by: John Doe <john.doe@example.com>
 ```
 
-### 13.4 Commit Hygiene
+### 14.4 Commit Hygiene
 
 - **SHOULD**: Make atomic commits (one logical change per commit)
 - **SHOULD**: Ensure each commit passes tests and builds successfully
@@ -680,7 +840,42 @@ git commit -s -m "feat: add new feature"
 
 ---
 
-## Enforcement
+## 15. Build & Release Standards
+
+### 15.1 Makefile Organization
+
+- **Phony targets**: All targets declared as .PHONY
+- **Help system**: Auto-generated help from inline comments
+- **Tool versioning**: Pinned versions (kustomize, controller-gen, etc.)
+- **Local overrides**: -include local.mk for custom development values
+- **Release coordination**: VERSION and LLAMASTACK_VERSION updated together
+
+### 15.2 Image Management
+
+- **Default registry**: quay.io/llamastack
+- **Multi-platform**: linux/arm64, amd64, s390x, ppc64le support
+- **Container tool agnostic**: CONTAINER_TOOL variable (podman/docker)
+- **Version tagging**: Semantic versioning with latest fallback
+
+### 15.3 Code Quality Gates (NON-NEGOTIABLE)
+
+- **Pre-commit hooks**: Mandatory formatting, linting, error message validation
+- **CI enforcement**: Pre-commit runs in CI, blocks merges on failure
+- **Linting**: golangci-lint with 100+ enabled linters
+- **Format enforcement**: gci for imports, yamlfmt for YAML
+- **Error message linting**: Custom check for "failed to" prefix in wrapped errors
+
+### 15.4 Linter Configuration
+
+- **Enable-all philosophy**: Start with all linters enabled, disable only with clear justification
+- **Cyclomatic complexity**: Max 30 for functions
+- **Function length**: Max 100 lines/statements (ignoring comments)
+- **Line length**: 180 characters maximum
+- **Magic numbers**: Contextual exceptions (0, 1, 2, 5, 10, 100)
+
+---
+
+## 16. Enforcement
 
 This constitution is enforced through **automated tooling** and **code review practices**:
 
@@ -750,6 +945,36 @@ Example:
 // See issue #123 for discussion.
 return errors.New("invalid configuration")
 ```
+
+---
+
+## 17. Governance
+
+### Constitutional Authority
+
+This constitution supersedes all other practices and guidelines. All specifications, implementations, code reviews, and pull requests MUST verify compliance with these principles.
+
+### Amendment Process
+
+1. Proposed amendments MUST be documented with clear rationale
+2. Impact analysis on existing code and practices required
+3. Approval from project maintainers needed
+4. Migration plan for affected code (if any)
+5. Update constitution version and last amended date
+
+### Compliance Enforcement
+
+- All PRs MUST verify compliance during code review
+- Pre-commit hooks enforce mechanical checks (error messages, formatting)
+- Complexity or deviations MUST be justified in PR descriptions
+- Regular audits of codebase against constitutional principles
+
+### Specification-Driven Development Integration
+
+- Specifications MUST reference relevant constitutional principles
+- Implementation plans MUST show how they uphold these standards
+- Code reviews verify spec compliance AND constitutional compliance
+- Evolutions MUST maintain constitutional alignment
 
 ---
 
