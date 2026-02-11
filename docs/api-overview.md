@@ -111,6 +111,79 @@ _Appears in:_
 | `name` _string_ | Name is the distribution name that maps to supported distributions. |  |  |
 | `image` _string_ | Image is the direct container image reference to use |  |  |
 
+#### ExternalProviderPhase
+
+_Underlying type:_ _string_
+
+ExternalProviderPhase represents the installation phase of an external provider.
+
+_Validation:_
+- Enum: [Pending Installing Ready Failed]
+
+_Appears in:_
+- [ExternalProviderStatus](#externalproviderstatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` | ExternalProviderPhasePending indicates the provider is waiting to be installed<br /> |
+| `Installing` | ExternalProviderPhaseInstalling indicates the provider is being installed<br /> |
+| `Ready` | ExternalProviderPhaseReady indicates the provider is installed and ready<br /> |
+| `Failed` | ExternalProviderPhaseFailed indicates the provider installation failed<br /> |
+
+#### ExternalProviderRef
+
+ExternalProviderRef references an external provider container image.
+The provider image must contain provider packages and metadata at standard locations.
+
+_Appears in:_
+- [ExternalProvidersSpec](#externalprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `providerId` _string_ | ProviderID is the unique identifier for this provider instance.<br />Must be unique across all providers (inline, remote, and external). |  | Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
+| `image` _string_ | Image is the container image reference containing the provider packages.<br />The image must contain /lls-provider/lls-provider-spec.yaml and /lls-provider/packages/. |  | Required: \{\} <br /> |
+| `imagePullPolicy` _[PullPolicy](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#pullpolicy-v1-core)_ | ImagePullPolicy determines when to pull the provider image. | IfNotPresent | Enum: [Always Never IfNotPresent] <br /> |
+| `config` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | Config contains provider-specific configuration that will be passed to the provider. |  |  |
+
+#### ExternalProviderStatus
+
+ExternalProviderStatus tracks the installation status of an individual external provider.
+
+_Appears in:_
+- [LlamaStackDistributionStatus](#llamastackdistributionstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `providerId` _string_ | ProviderID is the unique identifier for this provider instance |  |  |
+| `image` _string_ | Image is the container image reference for this provider |  |  |
+| `phase` _[ExternalProviderPhase](#externalproviderphase)_ | Phase represents the current installation phase of the provider |  | Enum: [Pending Installing Ready Failed] <br /> |
+| `message` _string_ | Message provides human-readable details about the current phase |  |  |
+| `initContainerName` _string_ | InitContainerName is the name of the init container responsible for installing this provider |  |  |
+| `lastTransitionTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | LastTransitionTime is the last time the phase transitioned |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta) array_ | Conditions represent detailed status of the provider installation |  |  |
+
+#### ExternalProvidersSpec
+
+ExternalProvidersSpec organizes external providers by API type.
+Each API type section contains a list of external provider references
+that will be installed and configured at pod startup.
+
+_Appears in:_
+- [ServerSpec](#serverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `volumeSizeLimit` _[Quantity](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#quantity-resource-api)_ | VolumeSizeLimit is the size limit for the shared emptyDir volume used by external providers.<br />Typical provider with dependencies uses 100-500 MB; default supports 4-20 providers. | 2Gi |  |
+| `inference` _[ExternalProviderRef](#externalproviderref) array_ | Inference providers for model inference APIs |  |  |
+| `safety` _[ExternalProviderRef](#externalproviderref) array_ | Safety providers for content moderation and safety APIs |  |  |
+| `agents` _[ExternalProviderRef](#externalproviderref) array_ | Agents providers for agent-related APIs |  |  |
+| `vectorIo` _[ExternalProviderRef](#externalproviderref) array_ | VectorIO providers for vector database operations |  |  |
+| `datasetIo` _[ExternalProviderRef](#externalproviderref) array_ | DatasetIO providers for dataset operations |  |  |
+| `scoring` _[ExternalProviderRef](#externalproviderref) array_ | Scoring providers for evaluation scoring |  |  |
+| `eval` _[ExternalProviderRef](#externalproviderref) array_ | Eval providers for evaluation APIs |  |  |
+| `toolRuntime` _[ExternalProviderRef](#externalproviderref) array_ | ToolRuntime providers for tool execution |  |  |
+| `postTraining` _[ExternalProviderRef](#externalproviderref) array_ | PostTraining providers for post-training operations |  |  |
+
 #### LlamaStackDistribution
 
 _Appears in:_
@@ -168,6 +241,7 @@ _Appears in:_
 | `availableReplicas` _integer_ | AvailableReplicas is the number of available replicas |  |  |
 | `serviceURL` _string_ | ServiceURL is the internal Kubernetes service URL where the distribution is exposed |  |  |
 | `routeURL` _string_ | RouteURL is the external URL where the distribution is exposed (when exposeRoute is true).<br />nil when external access is not configured, empty string when Ingress exists but URL not ready. |  |  |
+| `externalProviderStatus` _[ExternalProviderStatus](#externalproviderstatus) array_ | ExternalProviderStatus tracks the installation status of each external provider |  |  |
 
 #### NetworkSpec
 
@@ -253,6 +327,7 @@ _Appears in:_
 | `storage` _[StorageSpec](#storagespec)_ | Storage defines the persistent storage configuration |  |  |
 | `userConfig` _[UserConfigSpec](#userconfigspec)_ | UserConfig defines the user configuration for the llama-stack server |  |  |
 | `tlsConfig` _[TLSConfig](#tlsconfig)_ | TLSConfig defines the TLS configuration for the llama-stack server |  |  |
+| `externalProviders` _[ExternalProvidersSpec](#externalprovidersspec)_ | ExternalProviders defines external provider packages to inject at deployment time |  |  |
 
 #### StorageSpec
 
