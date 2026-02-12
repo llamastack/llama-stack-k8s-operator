@@ -73,6 +73,7 @@ func TestBuildContainerSpec(t *testing.T) {
 					{Name: "LLS_WORKERS", Value: "1"},
 					{Name: "LLS_PORT", Value: "8321"},
 					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+					{Name: "OPENSHIFT_SERVER_API_URL", Value: "https://kubernetes.default.svc"},
 				},
 			},
 		},
@@ -121,6 +122,7 @@ func TestBuildContainerSpec(t *testing.T) {
 					{Name: "LLS_WORKERS", Value: "1"},
 					{Name: "LLS_PORT", Value: "9000"},
 					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+					{Name: "OPENSHIFT_SERVER_API_URL", Value: "https://kubernetes.default.svc"},
 					{Name: "TEST_ENV", Value: "test-value"},
 				},
 				VolumeMounts: []corev1.VolumeMount{{
@@ -165,6 +167,7 @@ func TestBuildContainerSpec(t *testing.T) {
 					{Name: "LLS_WORKERS", Value: "1"},
 					{Name: "LLS_PORT", Value: "8321"},
 					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+					{Name: "OPENSHIFT_SERVER_API_URL", Value: "https://kubernetes.default.svc"},
 				},
 			},
 		},
@@ -198,6 +201,7 @@ func TestBuildContainerSpec(t *testing.T) {
 					{Name: "LLS_WORKERS", Value: "4"},
 					{Name: "LLS_PORT", Value: "8321"},
 					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+					{Name: "OPENSHIFT_SERVER_API_URL", Value: "https://kubernetes.default.svc"},
 				},
 				VolumeMounts: []corev1.VolumeMount{{
 					Name:      "lls-storage",
@@ -240,6 +244,7 @@ func TestBuildContainerSpec(t *testing.T) {
 					{Name: "LLS_WORKERS", Value: "1"},
 					{Name: "LLS_PORT", Value: "8321"},
 					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+					{Name: "OPENSHIFT_SERVER_API_URL", Value: "https://kubernetes.default.svc"},
 				},
 				VolumeMounts: []corev1.VolumeMount{
 					{

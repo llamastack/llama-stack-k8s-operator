@@ -300,7 +300,16 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 		},
 	)
 
-	// Finally, add the user provided env vars
+	// Add OpenShift/Kubernetes API server URL for RBAC authentication.
+	// This enables the Kubernetes auth provider in llama-stack to validate tokens
+	// against the API server for access control.
+	// Default to in-cluster service URL; can be overridden via user-provided env vars.
+	container.Env = append(container.Env, corev1.EnvVar{
+		Name:  "OPENSHIFT_SERVER_API_URL",
+		Value: "https://kubernetes.default.svc",
+	})
+
+	// Finally, add the user provided env vars (these take precedence over defaults)
 	container.Env = append(container.Env, instance.Spec.Server.ContainerSpec.Env...)
 }
 
