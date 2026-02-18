@@ -633,7 +633,7 @@ func TestRemoveDeploymentReplicas(t *testing.T) {
 
 // TestHasLegacyCABundleVolumes tests the detection of legacy CA bundle volumes.
 func TestHasLegacyCABundleVolumes(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("detects legacy emptyDir ca-bundle volume", func(t *testing.T) {
 		deployment := newTestResource(t, "apps/v1", "Deployment", "test-deploy", "test-ns", map[string]any{
