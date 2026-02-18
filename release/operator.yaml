@@ -3207,8 +3207,8 @@ spec:
         - /manager
         env:
         - name: OPERATOR_VERSION
-          value: latest
-        image: quay.io/llamastack/llama-stack-k8s-operator:latest
+          value: 0.7.0
+        image: quay.io/llamastack/llama-stack-k8s-operator:v0.7.0
         imagePullPolicy: Always
         livenessProbe:
           httpGet:
