@@ -6,9 +6,9 @@
 **Last Updated**: 2025-11-14
 
 **Architecture Notes**:
-- Two-phase init containers: Install → Merge (not three phases)
-- extra-providers.yaml schema provides forward compatibility for Phase 2 migration
-- Merge tool binary included in operator image (cmd/merge-run-yaml)
+- Two-phase init containers: Install → Config Generation
+- Uses LlamaStack's native `module:` field for provider loading
+- Config generation tool binary included in operator image (cmd/generate-config)
 - Init containers ordered by CRD order (not alphabetical)
 
 ---
@@ -157,14 +157,14 @@ tests/unit/initcontainer_test.go  (+250 lines, new)
 
 ---
 
-### PR #4: run.yaml Merging Logic
+### PR #4: config.yaml Merging Logic
 **Size**: ~650 lines
 **Review Time**: 2 hours
 **Merge Strategy**: Merge after PR #2 (independent of PR #3)
 
 **Tasks**: T018-T024, T024a-h, T040-T042 (18 tasks)
-- T018-T024: run.yaml merging implementation
-- T024a-c: extra-providers.yaml generation from provider metadata
+- T018-T024: config.yaml merging implementation
+- T024a-c: config.yaml (with module: field) generation from provider metadata
 - T024d-h: Merge tool binary implementation
 - T040-T042: Unit tests for merging
 
@@ -172,13 +172,13 @@ tests/unit/initcontainer_test.go  (+250 lines, new)
 ```
 pkg/deploy/runyaml.go              (+400 lines, new)
 pkg/provider/extra_providers.go    (+150 lines, new)
-cmd/merge-run-yaml/main.go         (+200 lines, new)
+cmd/generate-config/main.go         (+200 lines, new)
 tests/unit/merge_test.go           (+350 lines, new)
 Dockerfile                         (+5 lines, merge tool binary)
 ```
 
 **Description**:
-This PR implements the run.yaml merging logic and introduces the extra-providers.yaml schema for forward compatibility. The merge tool binary is included in the operator image to support Phase 2 migration where external tooling can read extra-providers.yaml.
+This PR implements the config.yaml merging logic and introduces the config.yaml (with module: field) schema for forward compatibility. The merge tool binary is included in the operator image to support Phase 2 migration where external tooling can read config.yaml (with module: field).
 
 **Tests**:
 - Base + external merge
@@ -187,7 +187,7 @@ This PR implements the run.yaml merging logic and introduces the extra-providers
 - API placement validation
 - Multiple providers same API
 - Multiple providers different APIs
-- extra-providers.yaml generation and validation
+- config.yaml (with module: field) generation and validation
 - Merge tool binary functionality
 
 **Acceptance Criteria**:
@@ -195,7 +195,7 @@ This PR implements the run.yaml merging logic and introduces the extra-providers
 - [ ] Duplicate IDs rejected with clear error
 - [ ] API placement validated
 - [ ] All merge scenarios tested
-- [ ] extra-providers.yaml generated correctly
+- [ ] config.yaml (with module: field) generated correctly
 - [ ] Merge tool binary builds and runs successfully
 - [ ] Test coverage > 90%
 
@@ -203,7 +203,7 @@ This PR implements the run.yaml merging logic and introduces the extra-providers
 - Merge precedence logic
 - Error message clarity
 - YAML parsing/generation correctness
-- extra-providers.yaml schema forward compatibility
+- config.yaml (with module: field) schema forward compatibility
 - Merge tool binary implementation
 - Edge cases handled
 
@@ -317,14 +317,14 @@ controllers/external_providers.go                 (+280 lines, new)
 
 **Tasks**: T046-T048, T048a-b, T082-T089 (13 tasks)
 - T046-T048: Basic examples and docs
-- T048a: Document extra-providers.yaml schema
+- T048a: Document config.yaml (with module: field) schema
 - T048b: Document forward compatibility plan (Phase 2 migration)
 - T082-T089: Comprehensive documentation
 
 **Files Added**:
 ```
 config/samples/llamastackdistribution_external_providers.yaml  (+50 lines, new)
-docs/external-providers.md                                     (+350 lines, new - includes extra-providers.yaml)
+docs/external-providers.md                                     (+350 lines, new - includes config.yaml (with module: field))
 docs/examples/provider-image/Containerfile                     (+30 lines, new)
 docs/examples/provider-image/lls-provider-spec.yaml            (+20 lines, new)
 docs/provider-development.md                                   (+250 lines, new)
@@ -341,7 +341,7 @@ README.md  (+30 lines - external providers overview)
 - [ ] Sample LLSD YAML works end-to-end
 - [ ] Provider image creation guide complete
 - [ ] Troubleshooting covers all error scenarios
-- [ ] extra-providers.yaml schema documented
+- [ ] config.yaml (with module: field) schema documented
 - [ ] Forward compatibility plan documented
 - [ ] Examples tested and validated
 
@@ -349,7 +349,7 @@ README.md  (+30 lines - external providers overview)
 - Documentation clarity
 - Examples correctness
 - Troubleshooting completeness
-- extra-providers.yaml schema documentation
+- config.yaml (with module: field) schema documentation
 - Forward compatibility approach
 
 **Dependencies**: PR #6
@@ -443,7 +443,7 @@ PR #1 (Foundation)
    ├─→ PR #2 (Validation)
    │      ├─→ PR #3 (Init Containers)
    │      │      └─→ PR #5 (Controller Integration) ──→ PR #6 (Status) ──→ PR #7 (Docs) ──→ PR #8 (Errors)
-   │      └─→ PR #4 (run.yaml Merge) ──┘
+   │      └─→ PR #4 (config.yaml Merge) ──┘
    │
    └─→ (PR #3 and PR #4 can be developed in parallel after PR #2)
 ```
@@ -720,7 +720,7 @@ If a merged PR causes issues:
 
 **Architecture Highlights**:
 - Two-phase init containers (Install → Merge) for simplicity
-- extra-providers.yaml schema enables forward compatibility
+- config.yaml (with module: field) schema enables forward compatibility
 - Merge tool binary in operator image supports Phase 2 migration
 - CRD-ordered init containers for deterministic behavior
 

@@ -27,9 +27,10 @@ COPY main.go main.go
 COPY api/ api/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
+COPY cmd/ cmd/
 COPY distributions.json distributions.json
 
-# Build the manager binary
+# Build the manager binary and generate-config tool
 # Cross-compilation is handled natively by Go via GOOS and GOARCH
 # This runs on the build host's native architecture, not under QEMU emulation
 USER root
@@ -41,11 +42,15 @@ RUN echo "Building for TARGETPLATFORM=${TARGETPLATFORM} on BUILDPLATFORM=${BUILD
     if [ "${BUILDPLATFORM}" = "${TARGETPLATFORM}" ]; then \
         echo "Native build detected - using CGO_ENABLED=1 with OpenSSL FIPS"; \
         CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-        go build -a -tags=strictfipsruntime,openssl -o manager main.go; \
+        go build -a -tags=strictfipsruntime,openssl -o manager main.go && \
+        CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+        go build -a -tags=strictfipsruntime,openssl -o generate-config ./cmd/generate-config; \
     else \
         echo "Cross-compilation detected - using CGO_ENABLED=0 with pure Go FIPS"; \
         CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-        go build -a -tags=strictfipsruntime -o manager main.go; \
+        go build -a -tags=strictfipsruntime -o manager main.go && \
+        CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+        go build -a -tags=strictfipsruntime -o generate-config ./cmd/generate-config; \
     fi
 
 # Use UBI minimal as the runtime base image
@@ -55,6 +60,7 @@ ARG TARGETARCH
 
 WORKDIR /
 COPY --from=builder /workspace/manager .
+COPY --from=builder /workspace/generate-config .
 COPY --from=builder /workspace/controllers/manifests ./manifests/
 
 # Install openssl - use minimal options for reliability under QEMU emulation
