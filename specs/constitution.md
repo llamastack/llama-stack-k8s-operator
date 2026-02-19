@@ -2,8 +2,8 @@
 
 **Purpose**: Define project-wide principles, patterns, and standards that guide all specifications and implementations.
 
-**Last Updated**: 2025-11-15
-**Version**: 1.4
+**Last Updated**: 2026-02-19
+**Version**: 1.5
 
 ---
 
@@ -20,7 +20,7 @@ This constitution documents **existing patterns** found in the codebase as of 20
 
 ---
 
-## Quick Reference: Top 10 Critical Rules
+## Quick Reference: Top 11 Critical Rules
 
 Quick lookup for the most important rules during day-to-day development:
 
@@ -53,6 +53,8 @@ Quick lookup for the most important rules during day-to-day development:
 
 10. **✅ Namespace-Scoped Resources** (§1.1)
     Operator must NOT require cluster-admin or use cluster-scoped resources
+
+11. **✅ FIPS Compliance** (§14) — All crypto, TLS, and RNG usage MUST use FIPS-validated implementations.
 
 **Legend**: ✅ = Current practice | 🎯 = Aspirational | See section § for details
 
@@ -680,6 +682,25 @@ git commit -s -m "feat: add new feature"
 
 ---
 
+## 14. Strict FIPS Compliance Guidelines
+
+This project MUST adhere strictly to "Designed for FIPS" standards at all times. The AI agent MUST enforce the following constraints:
+- **RATIONALE**: Ensures the operator meets federal security compliance requirements and can be deployed in regulated environments.
+
+### 14.1 Cryptographic Algorithms
+- **MUST**: NEVER use MD5, SHA-1, DES, or any non-FIPS-validated cryptographic algorithms for any purpose (even for non-security functions like file hashing). ALWAYS use FIPS 140-2/140-3 approved algorithms (e.g., SHA-256, SHA-3, AES).
+
+### 14.2 Network Traffic
+- **MUST**: NEVER implement or allow unencrypted network connections. ALWAYS enforce TLS (version 1.2 or higher) for all inbound and outbound traffic.
+
+### 14.3 Ciphers & Security Contexts
+- **MUST**: ONLY implement FIPS-approved TLS cipher suites and security contexts. Reject any configuration that permits fallback to non-compliant ciphers.
+
+### 14.4 UUIDs & Randomization
+- **MUST**: NEVER use standard, non-secure random number generators (RNGs). Any UUID generation or randomization MUST rely exclusively on FIPS-validated Random Number Generators (e.g., leveraging the OS's FIPS-compliant crypto module).
+
+---
+
 ## Enforcement
 
 This constitution is enforced through **automated tooling** and **code review practices**:
@@ -733,6 +754,8 @@ When reviewing code, verify:
 - [ ] Owner references set on created resources
 - [ ] Logging uses context logger with structured fields
 - [ ] No `fmt.Printf` for logging
+- [ ] No non-FIPS cryptographic algorithms (MD5, SHA-1, DES) used
+- [ ] All network connections use TLS 1.2+
 
 ### Exceptions and Deviations
 
