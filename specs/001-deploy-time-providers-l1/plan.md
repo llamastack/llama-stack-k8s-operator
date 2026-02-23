@@ -8,15 +8,15 @@
 
 Implement external provider injection for llama-stack K8s operator using init containers to install Python provider packages at pod startup. This enables users to add custom/third-party providers without rebuilding distribution images.
 
-**Technical Approach**: Two-phase init container architecture using `extra-providers.yaml` schema:
+**Technical Approach**: Two-phase init container architecture using LlamaStack's native `module:` field:
 1. **Phase 1 - Install**: N init containers (one per provider, in CRD order) install Python packages and copy metadata
-2. **Phase 2 - Merge**: Single init container (operator image) generates `extra-providers.yaml` from metadata, merges with user run.yaml (if exists)
-3. **Main container**: Uses merged run.yaml, PYTHONPATH includes external provider packages
+2. **Phase 2 - Config Generation**: Single init container (operator image) adds provider entries with `module:` field to config.yaml
+3. **Main container**: Uses generated config.yaml, PYTHONPATH includes external provider packages
 
-**Forward Compatibility**: The `extra-providers.yaml` schema enables future migration to native LlamaStack support (Phase 2) with minimal operator changes.
+**Native LlamaStack Support**: Uses LlamaStack's native `module:` field for provider loading - no separate config.yaml (with module: field) or merge step needed.
 
 **Note on Phase Terminology**: This plan describes *implementation phases* (development sequence: Phase 0-6). The spec's "Container Startup Sequence" section describes *runtime phases* (pod lifecycle: Phase 1-5). These are complementary views:
-- Plan Phases 2-3 (Init Container Generation, run.yaml Merging) implement spec's runtime Phases 1-3 (Provider Install, Config Extract, Merge)
+- Plan Phases 2-3 (Init Container Generation, Config Generation) implement spec's runtime Phases 1-3 (Provider Install, Config Extract, Config Generate)
 - Plan Phase 4 (Controller Integration) orchestrates all runtime phases
 - Spec runtime phases describe what happens at pod startup; plan phases describe when to build each component
 
@@ -71,7 +71,7 @@ pkg/
 │   └── validation.go        # Provider validation logic
 └── deploy/
     ├── initcontainer.go     # Init container generation
-    └── runyaml.go           # run.yaml merging logic
+    └── runyaml.go           # config.yaml merging logic
 
 tests/
 ├── integration/
@@ -220,7 +220,7 @@ func ValidateMetadata(m *ProviderMetadata) error {
 	}
 	// PackageName will be used by LlamaStack to import the provider module:
 	// module = importlib.import_module(provider_spec.module)
-	// This maps to the 'module:' field in run.yaml/extra-providers.yaml
+	// This maps to the 'module:' field in config.yaml/config.yaml (with module: field)
 
 	if m.Spec.ProviderType == "" {
 		return fmt.Errorf("spec.providerType is required")
@@ -247,18 +247,18 @@ func ValidateMetadata(m *ProviderMetadata) error {
 
 ### Phase 2: Init Container Generation
 
-**Objective**: Generate init containers for external provider installation (Phase 1) and merge init container (Phase 2)
+**Objective**: Generate init containers for external provider installation (Phase 1) and config generation init container (Phase 2)
 
 **Tasks**:
 1. Create `pkg/deploy/initcontainer.go`
 2. Implement Phase 1 init container template generation (provider install)
-3. Implement Phase 2 merge init container (operator image with merge tool)
+3. Implement Phase 2 config generation init container (operator image with merge tool)
 4. Add shared volume configuration
 5. Implement CRD ordering for Phase 1 init containers
 6. Write unit tests for init container generation
 
 **Phase 1 Init Containers**: Install provider packages and copy metadata (one per provider, in CRD order)
-**Phase 2 Merge Init Container**: Runs merge tool from operator image to generate `extra-providers.yaml` and merge with user run.yaml
+**Phase 2 Merge Init Container**: Runs merge tool from operator image to generate `config.yaml (with module: field)` and merge with user config.yaml
 
 **Files Created**:
 - `pkg/deploy/initcontainer.go`
@@ -418,7 +418,7 @@ func UpdatePythonPath(container *corev1.Container) {
 
 **Build System Changes**:
 
-The operator Dockerfile must be updated to build and include the merge-run-yaml binary:
+The operator Dockerfile must be updated to build and include the generate-config binary:
 
 ```dockerfile
 # Build stage - add merge tool
@@ -430,34 +430,34 @@ WORKDIR /workspace
 # Build manager binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager cmd/main.go
 
-# Build merge-run-yaml binary (NEW)
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o merge-run-yaml cmd/merge-run-yaml/main.go
+# Build generate-config binary (NEW)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o generate-config cmd/generate-config/main.go
 
 # Runtime stage
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/manager .
-COPY --from=builder /workspace/merge-run-yaml .  # NEW: Include merge tool
+COPY --from=builder /workspace/generate-config .  # NEW: Include merge tool
 
 ENTRYPOINT ["/manager"]
 ```
 
-**Task Reference**: This change is captured in T024g "Update Dockerfile to include merge-run-yaml binary"
+**Task Reference**: This change is captured in T024g "Update Dockerfile to include generate-config binary"
 
-### Phase 3: run.yaml Merging Logic
+### Phase 3: config.yaml Merging Logic
 
-**Objective**: Implement merge tool that generates `extra-providers.yaml` and merges with user run.yaml
+**Objective**: Implement merge tool that generates `config.yaml (with module: field)` and merges with user config.yaml
 
 **Tasks**:
-1. Create `cmd/merge-run-yaml/main.go` - standalone binary for merge init container
+1. Create `cmd/generate-config/main.go` - standalone binary for config generation init container
 2. Create `pkg/deploy/runyaml.go` - core merge logic
-3. Implement extra-providers.yaml generation from provider metadata
-4. Implement merge algorithm (user run.yaml + extra-providers.yaml → final run.yaml)
+3. Implement config.yaml (with module: field) generation from provider metadata
+4. Implement merge algorithm (user config.yaml + config.yaml (with module: field) → final config.yaml)
 5. Add conflict detection and resolution
 6. Add API placement validation
 7. Write comprehensive unit tests for all merge scenarios
 
-**Note**: This merge tool will be packaged in the operator image and run in Phase 2 init container. The `extra-providers.yaml` format matches run.yaml provider structure, enabling future migration to native LlamaStack `--extra-providers` flag support.
+**Note**: This merge tool will be packaged in the operator image and run in Phase 2 init container. The `config.yaml (with module: field)` format matches config.yaml provider structure, enabling future migration to native LlamaStack `--extra-providers` flag support.
 
 **Files Created**:
 - `pkg/deploy/runyaml.go`
@@ -476,10 +476,10 @@ import (
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/provider"
 )
 
-// RunYamlConfig represents the run.yaml structure
+// RunYamlConfig represents the config.yaml structure
 type RunYamlConfig struct {
 	Version   int                              `yaml:"version"`
-	ImageName string                           `yaml:"image_name"`
+	ImageName string                           `yaml:"distro_name"`
 	APIs      []string                         `yaml:"apis"`
 	Providers map[string][]ProviderConfigEntry `yaml:"providers"`
 	// ... other fields ...
@@ -492,7 +492,7 @@ type ProviderConfigEntry struct {
 	Config       map[string]interface{} `yaml:"config"`
 }
 
-// MergeRunYaml generates final run.yaml by merging all sources
+// MergeRunYaml generates final config.yaml by merging all sources
 func MergeRunYaml(
 	baseConfig *RunYamlConfig,
 	userConfig *RunYamlConfig,
@@ -576,7 +576,7 @@ func mergeExternalProviders(
 
 			// Create provider config entry
 			// Note: Module field comes from metadata.Spec.PackageName
-			// This becomes the 'module:' field in extra-providers.yaml that
+			// This becomes the 'module:' field in config.yaml (with module: field) that
 			// LlamaStack will use to import the provider via importlib.import_module()
 			entry := ProviderConfigEntry{
 				ProviderID:   extProvider.ProviderID,
@@ -761,7 +761,7 @@ func extractErrorMessage(status *corev1.ContainerStatus) string {
 **Unit Tests**:
 - Metadata parsing (valid, invalid, missing fields)
 - Init container generation (ordering, script content)
-- run.yaml merging (all precedence scenarios)
+- config.yaml merging (all precedence scenarios)
 - Validation logic (duplicate IDs, API mismatches)
 
 **Integration Tests**:
@@ -789,7 +789,7 @@ func extractErrorMessage(status *corev1.ContainerStatus) string {
 | CRD ordering of init containers | Deterministic, predictable behavior that preserves user intent | Random ordering could cause non-deterministic failures, alphabetical ignores user intent |
 | Metadata in image vs CRD | Single source of truth, avoid duplication/mismatch | CRD metadata could diverge from actual provider implementation |
 | EmptyDir volume vs ConfigMap | Supports large provider packages, writable | ConfigMap has size limits, read-only |
-| extra-providers.yaml schema | Forward-compatible with future LlamaStack native support | Extracting run.yaml from distribution images is brittle and fragile |
+| config.yaml (with module: field) schema | Forward-compatible with future LlamaStack native support | Extracting config.yaml from distribution images is brittle and fragile |
 
 ## Alternative Approaches Considered
 
@@ -810,32 +810,32 @@ func extractErrorMessage(status *corev1.ContainerStatus) string {
 
 ## Extra Providers Schema Design
 
-### Decision: extra-providers.yaml as Forward-Compatible Format
+### Decision: config.yaml (with module: field) as Forward-Compatible Format
 
 **Rationale**:
-- Distribution images contain built-in run.yaml at non-standardized paths
-- Extracting run.yaml is brittle and fragile across versions
-- Schema evolution in run.yaml would break merge logic across LlamaStack versions
+- Distribution images contain built-in config.yaml at non-standardized paths
+- Extracting config.yaml is brittle and fragile across versions
+- Schema evolution in config.yaml would break merge logic across LlamaStack versions
 - Better long-term solution: Let LlamaStack handle merge via `--extra-providers` flag
 
 **Current Implementation** (Phase 1 - this feature):
 ```
 Merge Init Container:
   1. Read provider metadata files
-  2. Generate extra-providers.yaml (matches run.yaml provider structure)
-  3. Merge user run.yaml (if exists) + extra-providers.yaml
-  4. Write final run.yaml for main container
+  2. Generate config.yaml (with module: field) (matches config.yaml provider structure)
+  3. Merge user config.yaml (if exists) + config.yaml (with module: field)
+  4. Write final config.yaml for main container
 ```
 
 **Future Enhancement** (Phase 2 - when LlamaStack adds support):
 ```
 Main Container Args:
-  llama stack run /etc/llama-stack/run.yaml \
-    --extra-providers /etc/extra-providers/extra-providers.yaml
+  llama stack run /etc/llama-stack/config.yaml \
+    --extra-providers /etc/extra-providers/config.yaml (with module: field)
 ```
 
 **Benefits**:
-- ✅ No brittle path discovery for run.yaml in distribution images
+- ✅ No brittle path discovery for config.yaml in distribution images
 - ✅ Schema evolution handled by LlamaStack (not operator)
 - ✅ Clean migration path (~20 lines of operator code)
 - ✅ Enables other tools to use same schema (Docker Compose, Helm, etc.)
@@ -847,9 +847,9 @@ Main Container Args:
 **Before Implementation**:
 - [ ] llama-stack supports module-based provider loading (verify in codebase)
 - [ ] Provider images available for testing (create sample provider)
-- [ ] Understanding of llama-stack run.yaml structure (documented)
-- [ ] Define extra-providers.yaml schema (see spec.md)
-- [ ] Create merge tool binary in operator image (cmd/merge-run-yaml)
+- [ ] Understanding of llama-stack config.yaml structure (documented)
+- [ ] Define config.yaml (with module: field) schema (see spec.md)
+- [ ] Create merge tool binary in operator image (cmd/generate-config)
 
 **External Dependencies**:
 - Kubernetes 1.21+ (init container support)

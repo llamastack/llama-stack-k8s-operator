@@ -181,3 +181,83 @@ func IsConditionFalse(status *llamav1alpha1.LlamaStackDistributionStatus, condit
 	condition := GetCondition(status, conditionType)
 	return condition != nil && condition.Status == metav1.ConditionFalse
 }
+
+// InitializeExternalProviderStatus initializes status tracking for all configured external providers.
+// This should be called when a LlamaStackDistribution with external providers is first reconciled.
+func InitializeExternalProviderStatus(status *llamav1alpha1.LlamaStackDistributionStatus, ep *llamav1alpha1.ExternalProvidersSpec) {
+	if ep == nil {
+		return
+	}
+
+	var providerStatuses []llamav1alpha1.ExternalProviderStatus
+
+	// Collect all providers maintaining CRD order
+	providerStatuses = appendProviderStatuses(providerStatuses, ep.Inference)
+	providerStatuses = appendProviderStatuses(providerStatuses, ep.Safety)
+	providerStatuses = appendProviderStatuses(providerStatuses, ep.Agents)
+	providerStatuses = appendProviderStatuses(providerStatuses, ep.VectorIO)
+	providerStatuses = appendProviderStatuses(providerStatuses, ep.DatasetIO)
+	providerStatuses = appendProviderStatuses(providerStatuses, ep.Scoring)
+	providerStatuses = appendProviderStatuses(providerStatuses, ep.Eval)
+	providerStatuses = appendProviderStatuses(providerStatuses, ep.ToolRuntime)
+	providerStatuses = appendProviderStatuses(providerStatuses, ep.PostTraining)
+
+	status.ExternalProviderStatus = providerStatuses
+}
+
+// appendProviderStatuses adds provider status entries for a list of provider refs.
+func appendProviderStatuses(statuses []llamav1alpha1.ExternalProviderStatus, refs []llamav1alpha1.ExternalProviderRef) []llamav1alpha1.ExternalProviderStatus {
+	for _, ref := range refs {
+		statuses = append(statuses, llamav1alpha1.ExternalProviderStatus{
+			ProviderID:         ref.ProviderID,
+			Image:              ref.Image,
+			Phase:              llamav1alpha1.ExternalProviderPhasePending,
+			Message:            "Waiting for init container to run",
+			InitContainerName:  "install-provider-" + ref.ProviderID,
+			LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+		})
+	}
+	return statuses
+}
+
+// UpdateExternalProviderStatus updates the status of a specific external provider.
+func UpdateExternalProviderStatus(status *llamav1alpha1.LlamaStackDistributionStatus, providerID string, phase llamav1alpha1.ExternalProviderPhase, message string) {
+	for i := range status.ExternalProviderStatus {
+		if status.ExternalProviderStatus[i].ProviderID == providerID {
+			status.ExternalProviderStatus[i].Phase = phase
+			status.ExternalProviderStatus[i].Message = message
+			status.ExternalProviderStatus[i].LastTransitionTime = metav1.NewTime(metav1.Now().UTC())
+			return
+		}
+	}
+}
+
+// GetExternalProviderStatus returns the status of a specific external provider.
+func GetExternalProviderStatus(status *llamav1alpha1.LlamaStackDistributionStatus, providerID string) *llamav1alpha1.ExternalProviderStatus {
+	for i := range status.ExternalProviderStatus {
+		if status.ExternalProviderStatus[i].ProviderID == providerID {
+			return &status.ExternalProviderStatus[i]
+		}
+	}
+	return nil
+}
+
+// AllExternalProvidersReady returns true if all external providers are in Ready phase.
+func AllExternalProvidersReady(status *llamav1alpha1.LlamaStackDistributionStatus) bool {
+	for _, ps := range status.ExternalProviderStatus {
+		if ps.Phase != llamav1alpha1.ExternalProviderPhaseReady {
+			return false
+		}
+	}
+	return true
+}
+
+// AnyExternalProviderFailed returns true if any external provider is in Failed phase.
+func AnyExternalProviderFailed(status *llamav1alpha1.LlamaStackDistributionStatus) bool {
+	for _, ps := range status.ExternalProviderStatus {
+		if ps.Phase == llamav1alpha1.ExternalProviderPhaseFailed {
+			return true
+		}
+	}
+	return false
+}

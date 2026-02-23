@@ -138,6 +138,81 @@ type ServerSpec struct {
 	// TLSConfig defines the TLS configuration for the llama-stack server
 	// +optional
 	TLSConfig *TLSConfig `json:"tlsConfig,omitempty"`
+	// ExternalProviders defines external provider packages to inject at deployment time
+	// +optional
+	ExternalProviders *ExternalProvidersSpec `json:"externalProviders,omitempty"`
+}
+
+// ExternalProvidersSpec organizes external providers by API type.
+// Each API type section contains a list of external provider references
+// that will be installed and configured at pod startup.
+type ExternalProvidersSpec struct {
+	// VolumeSizeLimit is the size limit for the shared emptyDir volume used by external providers.
+	// Typical provider with dependencies uses 100-500 MB; default supports 4-20 providers.
+	// +optional
+	// +kubebuilder:default:="2Gi"
+	VolumeSizeLimit *resource.Quantity `json:"volumeSizeLimit,omitempty"`
+
+	// Inference providers for model inference APIs
+	// +optional
+	Inference []ExternalProviderRef `json:"inference,omitempty"`
+
+	// Safety providers for content moderation and safety APIs
+	// +optional
+	Safety []ExternalProviderRef `json:"safety,omitempty"`
+
+	// Agents providers for agent-related APIs
+	// +optional
+	Agents []ExternalProviderRef `json:"agents,omitempty"`
+
+	// VectorIO providers for vector database operations
+	// +optional
+	VectorIO []ExternalProviderRef `json:"vectorIo,omitempty"`
+
+	// DatasetIO providers for dataset operations
+	// +optional
+	DatasetIO []ExternalProviderRef `json:"datasetIo,omitempty"`
+
+	// Scoring providers for evaluation scoring
+	// +optional
+	Scoring []ExternalProviderRef `json:"scoring,omitempty"`
+
+	// Eval providers for evaluation APIs
+	// +optional
+	Eval []ExternalProviderRef `json:"eval,omitempty"`
+
+	// ToolRuntime providers for tool execution
+	// +optional
+	ToolRuntime []ExternalProviderRef `json:"toolRuntime,omitempty"`
+
+	// PostTraining providers for post-training operations
+	// +optional
+	PostTraining []ExternalProviderRef `json:"postTraining,omitempty"`
+}
+
+// ExternalProviderRef references an external provider container image.
+// The provider image must contain provider packages and metadata at standard locations.
+type ExternalProviderRef struct {
+	// ProviderID is the unique identifier for this provider instance.
+	// Must be unique across all providers (inline, remote, and external).
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	ProviderID string `json:"providerId"`
+
+	// Image is the container image reference containing the provider packages.
+	// The image must contain /lls-provider/lls-provider-spec.yaml and /lls-provider/packages/.
+	// +kubebuilder:validation:Required
+	Image string `json:"image"`
+
+	// ImagePullPolicy determines when to pull the provider image.
+	// +optional
+	// +kubebuilder:default:=IfNotPresent
+	// +kubebuilder:validation:Enum=Always;Never;IfNotPresent
+	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
+
+	// Config contains provider-specific configuration that will be passed to the provider.
+	// +optional
+	Config *apiextensionsv1.JSON `json:"config,omitempty"`
 }
 
 type UserConfigSpec struct {
@@ -275,6 +350,56 @@ type VersionInfo struct {
 	LastUpdated metav1.Time `json:"lastUpdated,omitempty"`
 }
 
+// ExternalProviderPhase represents the installation phase of an external provider.
+// +kubebuilder:validation:Enum=Pending;Installing;Ready;Failed
+type ExternalProviderPhase string
+
+const (
+	// ExternalProviderPhasePending indicates the provider is waiting to be installed
+	ExternalProviderPhasePending ExternalProviderPhase = "Pending"
+	// ExternalProviderPhaseInstalling indicates the provider is being installed
+	ExternalProviderPhaseInstalling ExternalProviderPhase = "Installing"
+	// ExternalProviderPhaseReady indicates the provider is installed and ready
+	ExternalProviderPhaseReady ExternalProviderPhase = "Ready"
+	// ExternalProviderPhaseFailed indicates the provider installation failed
+	ExternalProviderPhaseFailed ExternalProviderPhase = "Failed"
+)
+
+// Condition types for ExternalProviderStatus
+const (
+	// ConditionTypeExternalProviderInstalled indicates whether provider packages were installed successfully
+	ConditionTypeExternalProviderInstalled = "Installed"
+	// ConditionTypeExternalProviderValidated indicates whether provider passed preflight validation
+	ConditionTypeExternalProviderValidated = "Validated"
+)
+
+// ExternalProviderStatus tracks the installation status of an individual external provider.
+type ExternalProviderStatus struct {
+	// ProviderID is the unique identifier for this provider instance
+	ProviderID string `json:"providerId"`
+
+	// Image is the container image reference for this provider
+	Image string `json:"image"`
+
+	// Phase represents the current installation phase of the provider
+	Phase ExternalProviderPhase `json:"phase"`
+
+	// Message provides human-readable details about the current phase
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// InitContainerName is the name of the init container responsible for installing this provider
+	// +optional
+	InitContainerName string `json:"initContainerName,omitempty"`
+
+	// LastTransitionTime is the last time the phase transitioned
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
+
+	// Conditions represent detailed status of the provider installation
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
 // LlamaStackDistributionStatus defines the observed state of LlamaStackDistribution.
 type LlamaStackDistributionStatus struct {
 	// Phase represents the current phase of the distribution
@@ -293,6 +418,9 @@ type LlamaStackDistributionStatus struct {
 	// nil when external access is not configured, empty string when Ingress exists but URL not ready.
 	// +optional
 	RouteURL *string `json:"routeURL,omitempty"`
+	// ExternalProviderStatus tracks the installation status of each external provider
+	// +optional
+	ExternalProviderStatus []ExternalProviderStatus `json:"externalProviderStatus,omitempty"`
 }
 
 //+kubebuilder:object:root=true

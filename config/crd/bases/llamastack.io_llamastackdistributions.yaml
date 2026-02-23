@@ -374,6 +374,346 @@ spec:
                     x-kubernetes-validations:
                     - message: Only one of name or image can be specified
                       rule: '!(has(self.name) && has(self.image))'
+                  externalProviders:
+                    description: ExternalProviders defines external provider packages
+                      to inject at deployment time
+                    properties:
+                      agents:
+                        description: Agents providers for agent-related APIs
+                        items:
+                          description: |-
+                            ExternalProviderRef references an external provider container image.
+                            The provider image must contain provider packages and metadata at standard locations.
+                          properties:
+                            config:
+                              description: Config contains provider-specific configuration
+                                that will be passed to the provider.
+                              x-kubernetes-preserve-unknown-fields: true
+                            image:
+                              description: |-
+                                Image is the container image reference containing the provider packages.
+                                The image must contain /lls-provider/lls-provider-spec.yaml and /lls-provider/packages/.
+                              type: string
+                            imagePullPolicy:
+                              default: IfNotPresent
+                              description: ImagePullPolicy determines when to pull
+                                the provider image.
+                              enum:
+                              - Always
+                              - Never
+                              - IfNotPresent
+                              type: string
+                            providerId:
+                              description: |-
+                                ProviderID is the unique identifier for this provider instance.
+                                Must be unique across all providers (inline, remote, and external).
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - image
+                          - providerId
+                          type: object
+                        type: array
+                      datasetIo:
+                        description: DatasetIO providers for dataset operations
+                        items:
+                          description: |-
+                            ExternalProviderRef references an external provider container image.
+                            The provider image must contain provider packages and metadata at standard locations.
+                          properties:
+                            config:
+                              description: Config contains provider-specific configuration
+                                that will be passed to the provider.
+                              x-kubernetes-preserve-unknown-fields: true
+                            image:
+                              description: |-
+                                Image is the container image reference containing the provider packages.
+                                The image must contain /lls-provider/lls-provider-spec.yaml and /lls-provider/packages/.
+                              type: string
+                            imagePullPolicy:
+                              default: IfNotPresent
+                              description: ImagePullPolicy determines when to pull
+                                the provider image.
+                              enum:
+                              - Always
+                              - Never
+                              - IfNotPresent
+                              type: string
+                            providerId:
+                              description: |-
+                                ProviderID is the unique identifier for this provider instance.
+                                Must be unique across all providers (inline, remote, and external).
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - image
+                          - providerId
+                          type: object
+                        type: array
+                      eval:
+                        description: Eval providers for evaluation APIs
+                        items:
+                          description: |-
+                            ExternalProviderRef references an external provider container image.
+                            The provider image must contain provider packages and metadata at standard locations.
+                          properties:
+                            config:
+                              description: Config contains provider-specific configuration
+                                that will be passed to the provider.
+                              x-kubernetes-preserve-unknown-fields: true
+                            image:
+                              description: |-
+                                Image is the container image reference containing the provider packages.
+                                The image must contain /lls-provider/lls-provider-spec.yaml and /lls-provider/packages/.
+                              type: string
+                            imagePullPolicy:
+                              default: IfNotPresent
+                              description: ImagePullPolicy determines when to pull
+                                the provider image.
+                              enum:
+                              - Always
+                              - Never
+                              - IfNotPresent
+                              type: string
+                            providerId:
+                              description: |-
+                                ProviderID is the unique identifier for this provider instance.
+                                Must be unique across all providers (inline, remote, and external).
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - image
+                          - providerId
+                          type: object
+                        type: array
+                      inference:
+                        description: Inference providers for model inference APIs
+                        items:
+                          description: |-
+                            ExternalProviderRef references an external provider container image.
+                            The provider image must contain provider packages and metadata at standard locations.
+                          properties:
+                            config:
+                              description: Config contains provider-specific configuration
+                                that will be passed to the provider.
+                              x-kubernetes-preserve-unknown-fields: true
+                            image:
+                              description: |-
+                                Image is the container image reference containing the provider packages.
+                                The image must contain /lls-provider/lls-provider-spec.yaml and /lls-provider/packages/.
+                              type: string
+                            imagePullPolicy:
+                              default: IfNotPresent
+                              description: ImagePullPolicy determines when to pull
+                                the provider image.
+                              enum:
+                              - Always
+                              - Never
+                              - IfNotPresent
+                              type: string
+                            providerId:
+                              description: |-
+                                ProviderID is the unique identifier for this provider instance.
+                                Must be unique across all providers (inline, remote, and external).
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - image
+                          - providerId
+                          type: object
+                        type: array
+                      postTraining:
+                        description: PostTraining providers for post-training operations
+                        items:
+                          description: |-
+                            ExternalProviderRef references an external provider container image.
+                            The provider image must contain provider packages and metadata at standard locations.
+                          properties:
+                            config:
+                              description: Config contains provider-specific configuration
+                                that will be passed to the provider.
+                              x-kubernetes-preserve-unknown-fields: true
+                            image:
+                              description: |-
+                                Image is the container image reference containing the provider packages.
+                                The image must contain /lls-provider/lls-provider-spec.yaml and /lls-provider/packages/.
+                              type: string
+                            imagePullPolicy:
+                              default: IfNotPresent
+                              description: ImagePullPolicy determines when to pull
+                                the provider image.
+                              enum:
+                              - Always
+                              - Never
+                              - IfNotPresent
+                              type: string
+                            providerId:
+                              description: |-
+                                ProviderID is the unique identifier for this provider instance.
+                                Must be unique across all providers (inline, remote, and external).
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - image
+                          - providerId
+                          type: object
+                        type: array
+                      safety:
+                        description: Safety providers for content moderation and safety
+                          APIs
+                        items:
+                          description: |-
+                            ExternalProviderRef references an external provider container image.
+                            The provider image must contain provider packages and metadata at standard locations.
+                          properties:
+                            config:
+                              description: Config contains provider-specific configuration
+                                that will be passed to the provider.
+                              x-kubernetes-preserve-unknown-fields: true
+                            image:
+                              description: |-
+                                Image is the container image reference containing the provider packages.
+                                The image must contain /lls-provider/lls-provider-spec.yaml and /lls-provider/packages/.
+                              type: string
+                            imagePullPolicy:
+                              default: IfNotPresent
+                              description: ImagePullPolicy determines when to pull
+                                the provider image.
+                              enum:
+                              - Always
+                              - Never
+                              - IfNotPresent
+                              type: string
+                            providerId:
+                              description: |-
+                                ProviderID is the unique identifier for this provider instance.
+                                Must be unique across all providers (inline, remote, and external).
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - image
+                          - providerId
+                          type: object
+                        type: array
+                      scoring:
+                        description: Scoring providers for evaluation scoring
+                        items:
+                          description: |-
+                            ExternalProviderRef references an external provider container image.
+                            The provider image must contain provider packages and metadata at standard locations.
+                          properties:
+                            config:
+                              description: Config contains provider-specific configuration
+                                that will be passed to the provider.
+                              x-kubernetes-preserve-unknown-fields: true
+                            image:
+                              description: |-
+                                Image is the container image reference containing the provider packages.
+                                The image must contain /lls-provider/lls-provider-spec.yaml and /lls-provider/packages/.
+                              type: string
+                            imagePullPolicy:
+                              default: IfNotPresent
+                              description: ImagePullPolicy determines when to pull
+                                the provider image.
+                              enum:
+                              - Always
+                              - Never
+                              - IfNotPresent
+                              type: string
+                            providerId:
+                              description: |-
+                                ProviderID is the unique identifier for this provider instance.
+                                Must be unique across all providers (inline, remote, and external).
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - image
+                          - providerId
+                          type: object
+                        type: array
+                      toolRuntime:
+                        description: ToolRuntime providers for tool execution
+                        items:
+                          description: |-
+                            ExternalProviderRef references an external provider container image.
+                            The provider image must contain provider packages and metadata at standard locations.
+                          properties:
+                            config:
+                              description: Config contains provider-specific configuration
+                                that will be passed to the provider.
+                              x-kubernetes-preserve-unknown-fields: true
+                            image:
+                              description: |-
+                                Image is the container image reference containing the provider packages.
+                                The image must contain /lls-provider/lls-provider-spec.yaml and /lls-provider/packages/.
+                              type: string
+                            imagePullPolicy:
+                              default: IfNotPresent
+                              description: ImagePullPolicy determines when to pull
+                                the provider image.
+                              enum:
+                              - Always
+                              - Never
+                              - IfNotPresent
+                              type: string
+                            providerId:
+                              description: |-
+                                ProviderID is the unique identifier for this provider instance.
+                                Must be unique across all providers (inline, remote, and external).
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - image
+                          - providerId
+                          type: object
+                        type: array
+                      vectorIo:
+                        description: VectorIO providers for vector database operations
+                        items:
+                          description: |-
+                            ExternalProviderRef references an external provider container image.
+                            The provider image must contain provider packages and metadata at standard locations.
+                          properties:
+                            config:
+                              description: Config contains provider-specific configuration
+                                that will be passed to the provider.
+                              x-kubernetes-preserve-unknown-fields: true
+                            image:
+                              description: |-
+                                Image is the container image reference containing the provider packages.
+                                The image must contain /lls-provider/lls-provider-spec.yaml and /lls-provider/packages/.
+                              type: string
+                            imagePullPolicy:
+                              default: IfNotPresent
+                              description: ImagePullPolicy determines when to pull
+                                the provider image.
+                              enum:
+                              - Always
+                              - Never
+                              - IfNotPresent
+                              type: string
+                            providerId:
+                              description: |-
+                                ProviderID is the unique identifier for this provider instance.
+                                Must be unique across all providers (inline, remote, and external).
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - image
+                          - providerId
+                          type: object
+                        type: array
+                      volumeSizeLimit:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        default: 2Gi
+                        description: |-
+                          VolumeSizeLimit is the size limit for the shared emptyDir volume used by external providers.
+                          Typical provider with dependencies uses 100-500 MB; default supports 4-20 providers.
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    type: object
                   podDisruptionBudget:
                     description: PodDisruptionBudget controls voluntary disruption
                       tolerance for the server pods
@@ -2735,6 +3075,107 @@ spec:
                       type: object
                     type: array
                 type: object
+              externalProviderStatus:
+                description: ExternalProviderStatus tracks the installation status
+                  of each external provider
+                items:
+                  description: ExternalProviderStatus tracks the installation status
+                    of an individual external provider.
+                  properties:
+                    conditions:
+                      description: Conditions represent detailed status of the provider
+                        installation
+                      items:
+                        description: Condition contains details for one aspect of
+                          the current state of this API Resource.
+                        properties:
+                          lastTransitionTime:
+                            description: |-
+                              lastTransitionTime is the last time the condition transitioned from one status to another.
+                              This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                            format: date-time
+                            type: string
+                          message:
+                            description: |-
+                              message is a human readable message indicating details about the transition.
+                              This may be an empty string.
+                            maxLength: 32768
+                            type: string
+                          observedGeneration:
+                            description: |-
+                              observedGeneration represents the .metadata.generation that the condition was set based upon.
+                              For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                              with respect to the current state of the instance.
+                            format: int64
+                            minimum: 0
+                            type: integer
+                          reason:
+                            description: |-
+                              reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                              Producers of specific condition types may define expected values and meanings for this field,
+                              and whether the values are considered a guaranteed API.
+                              The value should be a CamelCase string.
+                              This field may not be empty.
+                            maxLength: 1024
+                            minLength: 1
+                            pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                            type: string
+                          status:
+                            description: status of the condition, one of True, False,
+                              Unknown.
+                            enum:
+                            - "True"
+                            - "False"
+                            - Unknown
+                            type: string
+                          type:
+                            description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                            maxLength: 316
+                            pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                            type: string
+                        required:
+                        - lastTransitionTime
+                        - message
+                        - reason
+                        - status
+                        - type
+                        type: object
+                      type: array
+                    image:
+                      description: Image is the container image reference for this
+                        provider
+                      type: string
+                    initContainerName:
+                      description: InitContainerName is the name of the init container
+                        responsible for installing this provider
+                      type: string
+                    lastTransitionTime:
+                      description: LastTransitionTime is the last time the phase transitioned
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message provides human-readable details about the
+                        current phase
+                      type: string
+                    phase:
+                      description: Phase represents the current installation phase
+                        of the provider
+                      enum:
+                      - Pending
+                      - Installing
+                      - Ready
+                      - Failed
+                      type: string
+                    providerId:
+                      description: ProviderID is the unique identifier for this provider
+                        instance
+                      type: string
+                  required:
+                  - image
+                  - phase
+                  - providerId
+                  type: object
+                type: array
               phase:
                 description: Phase represents the current phase of the distribution
                 enum:
