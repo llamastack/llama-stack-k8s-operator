@@ -1,0 +1,47 @@
+# Base config for postgres-demo distribution (embedded in operator binary)
+# User CR specs merge over this config.
+# Demonstrates PostgreSQL for metadata/inference stores and pgvector for vector_io.
+version: 2
+apis:
+  - inference
+  - safety
+  - agents
+  - memory
+  - telemetry
+  - tool_runtime
+  - datasetio
+  - eval
+  - scoring
+  - inspect
+
+providers:
+  inference:
+    - provider_id: vllm
+      provider_type: remote::vllm
+      config:
+        url: http://localhost:8000
+  safety:
+    - provider_id: meta-reference
+      provider_type: inline::meta-reference
+      config: {}
+  vector_io:
+    - provider_id: pgvector
+      provider_type: remote::pgvector
+      config:
+        connection_string: ${env.PGVECTOR_CONNECTION_STRING}
+  tool_runtime:
+    - provider_id: rag-runtime
+      provider_type: inline::rag-runtime
+      config: {}
+  telemetry:
+    - provider_id: console
+      provider_type: inline::console
+      config: {}
+
+metadata_store:
+  type: postgres
+  connection_string: ${env.PG_METADATA_CONNECTION_STRING}
+
+inference_store:
+  type: postgres
+  connection_string: ${env.PG_INFERENCE_CONNECTION_STRING}
