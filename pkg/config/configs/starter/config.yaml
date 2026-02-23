@@ -1,0 +1,44 @@
+# Base config for starter distribution (embedded in operator binary)
+# User CR specs merge over this config.
+version: 2
+apis:
+  - inference
+  - safety
+  - agents
+  - memory
+  - telemetry
+  - tool_runtime
+  - datasetio
+  - eval
+  - scoring
+  - inspect
+
+providers:
+  inference:
+    - provider_id: meta-reference
+      provider_type: inline::meta-reference
+      config: {}
+  safety:
+    - provider_id: meta-reference
+      provider_type: inline::meta-reference
+      config: {}
+  vector_io:
+    - provider_id: faiss
+      provider_type: inline::faiss
+      config: {}
+  tool_runtime:
+    - provider_id: rag-runtime
+      provider_type: inline::rag-runtime
+      config: {}
+  telemetry:
+    - provider_id: console
+      provider_type: inline::console
+      config: {}
+
+metadata_store:
+  type: sqlite
+  db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/starter}/metadata.db
+
+inference_store:
+  type: sqlite
+  db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/starter}/inference.db
