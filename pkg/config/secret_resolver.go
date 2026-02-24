@@ -48,33 +48,12 @@ func ResolveSecrets(spec *v1alpha2.LlamaStackDistributionSpec) (*SecretResolutio
 		return resolution, nil
 	}
 
-	// Scan providers for apiKey and settings secretKeyRefs
 	if spec.Providers != nil {
-		providerFields := []struct {
-			name string
-			raw  *apiextensionsv1.JSON
-		}{
-			{"inference", spec.Providers.Inference},
-			{"safety", spec.Providers.Safety},
-			{"vectorIo", spec.Providers.VectorIo},
-			{"toolRuntime", spec.Providers.ToolRuntime},
-			{"telemetry", spec.Providers.Telemetry},
-		}
-		for _, pf := range providerFields {
-			if pf.raw == nil {
-				continue
-			}
-			entries, err := collectSecretRefsFromProviderField(pf.raw)
-			if err != nil {
-				return nil, fmt.Errorf("providers.%s: %w", pf.name, err)
-			}
-			for _, e := range entries {
-				addSecretToResolution(resolution, e)
-			}
+		if err := resolveProviderSecrets(resolution, spec.Providers); err != nil {
+			return nil, err
 		}
 	}
 
-	// Scan storage for password and connectionString secretKeyRefs
 	if spec.Storage != nil {
 		if spec.Storage.KV != nil && spec.Storage.KV.Password != nil {
 			e := secretRefEntry{
@@ -97,6 +76,32 @@ func ResolveSecrets(spec *v1alpha2.LlamaStackDistributionSpec) (*SecretResolutio
 	}
 
 	return resolution, nil
+}
+
+func resolveProviderSecrets(resolution *SecretResolution, providers *v1alpha2.ProvidersSpec) error {
+	providerFields := []struct {
+		name string
+		raw  *apiextensionsv1.JSON
+	}{
+		{"inference", providers.Inference},
+		{"safety", providers.Safety},
+		{"vectorIo", providers.VectorIo},
+		{"toolRuntime", providers.ToolRuntime},
+		{"telemetry", providers.Telemetry},
+	}
+	for _, pf := range providerFields {
+		if pf.raw == nil {
+			continue
+		}
+		entries, err := collectSecretRefsFromProviderField(pf.raw)
+		if err != nil {
+			return fmt.Errorf("failed to collect secrets from providers.%s: %w", pf.name, err)
+		}
+		for _, e := range entries {
+			addSecretToResolution(resolution, e)
+		}
+	}
+	return nil
 }
 
 // addSecretToResolution adds an env var and substitution for a secret ref.
@@ -128,21 +133,12 @@ func collectSecretRefsFromProviderField(raw *apiextensionsv1.JSON) ([]secretRefE
 	}
 	var decoded interface{}
 	if err := json.Unmarshal(raw.Raw, &decoded); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
+		return nil, fmt.Errorf("failed to parse provider JSON: %w", err)
 	}
 
-	var providers []map[string]interface{}
-	switch v := decoded.(type) {
-	case map[string]interface{}:
-		providers = []map[string]interface{}{v}
-	case []interface{}:
-		for _, item := range v {
-			if m, ok := item.(map[string]interface{}); ok {
-				providers = append(providers, m)
-			}
-		}
-	default:
-		return nil, fmt.Errorf("expected object or array, got %T", decoded)
+	providers, err := collectFromProviderArray(decoded)
+	if err != nil {
+		return nil, err
 	}
 
 	var entries []secretRefEntry
@@ -158,6 +154,23 @@ func collectSecretRefsFromProviderField(raw *apiextensionsv1.JSON) ([]secretRefE
 	return entries, nil
 }
 
+func collectFromProviderArray(decoded interface{}) ([]map[string]interface{}, error) {
+	switch v := decoded.(type) {
+	case map[string]interface{}:
+		return []map[string]interface{}{v}, nil
+	case []interface{}:
+		var providers []map[string]interface{}
+		for _, item := range v {
+			if m, ok := item.(map[string]interface{}); ok {
+				providers = append(providers, m)
+			}
+		}
+		return providers, nil
+	default:
+		return nil, fmt.Errorf("failed to parse provider field: expected object or array, got %T", decoded)
+	}
+}
+
 func getProviderID(p map[string]interface{}) string {
 	if id, ok := p["id"].(string); ok && id != "" {
 		return id
@@ -169,12 +182,15 @@ func getProviderID(p map[string]interface{}) string {
 }
 
 func mustMarshal(v interface{}) []byte {
-	b, _ := json.Marshal(v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
 	return b
 }
 
 // GenerateEnvVarName creates a deterministic env var name from provider ID and field name.
-// Convention: LLSD_<PROVIDER_ID>_<FIELD> uppercased, hyphens -> underscores
+// Convention: LLSD_<PROVIDER_ID>_<FIELD> uppercased, hyphens replaced with underscores.
 func GenerateEnvVarName(providerID, field string) string {
 	normalized := strings.ToUpper(strings.ReplaceAll(providerID, "-", "_"))
 	fieldNorm := strings.ToUpper(strings.ReplaceAll(field, "-", "_"))
@@ -189,72 +205,90 @@ func CollectSecretRefs(providerID string, raw *apiextensionsv1.JSON) ([]secretRe
 	}
 	var m map[string]interface{}
 	if err := json.Unmarshal(raw.Raw, &m); err != nil {
-		return nil, fmt.Errorf("invalid provider JSON: %w", err)
+		return nil, fmt.Errorf("failed to parse provider JSON for secret collection: %w", err)
 	}
 
 	var entries []secretRefEntry
+	if e, ok := extractAPIKeyRef(providerID, m); ok {
+		entries = append(entries, e)
+	}
+	entries = append(entries, extractSettingsRefs(providerID, m)...)
+	return entries, nil
+}
 
-	// apiKey: {name, key} or {secretKeyRef: {name, key}}
-	if ak, ok := m["apiKey"]; ok && ak != nil {
-		if ref := extractSecretRef(ak); ref != nil {
+func extractAPIKeyRef(providerID string, m map[string]interface{}) (secretRefEntry, bool) {
+	ak, ok := m["apiKey"]
+	if !ok || ak == nil {
+		return secretRefEntry{}, false
+	}
+	ref := extractSecretRef(ak)
+	if ref == nil {
+		return secretRefEntry{}, false
+	}
+	return secretRefEntry{
+		ProviderID: providerID,
+		Field:      "apiKey",
+		SecretName: ref.Name,
+		SecretKey:  ref.Key,
+	}, true
+}
+
+func extractSettingsRefs(providerID string, m map[string]interface{}) []secretRefEntry {
+	s, ok := m["settings"]
+	if !ok || s == nil {
+		return nil
+	}
+	sm, ok := s.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	var entries []secretRefEntry
+	for key, val := range sm {
+		if val == nil {
+			continue
+		}
+		if ref := extractSecretRef(val); ref != nil {
 			entries = append(entries, secretRefEntry{
 				ProviderID: providerID,
-				Field:      "apiKey",
+				Field:      key,
 				SecretName: ref.Name,
 				SecretKey:  ref.Key,
 			})
 		}
 	}
-
-	// settings.<key>: {secretKeyRef: {name, key}} or {name, key}
-	if s, ok := m["settings"]; ok && s != nil {
-		if sm, ok := s.(map[string]interface{}); ok {
-			for key, val := range sm {
-				if val == nil {
-					continue
-				}
-				if ref := extractSecretRef(val); ref != nil {
-					entries = append(entries, secretRefEntry{
-						ProviderID: providerID,
-						Field:      key,
-						SecretName: ref.Name,
-						SecretKey:  ref.Key,
-					})
-				}
-			}
-		}
-	}
-
-	return entries, nil
+	return entries
 }
 
 // extractSecretRef extracts name+key from a value that may be {name, key} or {secretKeyRef: {name, key}}.
 func extractSecretRef(val interface{}) *v1alpha2.SecretKeyRef {
-	var name, key string
-	switch v := val.(type) {
-	case map[string]interface{}:
-		// Direct form: {name: x, key: y}
-		if n, ok := v["name"].(string); ok && n != "" {
-			name = n
-		}
-		if k, ok := v["key"].(string); ok && k != "" {
-			key = k
-		}
-		if name != "" && key != "" {
-			return &v1alpha2.SecretKeyRef{Name: name, Key: key}
-		}
-		// Nested form: {secretKeyRef: {name, key}}
-		if skr, ok := v["secretKeyRef"].(map[string]interface{}); ok {
-			if n, ok := skr["name"].(string); ok && n != "" {
-				name = n
-			}
-			if k, ok := skr["key"].(string); ok && k != "" {
-				key = k
-			}
-			if name != "" && key != "" {
-				return &v1alpha2.SecretKeyRef{Name: name, Key: key}
-			}
-		}
+	v, ok := val.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	if ref := extractDirectSecretRef(v); ref != nil {
+		return ref
+	}
+	return extractNestedSecretRef(v)
+}
+
+func extractDirectSecretRef(v map[string]interface{}) *v1alpha2.SecretKeyRef {
+	name, nok := v["name"].(string)
+	key, kok := v["key"].(string)
+	if nok && kok && name != "" && key != "" {
+		return &v1alpha2.SecretKeyRef{Name: name, Key: key}
+	}
+	return nil
+}
+
+func extractNestedSecretRef(v map[string]interface{}) *v1alpha2.SecretKeyRef {
+	skr, ok := v["secretKeyRef"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	name, nok := skr["name"].(string)
+	key, kok := skr["key"].(string)
+	if nok && kok && name != "" && key != "" {
+		return &v1alpha2.SecretKeyRef{Name: name, Key: key}
 	}
 	return nil
 }

@@ -44,7 +44,7 @@ var _ conversion.Convertible = &LlamaStackDistribution{}
 func (src *LlamaStackDistribution) ConvertTo(dstRaw conversion.Hub) error {
 	dst, ok := dstRaw.(*v1alpha2.LlamaStackDistribution)
 	if !ok {
-		return fmt.Errorf("expected *v1alpha2.LlamaStackDistribution, got %T", dstRaw)
+		return fmt.Errorf("failed to convert: expected *v1alpha2.LlamaStackDistribution, got %T", dstRaw)
 	}
 
 	dst.ObjectMeta = src.ObjectMeta
@@ -84,7 +84,7 @@ func (src *LlamaStackDistribution) ConvertTo(dstRaw conversion.Hub) error {
 func (dst *LlamaStackDistribution) ConvertFrom(srcRaw conversion.Hub) error {
 	src, ok := srcRaw.(*v1alpha2.LlamaStackDistribution)
 	if !ok {
-		return fmt.Errorf("expected *v1alpha2.LlamaStackDistribution, got %T", srcRaw)
+		return fmt.Errorf("failed to convert: expected *v1alpha2.LlamaStackDistribution, got %T", srcRaw)
 	}
 
 	dst.ObjectMeta = src.ObjectMeta
@@ -155,7 +155,18 @@ func convertToWorkload(src *LlamaStackDistribution, dst *v1alpha2.LlamaStackDist
 		hasContent = true
 	}
 
-	// Storage
+	if convertToWorkloadScaling(src, w) {
+		hasContent = true
+	}
+
+	if !hasContent {
+		return nil
+	}
+	return w
+}
+
+func convertToWorkloadScaling(src *LlamaStackDistribution, w *v1alpha2.WorkloadSpec) bool {
+	hasContent := false
 	if src.Spec.Server.Storage != nil {
 		w.Storage = &v1alpha2.PVCStorageSpec{
 			Size:      src.Spec.Server.Storage.Size,
@@ -163,8 +174,6 @@ func convertToWorkload(src *LlamaStackDistribution, dst *v1alpha2.LlamaStackDist
 		}
 		hasContent = true
 	}
-
-	// PDB
 	if src.Spec.Server.PodDisruptionBudget != nil {
 		w.PodDisruptionBudget = &v1alpha2.PodDisruptionBudgetSpec{
 			MinAvailable:   src.Spec.Server.PodDisruptionBudget.MinAvailable,
@@ -172,8 +181,6 @@ func convertToWorkload(src *LlamaStackDistribution, dst *v1alpha2.LlamaStackDist
 		}
 		hasContent = true
 	}
-
-	// Autoscaling
 	if src.Spec.Server.Autoscaling != nil {
 		w.Autoscaling = &v1alpha2.AutoscalingSpec{
 			MinReplicas:                       src.Spec.Server.Autoscaling.MinReplicas,
@@ -183,17 +190,11 @@ func convertToWorkload(src *LlamaStackDistribution, dst *v1alpha2.LlamaStackDist
 		}
 		hasContent = true
 	}
-
-	// TopologySpreadConstraints
 	if len(src.Spec.Server.TopologySpreadConstraints) > 0 {
 		w.TopologySpreadConstraints = src.Spec.Server.TopologySpreadConstraints
 		hasContent = true
 	}
-
-	if !hasContent {
-		return nil
-	}
-	return w
+	return hasContent
 }
 
 func convertToOverrides(src *LlamaStackDistribution, dst *v1alpha2.LlamaStackDistribution) *v1alpha2.WorkloadOverrides {
@@ -243,51 +244,65 @@ func convertToNetworking(src *LlamaStackDistribution, dst *v1alpha2.LlamaStackDi
 	n := &v1alpha2.NetworkingSpec{}
 	hasContent := false
 
-	// Port from ContainerSpec
 	if src.Spec.Server.ContainerSpec.Port > 0 {
 		n.Port = src.Spec.Server.ContainerSpec.Port
 		hasContent = true
 	}
 
-	// TLS
-	if src.Spec.Server.TLSConfig != nil && src.Spec.Server.TLSConfig.CABundle != nil {
-		cab := src.Spec.Server.TLSConfig.CABundle
-		n.TLS = &v1alpha2.TLSSpec{
-			CABundle: &v1alpha2.CABundleConfig{
-				ConfigMapName: cab.ConfigMapName,
-			},
-		}
+	if convertToTLS(src, dst, n) {
 		hasContent = true
-
-		if cab.ConfigMapNamespace != "" {
-			dst.Annotations[annCABundleNamespace] = cab.ConfigMapNamespace
-		}
-		if len(cab.ConfigMapKeys) > 0 {
-			keysJSON, _ := json.Marshal(cab.ConfigMapKeys)
-			dst.Annotations[annCABundleKeys] = string(keysJSON)
-		}
 	}
 
-	// ExposeRoute → Expose
-	if src.Spec.Network != nil {
-		if src.Spec.Network.ExposeRoute {
-			raw, _ := json.Marshal(true)
-			n.Expose = &apiextensionsv1.JSON{Raw: raw}
-			hasContent = true
-		}
-		if src.Spec.Network.AllowedFrom != nil {
-			n.AllowedFrom = &v1alpha2.AllowedFromSpec{
-				Namespaces: src.Spec.Network.AllowedFrom.Namespaces,
-				Labels:     src.Spec.Network.AllowedFrom.Labels,
-			}
-			hasContent = true
-		}
+	if convertToNetworkAccess(src, n) {
+		hasContent = true
 	}
 
 	if !hasContent {
 		return nil
 	}
 	return n
+}
+
+func convertToTLS(src *LlamaStackDistribution, dst *v1alpha2.LlamaStackDistribution, n *v1alpha2.NetworkingSpec) bool {
+	if src.Spec.Server.TLSConfig == nil || src.Spec.Server.TLSConfig.CABundle == nil {
+		return false
+	}
+	cab := src.Spec.Server.TLSConfig.CABundle
+	n.TLS = &v1alpha2.TLSSpec{
+		CABundle: &v1alpha2.CABundleConfig{
+			ConfigMapName: cab.ConfigMapName,
+		},
+	}
+	if cab.ConfigMapNamespace != "" {
+		dst.Annotations[annCABundleNamespace] = cab.ConfigMapNamespace
+	}
+	if len(cab.ConfigMapKeys) > 0 {
+		if keysJSON, err := json.Marshal(cab.ConfigMapKeys); err == nil {
+			dst.Annotations[annCABundleKeys] = string(keysJSON)
+		}
+	}
+	return true
+}
+
+func convertToNetworkAccess(src *LlamaStackDistribution, n *v1alpha2.NetworkingSpec) bool {
+	if src.Spec.Network == nil {
+		return false
+	}
+	hasContent := false
+	if src.Spec.Network.ExposeRoute {
+		if raw, err := json.Marshal(true); err == nil {
+			n.Expose = &apiextensionsv1.JSON{Raw: raw}
+			hasContent = true
+		}
+	}
+	if src.Spec.Network.AllowedFrom != nil {
+		n.AllowedFrom = &v1alpha2.AllowedFromSpec{
+			Namespaces: src.Spec.Network.AllowedFrom.Namespaces,
+			Labels:     src.Spec.Network.AllowedFrom.Labels,
+		}
+		hasContent = true
+	}
+	return hasContent
 }
 
 func convertToStatus(src *LlamaStackDistribution, dst *v1alpha2.LlamaStackDistribution) {
@@ -362,51 +377,52 @@ func convertFromWorkload(src *v1alpha2.LlamaStackDistribution, dst *LlamaStackDi
 		}
 	}
 
-	// Overrides → ContainerSpec + PodOverrides
-	if w.Overrides != nil {
-		o := w.Overrides
-		dst.Spec.Server.ContainerSpec.Env = o.Env
-		dst.Spec.Server.ContainerSpec.Command = o.Command
-		dst.Spec.Server.ContainerSpec.Args = o.Args
+	convertFromOverrides(src, dst, w)
+	convertFromWorkloadScaling(dst, w)
+}
 
-		if o.ServiceAccountName != "" || len(o.Volumes) > 0 || len(o.VolumeMounts) > 0 {
-			dst.Spec.Server.PodOverrides = &PodOverrides{
-				ServiceAccountName: o.ServiceAccountName,
-				Volumes:            o.Volumes,
-				VolumeMounts:       o.VolumeMounts,
-			}
-		}
+func convertFromOverrides(src *v1alpha2.LlamaStackDistribution, dst *LlamaStackDistribution, w *v1alpha2.WorkloadSpec) {
+	if w.Overrides == nil {
+		return
+	}
+	o := w.Overrides
+	dst.Spec.Server.ContainerSpec.Env = o.Env
+	dst.Spec.Server.ContainerSpec.Command = o.Command
+	dst.Spec.Server.ContainerSpec.Args = o.Args
 
-		// TerminationGracePeriod from annotation
-		if src.Annotations != nil {
-			if tgp, ok := src.Annotations[annTerminationGracePeriod]; ok {
-				if v, err := strconv.ParseInt(tgp, 10, 64); err == nil {
-					if dst.Spec.Server.PodOverrides == nil {
-						dst.Spec.Server.PodOverrides = &PodOverrides{}
-					}
-					dst.Spec.Server.PodOverrides.TerminationGracePeriodSeconds = &v
-				}
-			}
+	if o.ServiceAccountName != "" || len(o.Volumes) > 0 || len(o.VolumeMounts) > 0 {
+		dst.Spec.Server.PodOverrides = &PodOverrides{
+			ServiceAccountName: o.ServiceAccountName,
+			Volumes:            o.Volumes,
+			VolumeMounts:       o.VolumeMounts,
 		}
 	}
 
-	// Storage
+	if src.Annotations != nil {
+		if tgp, ok := src.Annotations[annTerminationGracePeriod]; ok {
+			if v, err := strconv.ParseInt(tgp, 10, 64); err == nil {
+				if dst.Spec.Server.PodOverrides == nil {
+					dst.Spec.Server.PodOverrides = &PodOverrides{}
+				}
+				dst.Spec.Server.PodOverrides.TerminationGracePeriodSeconds = &v
+			}
+		}
+	}
+}
+
+func convertFromWorkloadScaling(dst *LlamaStackDistribution, w *v1alpha2.WorkloadSpec) {
 	if w.Storage != nil {
 		dst.Spec.Server.Storage = &StorageSpec{
 			Size:      w.Storage.Size,
 			MountPath: w.Storage.MountPath,
 		}
 	}
-
-	// PDB
 	if w.PodDisruptionBudget != nil {
 		dst.Spec.Server.PodDisruptionBudget = &PodDisruptionBudgetSpec{
 			MinAvailable:   w.PodDisruptionBudget.MinAvailable,
 			MaxUnavailable: w.PodDisruptionBudget.MaxUnavailable,
 		}
 	}
-
-	// Autoscaling
 	if w.Autoscaling != nil {
 		dst.Spec.Server.Autoscaling = &AutoscalingSpec{
 			MinReplicas:                       w.Autoscaling.MinReplicas,
@@ -415,9 +431,25 @@ func convertFromWorkload(src *v1alpha2.LlamaStackDistribution, dst *LlamaStackDi
 			TargetMemoryUtilizationPercentage: w.Autoscaling.TargetMemoryUtilizationPercentage,
 		}
 	}
-
-	// TopologySpreadConstraints
 	dst.Spec.Server.TopologySpreadConstraints = w.TopologySpreadConstraints
+}
+
+func convertFromTLS(src *v1alpha2.LlamaStackDistribution, dst *LlamaStackDistribution, n *v1alpha2.NetworkingSpec) {
+	if n.TLS == nil || n.TLS.CABundle == nil {
+		return
+	}
+	cab := &CABundleConfig{
+		ConfigMapName: n.TLS.CABundle.ConfigMapName,
+	}
+	if src.Annotations != nil {
+		cab.ConfigMapNamespace = src.Annotations[annCABundleNamespace]
+		if keysJSON, ok := src.Annotations[annCABundleKeys]; ok {
+			_ = json.Unmarshal([]byte(keysJSON), &cab.ConfigMapKeys)
+		}
+	}
+	dst.Spec.Server.TLSConfig = &TLSConfig{
+		CABundle: cab,
+	}
 }
 
 func convertFromNetworking(src *v1alpha2.LlamaStackDistribution, dst *LlamaStackDistribution) {
@@ -431,21 +463,7 @@ func convertFromNetworking(src *v1alpha2.LlamaStackDistribution, dst *LlamaStack
 		dst.Spec.Server.ContainerSpec.Port = n.Port
 	}
 
-	// TLS → TLSConfig
-	if n.TLS != nil && n.TLS.CABundle != nil {
-		cab := &CABundleConfig{
-			ConfigMapName: n.TLS.CABundle.ConfigMapName,
-		}
-		if src.Annotations != nil {
-			cab.ConfigMapNamespace = src.Annotations[annCABundleNamespace]
-			if keysJSON, ok := src.Annotations[annCABundleKeys]; ok {
-				_ = json.Unmarshal([]byte(keysJSON), &cab.ConfigMapKeys)
-			}
-		}
-		dst.Spec.Server.TLSConfig = &TLSConfig{
-			CABundle: cab,
-		}
-	}
+	convertFromTLS(src, dst, n)
 
 	// Expose → ExposeRoute
 	expose, _ := parseExpose(n.Expose)

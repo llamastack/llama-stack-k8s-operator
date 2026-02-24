@@ -19,6 +19,7 @@ package config
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -48,7 +49,7 @@ func NewBaseConfigResolver(distImages, overrides map[string]string) *BaseConfigR
 // Resolution priority:
 // 1. (Phase 2) OCI labels on resolved image
 // 2. Embedded config for distribution.name
-// 3. Error requiring overrideConfig
+// 3. Error requiring overrideConfig.
 func (r *BaseConfigResolver) Resolve(ctx context.Context, dist v1alpha2.DistributionSpec) (*BaseConfig, string, error) {
 	log := logr.FromContextOrDiscard(ctx)
 
@@ -68,9 +69,9 @@ func (r *BaseConfigResolver) Resolve(ctx context.Context, dist v1alpha2.Distribu
 	}
 
 	// distribution.image without embedded config
-	return nil, "", fmt.Errorf(
-		"direct image references require either overrideConfig.configMapName or OCI config labels on the image; " +
-			"see docs/configuration.md for details",
+	return nil, "", errors.New(
+		"failed to resolve config: direct image references require either overrideConfig.configMapName or " +
+			"OCI config labels on the image; see docs/configuration.md for details",
 	)
 }
 
@@ -78,12 +79,12 @@ func (r *BaseConfigResolver) Resolve(ctx context.Context, dist v1alpha2.Distribu
 func (r *BaseConfigResolver) loadEmbeddedConfig(name string) (*BaseConfig, error) {
 	data, err := embeddedConfigs.ReadFile(fmt.Sprintf("configs/%s/config.yaml", name))
 	if err != nil {
-		return nil, fmt.Errorf("no embedded config for distribution %q: %w", name, err)
+		return nil, fmt.Errorf("failed to read embedded config for distribution %q: %w", name, err)
 	}
 
 	var config BaseConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("invalid embedded config for distribution %q: %w", name, err)
+		return nil, fmt.Errorf("failed to parse embedded config for distribution %q: %w", name, err)
 	}
 
 	return &config, nil
@@ -103,7 +104,7 @@ func (r *BaseConfigResolver) resolveImage(dist v1alpha2.DistributionSpec) (strin
 		return image, nil
 	}
 
-	return "", fmt.Errorf("unknown distribution name %q: not found in distributions.json", dist.Name)
+	return "", fmt.Errorf("failed to resolve distribution name %q: not found in distributions.json", dist.Name)
 }
 
 // EmbeddedDistributionNames returns the list of distribution names that have embedded configs.

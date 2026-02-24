@@ -63,7 +63,7 @@ func ExpandProviders(spec *v1alpha2.ProvidersSpec, substitutions map[string]stri
 
 		configs, err := ParsePolymorphicProvider(f.raw)
 		if err != nil {
-			return nil, 0, fmt.Errorf("providers.%s: %w", f.fieldName, err)
+			return nil, 0, fmt.Errorf("failed to parse providers.%s: %w", f.fieldName, err)
 		}
 
 		configKey := apiTypeNames[f.fieldName]
@@ -72,7 +72,7 @@ func ExpandProviders(spec *v1alpha2.ProvidersSpec, substitutions map[string]stri
 		for _, pc := range configs {
 			entry, err := expandSingleProvider(pc, substitutions)
 			if err != nil {
-				return nil, 0, fmt.Errorf("providers.%s: %w", f.fieldName, err)
+				return nil, 0, fmt.Errorf("failed to parse providers.%s: %w", f.fieldName, err)
 			}
 			entries = append(entries, entry)
 		}
@@ -82,6 +82,30 @@ func ExpandProviders(spec *v1alpha2.ProvidersSpec, substitutions map[string]stri
 	}
 
 	return result, totalCount, nil
+}
+
+func mergeProviderSettings(pc v1alpha2.ProviderConfig, providerID string, substitutions map[string]string) (map[string]interface{}, error) {
+	if pc.Settings == nil || len(pc.Settings.Raw) == 0 {
+		return nil, nil
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(pc.Settings.Raw, &settings); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal settings for provider %q: %w", providerID, err)
+	}
+	out := make(map[string]interface{}, len(settings))
+	for k, v := range settings {
+		if m, ok := v.(map[string]interface{}); ok {
+			if ref := extractSecretRef(m); ref != nil {
+				ident := providerID + ":" + k
+				if sub, ok2 := substitutions[ident]; ok2 {
+					out[k] = sub
+					continue
+				}
+			}
+		}
+		out[k] = v
+	}
+	return out, nil
 }
 
 // expandSingleProvider converts a single ProviderConfig to a ProviderEntry.
@@ -112,25 +136,12 @@ func expandSingleProvider(pc v1alpha2.ProviderConfig, substitutions map[string]s
 	}
 
 	// Merge settings into config
-	if pc.Settings != nil && len(pc.Settings.Raw) > 0 {
-		var settings map[string]interface{}
-		if err := json.Unmarshal(pc.Settings.Raw, &settings); err != nil {
-			return ProviderEntry{}, fmt.Errorf("invalid settings for provider %q: %w", providerID, err)
-		}
-
-		for k, v := range settings {
-			// Check if this setting value is a secretKeyRef
-			if m, ok := v.(map[string]interface{}); ok {
-				if ref := extractSecretRef(m); ref != nil {
-					ident := providerID + ":" + k
-					if sub, ok2 := substitutions[ident]; ok2 {
-						cfg[k] = sub
-						continue
-					}
-				}
-			}
-			cfg[k] = v
-		}
+	settingsMap, err := mergeProviderSettings(pc, providerID, substitutions)
+	if err != nil {
+		return ProviderEntry{}, err
+	}
+	for k, v := range settingsMap {
+		cfg[k] = v
 	}
 
 	return ProviderEntry{
@@ -174,14 +185,14 @@ func ParsePolymorphicProvider(raw *apiextensionsv1.JSON) ([]v1alpha2.ProviderCon
 	// Try array
 	var list []v1alpha2.ProviderConfig
 	if err := json.Unmarshal(raw.Raw, &list); err != nil {
-		return nil, fmt.Errorf("expected provider object or array: %w", err)
+		return nil, fmt.Errorf("failed to parse provider: expected object or array: %w", err)
 	}
 
 	// Validate: when list form, each item must have an explicit ID
 	if len(list) > 1 {
 		for i, pc := range list {
 			if pc.ID == "" {
-				return nil, fmt.Errorf("provider at index %d must have an explicit 'id' when multiple providers are specified", i)
+				return nil, fmt.Errorf("failed to validate provider at index %d: must have an explicit 'id' when multiple providers are specified", i)
 			}
 		}
 	}

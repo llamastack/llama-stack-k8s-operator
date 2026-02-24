@@ -18,6 +18,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	v1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
@@ -40,21 +41,21 @@ func ExpandResources(
 	// Expand models
 	models, err := expandModels(spec.Models, userProviders, base)
 	if err != nil {
-		return nil, nil, nil, 0, fmt.Errorf("resources.models: %w", err)
+		return nil, nil, nil, 0, fmt.Errorf("failed to expand resources.models: %w", err)
 	}
 	totalCount += len(models)
 
 	// Expand tools
 	tools, err := expandTools(spec.Tools, userProviders, base)
 	if err != nil {
-		return nil, nil, nil, 0, fmt.Errorf("resources.tools: %w", err)
+		return nil, nil, nil, 0, fmt.Errorf("failed to expand resources.tools: %w", err)
 	}
 	totalCount += len(tools)
 
 	// Expand shields
 	shields, err := expandShields(spec.Shields, userProviders, base)
 	if err != nil {
-		return nil, nil, nil, 0, fmt.Errorf("resources.shields: %w", err)
+		return nil, nil, nil, 0, fmt.Errorf("failed to expand resources.shields: %w", err)
 	}
 	totalCount += len(shields)
 
@@ -76,7 +77,7 @@ func expandModels(
 	for i, item := range raw {
 		mc, err := ParsePolymorphicModel(&item)
 		if err != nil {
-			return nil, fmt.Errorf("[%d]: %w", i, err)
+			return nil, fmt.Errorf("failed to parse model[%d]: %w", i, err)
 		}
 
 		provider := mc.Provider
@@ -131,7 +132,7 @@ func expandTools(
 
 	provider := getDefaultProviderForAPI("tool_runtime", userProviders, base)
 	if provider == "" {
-		return nil, fmt.Errorf("resources.tools requires at least one toolRuntime provider to be configured")
+		return nil, errors.New("failed to expand tools: requires at least one toolRuntime provider to be configured")
 	}
 
 	var entries []map[string]interface{}
@@ -155,7 +156,7 @@ func expandShields(
 
 	provider := getDefaultProviderForAPI("safety", userProviders, base)
 	if provider == "" {
-		return nil, fmt.Errorf("resources.shields requires at least one safety provider to be configured")
+		return nil, errors.New("failed to expand shields: requires at least one safety provider to be configured")
 	}
 
 	var entries []map[string]interface{}
@@ -207,7 +208,7 @@ func getDefaultProviderForAPI(
 // (model name) or a ModelConfig object.
 func ParsePolymorphicModel(raw *apiextensionsv1.JSON) (*v1alpha2.ModelConfig, error) {
 	if raw == nil || len(raw.Raw) == 0 {
-		return nil, fmt.Errorf("empty model entry")
+		return nil, errors.New("failed to parse model: empty entry")
 	}
 
 	// Try as string first
@@ -219,11 +220,11 @@ func ParsePolymorphicModel(raw *apiextensionsv1.JSON) (*v1alpha2.ModelConfig, er
 	// Try as object
 	var mc v1alpha2.ModelConfig
 	if err := json.Unmarshal(raw.Raw, &mc); err != nil {
-		return nil, fmt.Errorf("expected model string or object: %w", err)
+		return nil, fmt.Errorf("failed to parse model: expected string or object: %w", err)
 	}
 
 	if mc.Name == "" {
-		return nil, fmt.Errorf("model object must have a 'name' field")
+		return nil, errors.New("failed to parse model: object must have a 'name' field")
 	}
 
 	return &mc, nil

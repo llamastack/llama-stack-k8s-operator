@@ -17,16 +17,19 @@ limitations under the License.
 package config
 
 import (
-	"fmt"
+	"errors"
 
 	v1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 )
 
-// KV storage identifier for substitutions.
-const kvRedisID = "kv-redis"
-
-// SQL storage identifier for substitutions.
-const sqlPostgresID = "sql-postgres"
+const (
+	// kvRedisID is the KV storage identifier for substitutions.
+	kvRedisID = "kv-redis"
+	// sqlPostgresID is the SQL storage identifier for substitutions.
+	sqlPostgresID = "sql-postgres"
+	// storageTypeSQLite is the default storage type.
+	storageTypeSQLite = "sqlite"
+)
 
 // ExpandStorage merges user storage spec over the base config's storage sections.
 // When storage is nil, the base config's storage is preserved unchanged.
@@ -35,16 +38,11 @@ func ExpandStorage(spec *v1alpha2.StateStorageSpec, base *BaseConfig) (*BaseConf
 		return base, nil
 	}
 	if base == nil {
-		return nil, fmt.Errorf("base config is nil")
+		return nil, errors.New("failed to expand storage: base config is nil")
 	}
 
-	// Clone base config to avoid mutation
 	clone := cloneBaseConfig(base)
-
 	substitutions := make(map[string]string)
-	// Pre-populate substitutions from a resolution context if available.
-	// For standalone ExpandStorage calls, substitutions are passed from ResolveSecrets.
-	// We use fixed identifiers that match secret_resolver.go.
 	if spec.KV != nil && spec.KV.Password != nil {
 		substitutions[kvRedisID+":password"] = "${env.LLSD_KV_REDIS_PASSWORD}"
 	}
@@ -52,36 +50,43 @@ func ExpandStorage(spec *v1alpha2.StateStorageSpec, base *BaseConfig) (*BaseConf
 		substitutions[sqlPostgresID+":connectionString"] = "${env.LLSD_SQL_POSTGRES_CONNECTIONSTRING}"
 	}
 
-	// Apply KV storage changes
-	if spec.KV != nil {
-		kvMap := ExpandKVStorage(spec.KV, substitutions)
-		clone.MetadataStore = mergeStore(clone.MetadataStore, kvMap)
-	}
-
-	// Apply SQL storage changes
-	if spec.SQL != nil {
-		sqlMap := ExpandSQLStorage(spec.SQL, substitutions)
-		sqlStores := []*map[string]interface{}{
-			&clone.InferenceStore,
-			&clone.SafetyStore,
-			&clone.VectorIOStore,
-			&clone.ToolRuntimeStore,
-			&clone.TelemetryStore,
-			&clone.PostTrainingStore,
-			&clone.ScoringStore,
-			&clone.EvalStore,
-			&clone.DatasetIOStore,
-		}
-		for _, store := range sqlStores {
-			if *store != nil {
-				*store = mergeStore(*store, sqlMap)
-			} else {
-				*store = copyMap(sqlMap)
-			}
-		}
-	}
+	applyKVStorage(clone, spec.KV, substitutions)
+	applySQLStorage(clone, spec.SQL, substitutions)
 
 	return clone, nil
+}
+
+func applyKVStorage(clone *BaseConfig, kv *v1alpha2.KVStorageSpec, substitutions map[string]string) {
+	if kv == nil {
+		return
+	}
+	kvMap := ExpandKVStorage(kv, substitutions)
+	clone.MetadataStore = mergeStore(clone.MetadataStore, kvMap)
+}
+
+func applySQLStorage(clone *BaseConfig, sql *v1alpha2.SQLStorageSpec, substitutions map[string]string) {
+	if sql == nil {
+		return
+	}
+	sqlMap := ExpandSQLStorage(sql, substitutions)
+	sqlStores := []*map[string]interface{}{
+		&clone.InferenceStore,
+		&clone.SafetyStore,
+		&clone.VectorIOStore,
+		&clone.ToolRuntimeStore,
+		&clone.TelemetryStore,
+		&clone.PostTrainingStore,
+		&clone.ScoringStore,
+		&clone.EvalStore,
+		&clone.DatasetIOStore,
+	}
+	for _, store := range sqlStores {
+		if *store != nil {
+			*store = mergeStore(*store, sqlMap)
+		} else {
+			*store = copyMap(sqlMap)
+		}
+	}
 }
 
 // cloneBaseConfig returns a deep copy of the base config.
@@ -100,10 +105,10 @@ func cloneBaseConfig(base *BaseConfig) *BaseConfig {
 		ToolRuntimeStore:  copyMap(base.ToolRuntimeStore),
 		TelemetryStore:    copyMap(base.TelemetryStore),
 		PostTrainingStore: copyMap(base.PostTrainingStore),
-		ScoringStore:     copyMap(base.ScoringStore),
-		EvalStore:        copyMap(base.EvalStore),
-		DatasetIOStore:   copyMap(base.DatasetIOStore),
-		Server:           copyMap(base.Server),
+		ScoringStore:      copyMap(base.ScoringStore),
+		EvalStore:         copyMap(base.EvalStore),
+		DatasetIOStore:    copyMap(base.DatasetIOStore),
+		Server:            copyMap(base.Server),
 		ExternalProviders: copyMap(base.ExternalProviders),
 	}
 }
@@ -151,14 +156,14 @@ func ExpandKVStorage(kv *v1alpha2.KVStorageSpec, substitutions map[string]string
 	}
 	typ := kv.Type
 	if typ == "" {
-		typ = "sqlite"
+		typ = storageTypeSQLite
 	}
 
 	out := make(map[string]interface{})
 	out["type"] = typ
 
 	switch typ {
-	case "sqlite":
+	case storageTypeSQLite:
 		out["db_path"] = "${env.SQLITE_STORE_DIR:=~/.llama}/kvstore.db"
 	case "redis":
 		if kv.Endpoint != "" {
@@ -185,14 +190,14 @@ func ExpandSQLStorage(sql *v1alpha2.SQLStorageSpec, substitutions map[string]str
 	}
 	typ := sql.Type
 	if typ == "" {
-		typ = "sqlite"
+		typ = storageTypeSQLite
 	}
 
 	out := make(map[string]interface{})
 	out["type"] = typ
 
 	switch typ {
-	case "sqlite":
+	case storageTypeSQLite:
 		out["db_path"] = "${env.SQLITE_STORE_DIR:=~/.llama}/sqlstore.db"
 	case "postgres":
 		if sql.ConnectionString != nil {

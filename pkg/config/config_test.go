@@ -141,7 +141,7 @@ func TestResolverLoadEmbeddedConfig(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.NotNil(t, config)
-			assert.Greater(t, config.Version, 0)
+			assert.Positive(t, config.Version)
 			assert.NotEmpty(t, config.APIs)
 		})
 	}
@@ -472,8 +472,8 @@ func TestMergeExternalProvidersConflict(t *testing.T) {
 }
 
 func TestValidateConfigVersion(t *testing.T) {
-	assert.NoError(t, ValidateConfigVersion(1))
-	assert.NoError(t, ValidateConfigVersion(2))
-	assert.Error(t, ValidateConfigVersion(0))
-	assert.Error(t, ValidateConfigVersion(99))
+	require.NoError(t, ValidateConfigVersion(1))
+	require.NoError(t, ValidateConfigVersion(2))
+	require.Error(t, ValidateConfigVersion(0))
+	require.Error(t, ValidateConfigVersion(99))
 }
