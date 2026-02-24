@@ -1,27 +1,28 @@
 # Integration Points: External Providers Feature (Final)
 
-**Purpose**: Document all integration points with existing codebase for implementing external provider support using the `extra-providers.yaml` schema.
+**Purpose**: Document all integration points with existing codebase for implementing external provider support using LlamaStack's native `module:` field.
 
 **Created**: 2025-11-13
-**Updated**: 2025-11-13 (final - using extra-providers.yaml approach)
+**Updated**: 2026-01-29 (Simplified to use native module: support)
 
-**Related**: See `extra-providers-schema.md` for schema definition and evolution strategy
+**Related**: See `extra-providers-schema.md` for provider entry schema and migration notes
 
 ---
 
 ## Executive Summary
 
-The external providers feature uses a **forward-compatible** `extra-providers.yaml` schema that enables both current (merge-based) and future (native LlamaStack support) implementations.
+The external providers feature uses LlamaStack's native `module:` field support for provider loading. Provider entries are added directly to config.yaml with the `module:` field.
 
 **Architecture**:
-- **Current (Phase 1)**: Merge init container generates `extra-providers.yaml` from metadata, merges with user run.yaml
-- **Future (Phase 2)**: LlamaStack reads `extra-providers.yaml` directly via `--extra-providers` flag (no merge needed)
+- **Install Phase**: N init containers install provider packages from container images
+- **Config Generation**: Single init container adds provider entries with `module:` field to config.yaml
+- **Runtime**: LlamaStack imports providers via `importlib.import_module()` using the `module:` field
 
 **Benefits of This Approach**:
-- ✅ No brittle run.yaml extraction from distribution images
-- ✅ Schema evolution handled by LlamaStack
-- ✅ Clean migration path (remove merge init container, add flag)
-- ✅ Current implementation doesn't block future enhancement
+- ✅ Uses LlamaStack's native module loading mechanism
+- ✅ No separate extra-providers.yaml file needed
+- ✅ Self-contained - packages come from container images, not external repos
+- ✅ Simpler architecture - just add provider entries with module: field
 
 ---
 
@@ -50,25 +51,25 @@ Phase 2: MERGE (1 init container)
 ┌─────────────────────────────────────┐
 │ merge-config                        │
 │ Image: <operator-image>             │
-│ Binary: /usr/local/bin/merge-run-yaml
+│ Binary: /usr/local/bin/generate-config
 │ → Read provider metadata            │
-│ → Generate extra-providers.yaml     │
-│ → Read user run.yaml (if exists)    │
+│ → Generate config.yaml (with module: field)     │
+│ → Read user config.yaml (if exists)    │
 │ → Merge user + extra-providers      │
-│ → Write to /shared/final/run.yaml  │
+│ → Write to /shared/final/config.yaml  │
 └─────────────────────────────────────┘
               ↓
 
 MAIN CONTAINER
 ┌─────────────────────────────────────┐
 │ llama-stack                         │
-│ → Mounts /shared/final/run.yaml    │
+│ → Mounts /shared/final/config.yaml    │
 │ → PYTHONPATH includes providers     │
 │ → Starts server                     │
 └─────────────────────────────────────┘
 ```
 
-**Key Improvement**: No extraction init container needed! We generate `extra-providers.yaml` from metadata and merge with user ConfigMap (if provided).
+**Key Improvement**: No extraction init container needed! We generate `config.yaml (with module: field)` from metadata and merge with user ConfigMap (if provided).
 
 ---
 
@@ -254,7 +255,7 @@ func buildExternalProviderInitContainers(
     providerContainers := createProviderInstallInitContainers(instance)
     initContainers = append(initContainers, providerContainers...)
 
-    // Phase 2: Generate extra-providers.yaml and merge with user config
+    // Phase 2: Generate config.yaml (with module: field) and merge with user config
     mergeContainer := createMergeConfigInitContainer(instance, r.getOperatorImage())
     initContainers = append(initContainers, mergeContainer)
 
@@ -378,13 +379,13 @@ func createMergeConfigInitContainer(
     // Build command arguments
     args := []string{
         "--metadata-dir=/opt/external-providers/metadata",
-        "--extra-providers-output=/shared/extra-providers.yaml",
-        "--output=/shared/final/run.yaml",
+        "--extra-providers-output=/shared/config.yaml (with module: field)",
+        "--output=/shared/final/config.yaml",
     }
 
     // Add user config if exists (this becomes the base for merge)
     if hasValidUserConfig(instance) {
-        args = append(args, "--base=/etc/user-config-source/run.yaml")
+        args = append(args, "--base=/etc/user-config-source/config.yaml")
     }
 
     volumeMounts := []corev1.VolumeMount{
@@ -411,7 +412,7 @@ func createMergeConfigInitContainer(
     return corev1.Container{
         Name:         "merge-config",
         Image:        operatorImage,
-        Command:      []string{"/usr/local/bin/merge-run-yaml"},
+        Command:      []string{"/usr/local/bin/generate-config"},
         Args:         args,
         VolumeMounts: volumeMounts,
         SecurityContext: &corev1.SecurityContext{
@@ -473,8 +474,8 @@ func configureExternalProviderVolumes(
         // Mount merged config
         podSpec.Containers[i].VolumeMounts = append(podSpec.Containers[i].VolumeMounts, corev1.VolumeMount{
             Name:      "config-merge",
-            MountPath: "/etc/llama-stack/run.yaml",
-            SubPath:   "final/run.yaml",
+            MountPath: "/etc/llama-stack/config.yaml",
+            SubPath:   "final/config.yaml",
             ReadOnly:  true,
         })
 
@@ -489,9 +490,9 @@ func configureExternalProviderVolumes(
 ```
 
 **Volumes Summary**:
-- `config-merge` - emptyDir for merge process (extra-providers.yaml + final/run.yaml)
+- `config-merge` - emptyDir for merge process (config.yaml (with module: field) + final/config.yaml)
 - `external-providers` - emptyDir for provider packages + metadata
-- `user-config-source` - ConfigMap for user-provided run.yaml (if exists)
+- `user-config-source` - ConfigMap for user-provided config.yaml (if exists)
 
 **Dependencies**: Integration Point 3
 
@@ -594,15 +595,15 @@ func configureUserConfigSource(instance *llamav1alpha1.LlamaStackDistribution, p
         },
     })
 
-    // Note: This volume is mounted ONLY in the merge init container
+    // Note: This volume is mounted ONLY in the config generation init container
     // Main container mounts the merged config from config-merge volume
 }
 ```
 
 **Important**: When external providers exist, user ConfigMap is:
-- Mounted in merge init container at `/etc/user-config-source/`
+- Mounted in config generation init container at `/etc/user-config-source/`
 - NOT mounted in main container
-- Used as base for merging with extra-providers.yaml
+- Used as base for merging with config.yaml (with module: field)
 
 **Dependencies**: Integration Point 4
 
@@ -660,9 +661,9 @@ r.updateDistributionConfig(ctx, instance)
 
 ## Integration Point 10: Merge Tool in Operator Image
 
-**New Component**: `cmd/merge-run-yaml/main.go` in operator repository
+**New Component**: `cmd/generate-config/main.go` in operator repository
 
-**Purpose**: Generate `extra-providers.yaml` from metadata, merge with user run.yaml
+**Purpose**: Generate `config.yaml (with module: field)` from metadata, merge with user config.yaml
 
 **Implementation**:
 ```go
@@ -681,30 +682,30 @@ import (
 )
 
 func main() {
-    basePath := flag.String("base", "", "Path to user run.yaml (optional - if not provided, only extra-providers)")
+    basePath := flag.String("base", "", "Path to user config.yaml (optional - if not provided, only extra-providers)")
     metadataDir := flag.String("metadata-dir", "", "Directory containing provider metadata files")
-    extraProvidersOutput := flag.String("extra-providers-output", "", "Path to write extra-providers.yaml")
-    outputPath := flag.String("output", "", "Path to write final merged run.yaml")
+    extraProvidersOutput := flag.String("extra-providers-output", "", "Path to write config.yaml (with module: field)")
+    outputPath := flag.String("output", "", "Path to write final merged config.yaml")
 
     flag.Parse()
 
     if *metadataDir == "" || *extraProvidersOutput == "" || *outputPath == "" {
-        fmt.Fprintf(os.Stderr, "Usage: merge-run-yaml --metadata-dir=<dir> --extra-providers-output=<path> --output=<path> [--base=<path>]\n")
+        fmt.Fprintf(os.Stderr, "Usage: generate-config --metadata-dir=<dir> --extra-providers-output=<path> --output=<path> [--base=<path>]\n")
         os.Exit(1)
     }
 
-    // Step 1: Generate extra-providers.yaml from provider metadata
-    fmt.Println("Generating extra-providers.yaml from provider metadata...")
+    // Step 1: Generate config.yaml (with module: field) from provider metadata
+    fmt.Println("Generating config.yaml (with module: field) from provider metadata...")
     extraProviders, err := provider.GenerateExtraProvidersFromMetadata(*metadataDir)
     if err != nil {
-        fmt.Fprintf(os.Stderr, "ERROR: Failed to generate extra-providers.yaml: %v\n", err)
+        fmt.Fprintf(os.Stderr, "ERROR: Failed to generate config.yaml (with module: field): %v\n", err)
         os.Exit(1)
     }
 
-    // Write extra-providers.yaml
+    // Write config.yaml (with module: field)
     extraProvidersData, err := yaml.Marshal(extraProviders)
     if err != nil {
-        fmt.Fprintf(os.Stderr, "ERROR: Failed to serialize extra-providers.yaml: %v\n", err)
+        fmt.Fprintf(os.Stderr, "ERROR: Failed to serialize config.yaml (with module: field): %v\n", err)
         os.Exit(1)
     }
 
@@ -714,31 +715,31 @@ func main() {
     }
 
     if err := ioutil.WriteFile(*extraProvidersOutput, extraProvidersData, 0644); err != nil {
-        fmt.Fprintf(os.Stderr, "ERROR: Failed to write extra-providers.yaml: %v\n", err)
+        fmt.Fprintf(os.Stderr, "ERROR: Failed to write config.yaml (with module: field): %v\n", err)
         os.Exit(1)
     }
 
-    fmt.Printf("✓ Generated extra-providers.yaml: %s\n", *extraProvidersOutput)
+    fmt.Printf("✓ Generated config.yaml (with module: field): %s\n", *extraProvidersOutput)
 
-    // Step 2: Merge with base run.yaml (if provided)
+    // Step 2: Merge with base config.yaml (if provided)
     var baseConfig *deploy.RunYamlConfig
 
     if *basePath != "" {
-        fmt.Printf("Reading base run.yaml from: %s\n", *basePath)
+        fmt.Printf("Reading base config.yaml from: %s\n", *basePath)
         baseData, err := ioutil.ReadFile(*basePath)
         if err != nil {
-            fmt.Fprintf(os.Stderr, "ERROR: Failed to read base run.yaml: %v\n", err)
+            fmt.Fprintf(os.Stderr, "ERROR: Failed to read base config.yaml: %v\n", err)
             os.Exit(1)
         }
 
         baseConfig = &deploy.RunYamlConfig{}
         if err := yaml.Unmarshal(baseData, baseConfig); err != nil {
-            fmt.Fprintf(os.Stderr, "ERROR: Failed to parse base run.yaml: %v\n", err)
+            fmt.Fprintf(os.Stderr, "ERROR: Failed to parse base config.yaml: %v\n", err)
             os.Exit(1)
         }
     } else {
         // No base config - create minimal structure
-        fmt.Println("No base run.yaml provided, creating minimal structure")
+        fmt.Println("No base config.yaml provided, creating minimal structure")
         baseConfig = &deploy.RunYamlConfig{
             Version:   2,
             Providers: make(map[string][]deploy.ProviderConfigEntry),
@@ -757,10 +758,10 @@ func main() {
         fmt.Fprintf(os.Stderr, "WARNING: %s\n", warning)
     }
 
-    // Write final merged run.yaml
+    // Write final merged config.yaml
     mergedData, err := yaml.Marshal(mergedConfig)
     if err != nil {
-        fmt.Fprintf(os.Stderr, "ERROR: Failed to serialize merged run.yaml: %v\n", err)
+        fmt.Fprintf(os.Stderr, "ERROR: Failed to serialize merged config.yaml: %v\n", err)
         os.Exit(1)
     }
 
@@ -770,11 +771,11 @@ func main() {
     }
 
     if err := ioutil.WriteFile(*outputPath, mergedData, 0644); err != nil {
-        fmt.Fprintf(os.Stderr, "ERROR: Failed to write merged run.yaml: %v\n", err)
+        fmt.Fprintf(os.Stderr, "ERROR: Failed to write merged config.yaml: %v\n", err)
         os.Exit(1)
     }
 
-    fmt.Printf("✓ Generated merged run.yaml: %s\n", *outputPath)
+    fmt.Printf("✓ Generated merged config.yaml: %s\n", *outputPath)
     fmt.Println("Merge completed successfully!")
 }
 ```
@@ -785,13 +786,13 @@ func main() {
 FROM golang:1.21 AS merge-builder
 WORKDIR /workspace
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /merge-run-yaml ./cmd/merge-run-yaml
+RUN CGO_ENABLED=0 GOOS=linux go build -o /generate-config ./cmd/generate-config
 
 # Final operator image
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/manager .
-COPY --from=merge-builder /merge-run-yaml /usr/local/bin/merge-run-yaml
+COPY --from=merge-builder /generate-config /usr/local/bin/generate-config
 USER 65532:65532
 ENTRYPOINT ["/manager"]
 ```
@@ -813,20 +814,20 @@ ENTRYPOINT ["/manager"]
 | 7 | Status Updates | `controllers/llamastackdistribution_controller.go` | `updateStatus()` | New code |
 | 8 | Status Conditions | `controllers/status.go` | New constant + function | New code |
 | 9 | ConfigMap Hash | `controllers/llamastackdistribution_controller.go` | `buildManifestContext()` | New code |
-| 10 | Merge Tool Binary | `cmd/merge-run-yaml/main.go` | New binary | New file |
+| 10 | Merge Tool Binary | `cmd/generate-config/main.go` | New binary | New file |
 
 ---
 
 ## New Files Required
 
 1. `pkg/provider/metadata.go` - Provider metadata parsing
-2. `pkg/provider/extra_providers.go` - extra-providers.yaml generation from metadata
-3. `pkg/deploy/runyaml.go` - run.yaml merging logic
-4. `cmd/merge-run-yaml/main.go` - Merge tool binary (included in operator image)
+2. `pkg/provider/extra_providers.go` - config.yaml (with module: field) generation from metadata
+3. `pkg/deploy/runyaml.go` - config.yaml merging logic
+4. `cmd/generate-config/main.go` - Merge tool binary (included in operator image)
 5. `controllers/external_providers.go` - Status tracking (optional)
 6. `tests/unit/metadata_test.go` - Metadata parsing tests
-7. `tests/unit/extra_providers_test.go` - extra-providers.yaml generation tests
-8. `tests/unit/merge_test.go` - run.yaml merge tests
+7. `tests/unit/extra_providers_test.go` - config.yaml (with module: field) generation tests
+8. `tests/unit/merge_test.go` - config.yaml merge tests
 9. `tests/integration/external_providers_test.go` - Integration tests
 
 ---
@@ -860,13 +861,13 @@ ENTRYPOINT ["/manager"]
 ... (one per provider, in CRD order)
 
 N. merge-config (operator image)
-   ↓ Reads: /etc/user-config-source/run.yaml (optional), /opt/external-providers/metadata/*.yaml
-   ↓ Generates: /shared/extra-providers.yaml
+   ↓ Reads: /etc/user-config-source/config.yaml (optional), /opt/external-providers/metadata/*.yaml
+   ↓ Generates: /shared/config.yaml (with module: field)
    ↓ Merges: user config + extra-providers
-   ↓ Writes: /shared/final/run.yaml
+   ↓ Writes: /shared/final/config.yaml
 
 MAIN CONTAINER
-   ↓ Uses: /etc/llama-stack/run.yaml (from /shared/final/run.yaml)
+   ↓ Uses: /etc/llama-stack/config.yaml (from /shared/final/config.yaml)
    ↓ PYTHONPATH: /opt/external-providers/python-packages
 ```
 
@@ -877,8 +878,8 @@ MAIN CONTAINER
 When LlamaStack adds `--extra-providers` support, migration is simple:
 
 **Remove**: Merge init container
-**Update**: Main container args to include `--extra-providers /etc/extra-providers/extra-providers.yaml`
-**Mount**: `extra-providers.yaml` generated by merge tool (which becomes a simple generator, not merger)
+**Update**: Main container args to include `--extra-providers /etc/extra-providers/config.yaml (with module: field)`
+**Mount**: `config.yaml (with module: field)` generated by merge tool (which becomes a simple generator, not merger)
 
 See `extra-providers-schema.md` for full migration path.
 
@@ -896,12 +897,12 @@ See `extra-providers-schema.md` for full migration path.
 
 ## Critical Architecture Decisions (Final)
 
-1. ✅ **extra-providers.yaml schema** - Forward-compatible, enables Phase 2 migration
+1. ✅ **config.yaml (with module: field) schema** - Forward-compatible, enables Phase 2 migration
 2. ✅ **Two-phase init containers** - Install → Merge (no extraction needed!)
-3. ✅ **Merge tool in operator image** - Reuses logic, generates extra-providers.yaml
+3. ✅ **Merge tool in operator image** - Reuses logic, generates config.yaml (with module: field)
 4. ✅ **Init containers in CRD order** - User-controlled, predictable
 5. ✅ **Pod-level imagePullSecrets** - Simpler, reuses existing mechanism
 6. ✅ **Explicit init container generation** - Clear, not hidden as side-effect
 7. ✅ **Hardcoded resource limits** - 100m CPU, 256Mi memory for all init containers
 8. ✅ **User ConfigMap as optional merge input** - Only mounted if exists AND external providers exist
-9. ✅ **No run.yaml extraction** - Cleaner, more robust, prepares for future LlamaStack enhancement
+9. ✅ **No config.yaml extraction** - Cleaner, more robust, prepares for future LlamaStack enhancement

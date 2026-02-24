@@ -37,4 +37,7 @@ config/manifests/bases/llama-stack-k8s-operator.clusterserviceversion.yaml
 
 # SDD and Claude Code directories
 .claude
-.specify
+
+# Spec-kit regeneratable tooling (keep .specify/memory/)
+.specify/scripts/
+.specify/templates/
