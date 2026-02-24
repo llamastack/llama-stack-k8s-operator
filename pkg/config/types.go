@@ -21,25 +21,25 @@ import corev1 "k8s.io/api/core/v1"
 // BaseConfig represents the parsed base config.yaml from a distribution.
 // Fields use interface types to preserve arbitrary structure during merging.
 type BaseConfig struct {
-	Version           int                      `yaml:"version" json:"version"`
-	APIs              []string                 `yaml:"apis,omitempty" json:"apis,omitempty"`
-	Providers         map[string]interface{}   `yaml:"providers,omitempty" json:"providers,omitempty"`
-	RegisteredModels  []map[string]interface{} `yaml:"models,omitempty" json:"models,omitempty"`
-	Shields           []map[string]interface{} `yaml:"shields,omitempty" json:"shields,omitempty"`
-	ToolGroups        []map[string]interface{} `yaml:"tool_groups,omitempty" json:"tool_groups,omitempty"`
-	MetadataStore     map[string]interface{}   `yaml:"metadata_store,omitempty" json:"metadata_store,omitempty"`
-	InferenceStore    map[string]interface{}   `yaml:"inference_store,omitempty" json:"inference_store,omitempty"`
-	SafetyStore       map[string]interface{}   `yaml:"safety_store,omitempty" json:"safety_store,omitempty"`
-	VectorIOStore     map[string]interface{}   `yaml:"vector_io_store,omitempty" json:"vector_io_store,omitempty"`
-	ToolRuntimeStore  map[string]interface{}   `yaml:"tool_runtime_store,omitempty" json:"tool_runtime_store,omitempty"`
-	TelemetryStore    map[string]interface{}   `yaml:"telemetry_store,omitempty" json:"telemetry_store,omitempty"`
-	PostTrainingStore map[string]interface{}   `yaml:"post_training_store,omitempty" json:"post_training_store,omitempty"`
-	ScoringStore      map[string]interface{}   `yaml:"scoring_store,omitempty" json:"scoring_store,omitempty"`
-	EvalStore         map[string]interface{}   `yaml:"eval_store,omitempty" json:"eval_store,omitempty"`
-	DatasetIOStore    map[string]interface{}   `yaml:"datasetio_store,omitempty" json:"datasetio_store,omitempty"`
-	Server            map[string]interface{}   `yaml:"server,omitempty" json:"server,omitempty"`
-	ExternalProviders map[string]interface{}   `yaml:"external_providers,omitempty" json:"external_providers,omitempty"`
-	Extra             map[string]interface{}   `yaml:"-" json:"-"`
+	Version           int                      `json:"version"                       yaml:"version"`
+	APIs              []string                 `json:"apis,omitempty"                yaml:"apis,omitempty"`
+	Providers         map[string]interface{}   `json:"providers,omitempty"           yaml:"providers,omitempty"`
+	RegisteredModels  []map[string]interface{} `json:"models,omitempty"              yaml:"models,omitempty"`
+	Shields           []map[string]interface{} `json:"shields,omitempty"             yaml:"shields,omitempty"`
+	ToolGroups        []map[string]interface{} `json:"tool_groups,omitempty"         yaml:"tool_groups,omitempty"`
+	MetadataStore     map[string]interface{}   `json:"metadata_store,omitempty"      yaml:"metadata_store,omitempty"`
+	InferenceStore    map[string]interface{}   `json:"inference_store,omitempty"     yaml:"inference_store,omitempty"`
+	SafetyStore       map[string]interface{}   `json:"safety_store,omitempty"        yaml:"safety_store,omitempty"`
+	VectorIOStore     map[string]interface{}   `json:"vector_io_store,omitempty"     yaml:"vector_io_store,omitempty"`
+	ToolRuntimeStore  map[string]interface{}   `json:"tool_runtime_store,omitempty"  yaml:"tool_runtime_store,omitempty"`
+	TelemetryStore    map[string]interface{}   `json:"telemetry_store,omitempty"     yaml:"telemetry_store,omitempty"`
+	PostTrainingStore map[string]interface{}   `json:"post_training_store,omitempty" yaml:"post_training_store,omitempty"`
+	ScoringStore      map[string]interface{}   `json:"scoring_store,omitempty"       yaml:"scoring_store,omitempty"`
+	EvalStore         map[string]interface{}   `json:"eval_store,omitempty"          yaml:"eval_store,omitempty"`
+	DatasetIOStore    map[string]interface{}   `json:"datasetio_store,omitempty"     yaml:"datasetio_store,omitempty"`
+	Server            map[string]interface{}   `json:"server,omitempty"              yaml:"server,omitempty"`
+	ExternalProviders map[string]interface{}   `json:"external_providers,omitempty"  yaml:"external_providers,omitempty"`
+	Extra             map[string]interface{}   `json:"-"                             yaml:"-"`
 }
 
 // GeneratedConfig is the output of the config generation pipeline.
@@ -70,9 +70,9 @@ type SecretResolution struct {
 
 // ProviderEntry represents a single expanded provider in config.yaml format.
 type ProviderEntry struct {
-	ProviderID   string                 `yaml:"provider_id" json:"provider_id"`
-	ProviderType string                 `yaml:"provider_type" json:"provider_type"`
-	Config       map[string]interface{} `yaml:"config" json:"config"`
+	ProviderID   string                 `json:"provider_id"   yaml:"provider_id"`
+	ProviderType string                 `json:"provider_type" yaml:"provider_type"`
+	Config       map[string]interface{} `json:"config"        yaml:"config"`
 }
 
 // ConfigSource describes where configuration comes from.

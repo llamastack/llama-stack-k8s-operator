@@ -43,13 +43,14 @@ func SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
+//nolint:lll // kubebuilder marker cannot be split across lines.
 //+kubebuilder:webhook:path=/validate-llamastack-io-v1alpha2-llamastackdistribution,mutating=false,failurePolicy=fail,sideEffects=None,groups=llamastack.io,resources=llamastackdistributions,verbs=create;update,versions=v1alpha2,name=vllamastackdistribution.kb.io,admissionReviewVersions=v1
 
 // ValidateCreate implements admission.CustomValidator.
 func (v *LlamaStackDistributionValidator) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
 	r, ok := obj.(*LlamaStackDistribution)
 	if !ok {
-		return nil, fmt.Errorf("expected *LlamaStackDistribution, got %T", obj)
+		return nil, fmt.Errorf("failed to validate: expected *LlamaStackDistribution, got %T", obj)
 	}
 	llamastacklog.Info("validating create", "name", r.Name)
 	return validate(r)
@@ -59,7 +60,7 @@ func (v *LlamaStackDistributionValidator) ValidateCreate(_ context.Context, obj 
 func (v *LlamaStackDistributionValidator) ValidateUpdate(_ context.Context, _, newObj runtime.Object) (admission.Warnings, error) {
 	r, ok := newObj.(*LlamaStackDistribution)
 	if !ok {
-		return nil, fmt.Errorf("expected *LlamaStackDistribution, got %T", newObj)
+		return nil, fmt.Errorf("failed to validate: expected *LlamaStackDistribution, got %T", newObj)
 	}
 	llamastacklog.Info("validating update", "name", r.Name)
 	return validate(r)
@@ -81,9 +82,8 @@ func validate(r *LlamaStackDistribution) (admission.Warnings, error) {
 	}
 
 	if r.Spec.Resources != nil && r.Spec.Providers != nil {
-		if errs, warns := validateProviderReferences(r.Spec.Resources, r.Spec.Providers); len(errs) > 0 {
+		if errs := validateProviderReferences(r.Spec.Resources, r.Spec.Providers); len(errs) > 0 {
 			allErrs = append(allErrs, errs...)
-			warnings = append(warnings, warns...)
 		}
 	}
 
@@ -136,9 +136,8 @@ func validateProviderIDUniqueness(spec *ProvidersSpec) field.ErrorList {
 	return errs
 }
 
-func validateProviderReferences(resources *ResourcesSpec, providers *ProvidersSpec) (field.ErrorList, admission.Warnings) {
+func validateProviderReferences(resources *ResourcesSpec, providers *ProvidersSpec) field.ErrorList {
 	var errs field.ErrorList
-	var warnings admission.Warnings
 
 	providerIDs := collectAllProviderIDs(providers)
 
@@ -158,7 +157,7 @@ func validateProviderReferences(resources *ResourcesSpec, providers *ProvidersSp
 		}
 	}
 
-	return errs, warnings
+	return errs
 }
 
 func checkDisabledConflicts(disabled []string, providers *ProvidersSpec) admission.Warnings {

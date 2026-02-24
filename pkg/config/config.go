@@ -34,7 +34,7 @@ import (
 // 4. Expand resources
 // 5. Apply storage overrides
 // 6. Apply disabled APIs
-// 7. Render final YAML
+// 7. Render final YAML.
 func GenerateConfig(
 	ctx context.Context,
 	spec *v1alpha2.LlamaStackDistributionSpec,
@@ -43,69 +43,30 @@ func GenerateConfig(
 	// Step 1: Resolve base config
 	base, resolvedImage, err := resolver.Resolve(ctx, spec.Distribution)
 	if err != nil {
-		return nil, "", fmt.Errorf("resolving base config: %w", err)
+		return nil, "", fmt.Errorf("failed to resolve base config: %w", err)
 	}
 
 	// Detect and validate config version
 	version := base.Version
-	if err := ValidateConfigVersion(version); err != nil {
-		return nil, "", fmt.Errorf("base config version: %w", err)
+	if vErr := ValidateConfigVersion(version); vErr != nil {
+		return nil, "", fmt.Errorf("failed to validate base config version: %w", vErr)
 	}
 
 	// Step 2: Resolve secrets
 	secretRes, err := ResolveSecrets(spec)
 	if err != nil {
-		return nil, "", fmt.Errorf("resolving secrets: %w", err)
+		return nil, "", fmt.Errorf("failed to resolve secrets: %w", err)
 	}
 
-	// Step 3: Expand user providers
-	userProviders, providerCount, err := ExpandProviders(spec.Providers, secretRes.Substitutions)
+	mergedConfig, providerCount, resourceCount, err := expandSpecOverBase(spec, base, secretRes)
 	if err != nil {
-		return nil, "", fmt.Errorf("expanding providers: %w", err)
-	}
-
-	// Merge user providers into base config
-	mergedConfig := cloneBaseConfig(base)
-	if userProviders != nil {
-		mergedConfig = mergeProviders(mergedConfig, userProviders)
-	}
-
-	// Count base providers if no user providers specified
-	if providerCount == 0 {
-		providerCount = countBaseProviders(mergedConfig)
-	}
-
-	// Step 4: Expand resources
-	models, tools, shields, resourceCount, err := ExpandResources(spec.Resources, userProviders, base)
-	if err != nil {
-		return nil, "", fmt.Errorf("expanding resources: %w", err)
-	}
-
-	if models != nil {
-		mergedConfig.RegisteredModels = models
-	}
-	if tools != nil {
-		mergedConfig.ToolGroups = tools
-	}
-	if shields != nil {
-		mergedConfig.Shields = shields
-	}
-
-	// Step 5: Apply storage overrides
-	mergedConfig, err = ExpandStorage(spec.Storage, mergedConfig)
-	if err != nil {
-		return nil, "", fmt.Errorf("expanding storage: %w", err)
-	}
-
-	// Step 6: Apply disabled APIs
-	if len(spec.Disabled) > 0 {
-		mergedConfig = ApplyDisabledAPIs(mergedConfig, spec.Disabled)
+		return nil, "", err
 	}
 
 	// Step 7: Render to YAML
 	configYAML, err := RenderConfigYAML(mergedConfig)
 	if err != nil {
-		return nil, "", fmt.Errorf("rendering config YAML: %w", err)
+		return nil, "", fmt.Errorf("failed to render config YAML: %w", err)
 	}
 
 	contentHash := ComputeContentHash(configYAML)
@@ -118,6 +79,46 @@ func GenerateConfig(
 		ResourceCount: resourceCount,
 		ConfigVersion: version,
 	}, resolvedImage, nil
+}
+
+func expandSpecOverBase(spec *v1alpha2.LlamaStackDistributionSpec, base *BaseConfig, secretRes *SecretResolution) (*BaseConfig, int, int, error) {
+	userProviders, providerCount, err := ExpandProviders(spec.Providers, secretRes.Substitutions)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to expand providers: %w", err)
+	}
+
+	mergedConfig := cloneBaseConfig(base)
+	if userProviders != nil {
+		mergedConfig = mergeProviders(mergedConfig, userProviders)
+	}
+	if providerCount == 0 {
+		providerCount = countBaseProviders(mergedConfig)
+	}
+
+	models, tools, shields, resourceCount, err := ExpandResources(spec.Resources, userProviders, base)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to expand resources: %w", err)
+	}
+	if models != nil {
+		mergedConfig.RegisteredModels = models
+	}
+	if tools != nil {
+		mergedConfig.ToolGroups = tools
+	}
+	if shields != nil {
+		mergedConfig.Shields = shields
+	}
+
+	mergedConfig, err = ExpandStorage(spec.Storage, mergedConfig)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to expand storage: %w", err)
+	}
+
+	if len(spec.Disabled) > 0 {
+		mergedConfig = ApplyDisabledAPIs(mergedConfig, spec.Disabled)
+	}
+
+	return mergedConfig, providerCount, resourceCount, nil
 }
 
 // mergeProviders replaces base config providers with user-specified providers
@@ -184,7 +185,7 @@ func RenderConfigYAML(config *BaseConfig) (string, error) {
 
 	data, err := yaml.Marshal(out)
 	if err != nil {
-		return "", fmt.Errorf("marshaling config YAML: %w", err)
+		return "", fmt.Errorf("failed to marshal config YAML: %w", err)
 	}
 
 	return string(data), nil
@@ -259,6 +260,10 @@ func MergeExternalProviders(config *BaseConfig, external map[string]interface{})
 		return config, nil
 	}
 
+	if config.Providers == nil {
+		config.Providers = make(map[string]interface{})
+	}
+
 	var warnings []string
 
 	for apiType, provs := range external {
@@ -268,35 +273,42 @@ func MergeExternalProviders(config *BaseConfig, external map[string]interface{})
 		}
 
 		existing := config.Providers[apiType]
-		existingList, _ := existing.([]interface{})
-
-		existingIDs := make(map[string]int)
-		for i, p := range existingList {
-			if m, ok := p.(map[string]interface{}); ok {
-				if id, ok := m["provider_id"].(string); ok {
-					existingIDs[id] = i
-				}
-			}
-		}
-
-		for _, ep := range extList {
-			if m, ok := ep.(map[string]interface{}); ok {
-				if id, ok := m["provider_id"].(string); ok {
-					if idx, exists := existingIDs[id]; exists {
-						warnings = append(warnings, fmt.Sprintf(
-							"external provider %q for API %q overrides inline provider with same ID",
-							id, apiType,
-						))
-						existingList[idx] = ep
-						continue
-					}
-				}
-			}
-			existingList = append(existingList, ep)
-		}
-
-		config.Providers[apiType] = existingList
+		mergedList, apiWarnings := mergeExternalAPIProviders(existing, extList, apiType)
+		config.Providers[apiType] = mergedList
+		warnings = append(warnings, apiWarnings...)
 	}
 
 	return config, warnings
+}
+
+func mergeExternalAPIProviders(existing interface{}, extList []interface{}, apiType string) ([]interface{}, []string) {
+	existingList, _ := existing.([]interface{})
+
+	existingIDs := make(map[string]int)
+	for i, p := range existingList {
+		if m, ok := p.(map[string]interface{}); ok {
+			if id, ok := m["provider_id"].(string); ok {
+				existingIDs[id] = i
+			}
+		}
+	}
+
+	var warnings []string
+	for _, ep := range extList {
+		if m, ok := ep.(map[string]interface{}); ok {
+			if id, ok := m["provider_id"].(string); ok {
+				if idx, exists := existingIDs[id]; exists {
+					warnings = append(warnings, fmt.Sprintf(
+						"external provider %q for API %q overrides inline provider with same ID",
+						id, apiType,
+					))
+					existingList[idx] = ep
+					continue
+				}
+			}
+		}
+		existingList = append(existingList, ep)
+	}
+
+	return existingList, warnings
 }

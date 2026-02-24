@@ -91,7 +91,7 @@ func (r *LlamaStackDistributionReconciler) ReconcileV1Alpha2Config(
 		return r.handleDistributionDefault(ctx, instance)
 	}
 
-	return nil, "", fmt.Errorf("unknown config source: %s", configSource)
+	return nil, "", fmt.Errorf("failed to determine config source: unknown value %s", configSource)
 }
 
 // handleOverrideConfig uses the user-provided ConfigMap directly.
@@ -108,14 +108,14 @@ func (r *LlamaStackDistributionReconciler) handleOverrideConfig(
 		Namespace: instance.Namespace,
 	}, cm); err != nil {
 		if k8serrors.IsNotFound(err) {
-			return nil, "", fmt.Errorf("overrideConfig ConfigMap %q not found in namespace %q", cmName, instance.Namespace)
+			return nil, "", fmt.Errorf("failed to find overrideConfig ConfigMap %q in namespace %q", cmName, instance.Namespace)
 		}
 		return nil, "", fmt.Errorf("failed to get overrideConfig ConfigMap: %w", err)
 	}
 
 	configData, ok := cm.Data["config.yaml"]
 	if !ok {
-		return nil, "", fmt.Errorf("overrideConfig ConfigMap %q missing 'config.yaml' key", cmName)
+		return nil, "", fmt.Errorf("failed to read config from ConfigMap %q: missing 'config.yaml' key", cmName)
 	}
 
 	resolvedImage, err := r.resolveV1Alpha2Image(instance)
@@ -146,7 +146,7 @@ func (r *LlamaStackDistributionReconciler) handleGeneratedConfig(
 
 	generated, resolvedImage, err := llsconfig.GenerateConfig(ctx, &instance.Spec, resolver)
 	if err != nil {
-		return nil, "", fmt.Errorf("config generation failed: %w", err)
+		return nil, "", fmt.Errorf("failed to generate config: %w", err)
 	}
 
 	logger.Info("generated config",
@@ -173,12 +173,12 @@ func (r *LlamaStackDistributionReconciler) handleDistributionDefault(
 
 	base, resolvedImage, err := resolver.Resolve(ctx, instance.Spec.Distribution)
 	if err != nil {
-		return nil, "", fmt.Errorf("resolving distribution default: %w", err)
+		return nil, "", fmt.Errorf("failed to resolve distribution default: %w", err)
 	}
 
 	configYAML, err := llsconfig.RenderConfigYAML(base)
 	if err != nil {
-		return nil, "", fmt.Errorf("rendering default config: %w", err)
+		return nil, "", fmt.Errorf("failed to render default config: %w", err)
 	}
 
 	contentHash := llsconfig.ComputeContentHash(configYAML)
@@ -243,11 +243,11 @@ func (r *LlamaStackDistributionReconciler) ReconcileGeneratedConfigMap(
 	}
 
 	if err := ctrl.SetControllerReference(instance, cm, r.Scheme); err != nil {
-		return "", fmt.Errorf("setting owner reference on generated ConfigMap: %w", err)
+		return "", fmt.Errorf("failed to set owner reference on generated ConfigMap: %w", err)
 	}
 
 	if err := r.Create(ctx, cm); err != nil {
-		return "", fmt.Errorf("creating generated ConfigMap: %w", err)
+		return "", fmt.Errorf("failed to create generated ConfigMap: %w", err)
 	}
 
 	logger.Info("created generated ConfigMap", "configMap", configMapName)
@@ -274,7 +274,7 @@ func (r *LlamaStackDistributionReconciler) cleanupOldConfigMaps(
 		"app.kubernetes.io/instance":  instance.Name,
 	}
 	if err := r.List(ctx, cmList, matchLabels(matchingLabels)); err != nil {
-		return fmt.Errorf("listing generated ConfigMaps: %w", err)
+		return fmt.Errorf("failed to list generated ConfigMaps: %w", err)
 	}
 
 	// Sort by creation timestamp (newest first)
@@ -318,7 +318,7 @@ func (r *LlamaStackDistributionReconciler) ValidateV1Alpha2SecretRefs(
 ) error {
 	resolution, err := llsconfig.ResolveSecrets(spec)
 	if err != nil {
-		return fmt.Errorf("collecting secret references: %w", err)
+		return fmt.Errorf("failed to collect secret references: %w", err)
 	}
 
 	for _, envVar := range resolution.EnvVars {
@@ -335,13 +335,13 @@ func (r *LlamaStackDistributionReconciler) ValidateV1Alpha2SecretRefs(
 			Namespace: namespace,
 		}, secret); err != nil {
 			if k8serrors.IsNotFound(err) {
-				return fmt.Errorf("Secret %q not found in namespace %q (referenced by env var %s)", secretName, namespace, envVar.Name)
+				return fmt.Errorf("failed to find Secret %q in namespace %q (referenced by env var %s)", secretName, namespace, envVar.Name)
 			}
 			return fmt.Errorf("failed to get Secret %q: %w", secretName, err)
 		}
 
 		if _, ok := secret.Data[secretKey]; !ok {
-			return fmt.Errorf("key %q not found in Secret %q in namespace %q", secretKey, secretName, namespace)
+			return fmt.Errorf("failed to find key %q in Secret %q in namespace %q", secretKey, secretName, namespace)
 		}
 	}
 
@@ -362,7 +362,7 @@ func (r *LlamaStackDistributionReconciler) ValidateV1Alpha2ConfigMapRefs(
 			Namespace: namespace,
 		}, cm); err != nil {
 			if k8serrors.IsNotFound(err) {
-				return fmt.Errorf("overrideConfig ConfigMap %q not found in namespace %q", spec.OverrideConfig.ConfigMapName, namespace)
+				return fmt.Errorf("failed to find overrideConfig ConfigMap %q in namespace %q", spec.OverrideConfig.ConfigMapName, namespace)
 			}
 			return fmt.Errorf("failed to get overrideConfig ConfigMap: %w", err)
 		}
@@ -376,7 +376,7 @@ func (r *LlamaStackDistributionReconciler) ValidateV1Alpha2ConfigMapRefs(
 			Namespace: namespace,
 		}, cm); err != nil {
 			if k8serrors.IsNotFound(err) {
-				return fmt.Errorf("caBundle ConfigMap %q not found in namespace %q", spec.Networking.TLS.CABundle.ConfigMapName, namespace)
+				return fmt.Errorf("failed to find caBundle ConfigMap %q in namespace %q", spec.Networking.TLS.CABundle.ConfigMapName, namespace)
 			}
 			return fmt.Errorf("failed to get caBundle ConfigMap: %w", err)
 		}
@@ -396,7 +396,7 @@ func ValidateProviderReferences(spec *v1alpha2.LlamaStackDistributionSpec) error
 	for i, raw := range spec.Resources.Models {
 		mc, err := llsconfig.ParsePolymorphicModel(&raw)
 		if err != nil {
-			return fmt.Errorf("resources.models[%d]: %w", i, err)
+			return fmt.Errorf("failed to parse resources.models[%d]: %w", i, err)
 		}
 		if mc.Provider != "" {
 			if _, ok := providerIDs[mc.Provider]; !ok {
@@ -470,7 +470,7 @@ func (r *LlamaStackDistributionReconciler) resolveV1Alpha2Image(instance *v1alph
 		return image, nil
 	}
 
-	return "", fmt.Errorf("unknown distribution name %q: not found in distributions.json", dist.Name)
+	return "", fmt.Errorf("failed to resolve distribution name %q: not found in distributions.json", dist.Name)
 }
 
 // UpdateV1Alpha2Status updates the status fields specific to v1alpha2.

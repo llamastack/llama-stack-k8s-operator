@@ -16,18 +16,21 @@ limitations under the License.
 
 package config
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // DetectConfigVersion extracts the version from a base config map.
 // The version field is expected at the top level as an integer.
 // Accepts both int and float64 (JSON numbers decode as float64).
 func DetectConfigVersion(config map[string]interface{}) (int, error) {
 	if config == nil {
-		return 0, fmt.Errorf("config map is nil")
+		return 0, errors.New("failed to detect config version: config map is nil")
 	}
 	raw, ok := config["version"]
 	if !ok {
-		return 0, fmt.Errorf("config missing required 'version' field")
+		return 0, errors.New("failed to detect config version: missing required 'version' field")
 	}
 	switch v := raw.(type) {
 	case int:
@@ -37,7 +40,7 @@ func DetectConfigVersion(config map[string]interface{}) (int, error) {
 	case float64:
 		return int(v), nil
 	default:
-		return 0, fmt.Errorf("invalid config version type: %T (expected int)", raw)
+		return 0, fmt.Errorf("failed to detect config version: invalid type %T (expected int)", raw)
 	}
 }
 
@@ -45,7 +48,7 @@ func DetectConfigVersion(config map[string]interface{}) (int, error) {
 // [SupportedConfigVersionMin, SupportedConfigVersionMax].
 func ValidateConfigVersion(version int) error {
 	if version < SupportedConfigVersionMin || version > SupportedConfigVersionMax {
-		return fmt.Errorf("config version %d is not supported; supported versions: %v",
+		return fmt.Errorf("failed to validate config version %d: not supported; supported versions: %v",
 			version, SupportedVersions())
 	}
 	return nil
