@@ -1,7 +1,8 @@
-# Base config for starter distribution (embedded in operator binary)
+# Base config for meta-reference-gpu distribution (embedded in operator binary)
 # User CR specs merge over this config.
+# Uses inline meta-reference for inference with model_checkpoint_dir (GPU-backed).
 version: 2
-distro_name: starter
+distro_name: starter-gpu
 apis:
 - agents
 - batches
@@ -106,14 +107,14 @@ providers:
   - provider_id: sqlite-vec
     provider_type: inline::sqlite-vec
     config:
-      db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/starter}/sqlite_vec.db
+      db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/starter-gpu}/sqlite_vec.db
       persistence:
         namespace: vector_io::sqlite_vec
         backend: kv_default
   - provider_id: ${env.MILVUS_URL:+milvus}
     provider_type: inline::milvus
     config:
-      db_path: ${env.MILVUS_DB_PATH:=~/.llama/distributions/starter}/milvus.db
+      db_path: ${env.MILVUS_DB_PATH:=~/.llama/distributions/starter-gpu}/milvus.db
       persistence:
         namespace: vector_io::milvus
         backend: kv_default
@@ -167,7 +168,7 @@ providers:
   - provider_id: meta-reference-files
     provider_type: inline::localfs
     config:
-      storage_dir: ${env.FILES_STORAGE_DIR:=~/.llama/distributions/starter/files}
+      storage_dir: ${env.FILES_STORAGE_DIR:=~/.llama/distributions/starter-gpu/files}
       metadata_store:
         table_name: files_metadata
         backend: sql_default
@@ -195,10 +196,13 @@ providers:
           max_write_queue_size: 10000
           num_writers: 4
   post_training:
-  - provider_id: torchtune-cpu
-    provider_type: inline::torchtune-cpu
+  - provider_id: huggingface-gpu
+    provider_type: inline::huggingface-gpu
     config:
-      checkpoint_format: meta
+      checkpoint_format: huggingface
+      distributed_backend: null
+      device: cpu
+      dpo_output_dir: ~/.llama/distributions/starter-gpu/dpo_output
   eval:
   - provider_id: meta-reference
     provider_type: inline::meta-reference
@@ -254,10 +258,10 @@ storage:
   backends:
     kv_default:
       type: kv_sqlite
-      db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/starter}/kvstore.db
+      db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/starter-gpu}/kvstore.db
     sql_default:
       type: sql_sqlite
-      db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/starter}/sql_store.db
+      db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/starter-gpu}/sql_store.db
   stores:
     metadata:
       namespace: registry
