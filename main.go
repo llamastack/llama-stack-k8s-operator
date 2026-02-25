@@ -159,6 +159,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := llamaxk8siov1alpha2.SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "failed to set up webhooks")
+		os.Exit(1)
+	}
+
 	if err := setupHealthChecks(mgr); err != nil {
 		setupLog.Error(err, "failed to set up health checks")
 		os.Exit(1)

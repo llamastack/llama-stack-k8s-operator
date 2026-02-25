@@ -1,0 +1,16 @@
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: llamastackdistribution-v1alpha2-sample
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      provider: ollama
+      endpoint: http://ollama-server-service.ollama-dist.svc.cluster.local:11434
+  resources:
+    models:
+      - name: "llama3.2:1b"
+  workload:
+    replicas: 1
