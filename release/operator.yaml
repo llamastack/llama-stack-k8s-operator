@@ -10,11 +10,22 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+    cert-manager.io/inject-ca-from: llama-stack-k8s-operator-system/llama-stack-k8s-operator-serving-cert
     controller-gen.kubebuilder.io/version: v0.17.2
   labels:
     app.kubernetes.io/name: llama-stack-k8s-operator
   name: llamastackdistributions.llamastack.io
 spec:
+  conversion:
+    strategy: Webhook
+    webhook:
+      clientConfig:
+        service:
+          name: llama-stack-k8s-operator-webhook-service
+          namespace: llama-stack-k8s-operator-system
+          path: /convert
+      conversionReviewVersions:
+      - v1
   group: llamastack.io
   names:
     kind: LlamaStackDistribution
@@ -6070,6 +6081,24 @@ spec:
     app.kubernetes.io/name: llama-stack-k8s-operator
     control-plane: controller-manager
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: llama-stack-operator-webhook-cert
+  labels:
+    app.kubernetes.io/name: llama-stack-k8s-operator
+  name: llama-stack-k8s-operator-webhook-service
+  namespace: llama-stack-k8s-operator-system
+spec:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
+  selector:
+    app.kubernetes.io/name: llama-stack-k8s-operator
+    control-plane: controller-manager
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6109,6 +6138,10 @@ spec:
           initialDelaySeconds: 15
           periodSeconds: 20
         name: manager
+        ports:
+        - containerPort: 9443
+          name: webhook-server
+          protocol: TCP
         readinessProbe:
           httpGet:
             path: /readyz
@@ -6127,6 +6160,10 @@ spec:
           capabilities:
             drop:
             - ALL
+        volumeMounts:
+        - mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: cert
+          readOnly: true
       securityContext:
         runAsNonRoot: true
       serviceAccountName: llama-stack-k8s-operator-controller-manager
@@ -6144,6 +6181,11 @@ spec:
         maxSkew: 1
         topologyKey: kubernetes.io/hostname
         whenUnsatisfiable: ScheduleAnyway
+      volumes:
+      - name: cert
+        secret:
+          defaultMode: 420
+          secretName: llama-stack-operator-webhook-cert
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -6157,3 +6199,59 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: llama-stack-k8s-operator
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    app.kubernetes.io/name: llama-stack-k8s-operator
+  name: llama-stack-k8s-operator-serving-cert
+  namespace: llama-stack-k8s-operator-system
+spec:
+  dnsNames:
+  - llama-stack-k8s-operator-webhook-service.llama-stack-k8s-operator-system.svc
+  - llama-stack-k8s-operator-webhook-service.llama-stack-k8s-operator-system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: llama-stack-k8s-operator-selfsigned-issuer
+  secretName: llama-stack-operator-webhook-cert
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  labels:
+    app.kubernetes.io/name: llama-stack-k8s-operator
+  name: llama-stack-k8s-operator-selfsigned-issuer
+  namespace: llama-stack-k8s-operator-system
+spec:
+  selfSigned: {}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  annotations:
+    cert-manager.io/inject-ca-from: llama-stack-k8s-operator-system/llama-stack-k8s-operator-serving-cert
+  labels:
+    app.kubernetes.io/name: llama-stack-k8s-operator
+  name: llama-stack-k8s-operator-validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: llama-stack-k8s-operator-webhook-service
+      namespace: llama-stack-k8s-operator-system
+      path: /validate-llamastack-io-v1alpha2-llamastackdistribution
+  failurePolicy: Fail
+  name: vllamastackdistribution.kb.io
+  rules:
+  - apiGroups:
+    - llamastack.io
+    apiVersions:
+    - v1alpha2
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - llamastackdistributions
+  sideEffects: None

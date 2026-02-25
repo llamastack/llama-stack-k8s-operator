@@ -25,6 +25,13 @@ labels:
 
 patches:
 - path: manager_webhook_patch.yaml
+- target:
+    kind: ValidatingWebhookConfiguration
+  patch: |-
+    - op: add
+      path: /metadata/annotations
+      value:
+        cert-manager.io/inject-ca-from: CERTIFICATE_NAMESPACE/CERTIFICATE_NAME
 
 # [PROMETHEUS] To enable prometheus monitor, uncomment all sections with 'PROMETHEUS'.
 #- ../prometheus
@@ -75,6 +82,13 @@ replacements:
     options:
       delimiter: "/"
       index: 0
+  - select:
+      kind: ValidatingWebhookConfiguration
+    fieldPaths:
+    - metadata.annotations.[cert-manager.io/inject-ca-from]
+    options:
+      delimiter: "/"
+      index: 0
 - source:
     kind: Certificate
     group: cert-manager.io
@@ -84,6 +98,13 @@ replacements:
   targets:
   - select:
       kind: CustomResourceDefinition
+    fieldPaths:
+    - metadata.annotations.[cert-manager.io/inject-ca-from]
+    options:
+      delimiter: "/"
+      index: 1
+  - select:
+      kind: ValidatingWebhookConfiguration
     fieldPaths:
     - metadata.annotations.[cert-manager.io/inject-ca-from]
     options:

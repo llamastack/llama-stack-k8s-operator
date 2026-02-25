@@ -23,6 +23,21 @@ func TestE2E(t *testing.T) {
 		})
 	}
 
+	// Run v1alpha2-specific creation and deletion tests
+	t.Run("v1alpha2-lifecycle", func(t *testing.T) {
+		runV1Alpha2CreationDeletionSuite(t)
+	})
+
+	// Run conversion round-trip tests
+	t.Run("conversion", func(t *testing.T) {
+		TestConversionSuite(t)
+	})
+
+	// Run webhook validation tests
+	t.Run("webhook-validation", func(t *testing.T) {
+		TestWebhookValidationSuite(t)
+	})
+
 	// Run TLS tests
 	t.Run("tls", func(t *testing.T) {
 		TestTLSSuite(t)
