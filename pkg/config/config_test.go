@@ -128,7 +128,7 @@ func TestResolverLoadEmbeddedConfig(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "starter", dist: "starter"},
-		{name: "remote-vllm", dist: "remote-vllm"},
+		{name: "postgres-demo", dist: "postgres-demo"},
 		{name: "unknown", dist: "nonexistent-distro", wantErr: true},
 	}
 
@@ -151,7 +151,7 @@ func TestEmbeddedDistributionNames(t *testing.T) {
 	names, err := EmbeddedDistributionNames()
 	require.NoError(t, err)
 	assert.Contains(t, names, "starter")
-	assert.Contains(t, names, "remote-vllm")
+	assert.Contains(t, names, "postgres-demo")
 }
 
 func TestNormalizeProviderType(t *testing.T) {
