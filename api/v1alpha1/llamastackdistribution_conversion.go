@@ -453,13 +453,17 @@ func convertFromTLS(src *v1alpha2.LlamaStackDistribution, dst *LlamaStackDistrib
 
 func convertFromNetworking(src *v1alpha2.LlamaStackDistribution, dst *LlamaStackDistribution) {
 	if src.Spec.Networking == nil {
+		// Always set the default port so the v1alpha1 controller creates a Service.
+		dst.Spec.Server.ContainerSpec.Port = DefaultServerPort
 		return
 	}
 	n := src.Spec.Networking
 
-	// Port
+	// Port (default to standard port so the Service is always created)
 	if n.Port > 0 {
 		dst.Spec.Server.ContainerSpec.Port = n.Port
+	} else {
+		dst.Spec.Server.ContainerSpec.Port = DefaultServerPort
 	}
 
 	convertFromTLS(src, dst, n)

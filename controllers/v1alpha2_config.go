@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 
+	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	v1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 	llsconfig "github.com/llamastack/llama-stack-k8s-operator/pkg/config"
 	corev1 "k8s.io/api/core/v1"
@@ -473,15 +474,15 @@ func (r *LlamaStackDistributionReconciler) resolveV1Alpha2Image(instance *v1alph
 	return "", fmt.Errorf("failed to resolve distribution name %q: not found in distributions.json", dist.Name)
 }
 
-// UpdateV1Alpha2Status updates the status fields specific to v1alpha2.
-func (r *LlamaStackDistributionReconciler) UpdateV1Alpha2Status(
+// updateV1Alpha2SpecificStatus sets v1alpha2-specific status fields. Only updates
+// GeneratedAt when the config actually changes to avoid unnecessary status churn.
+func (r *LlamaStackDistributionReconciler) updateV1Alpha2SpecificStatus(
 	instance *v1alpha2.LlamaStackDistribution,
 	generated *llsconfig.GeneratedConfig,
 	resolvedImage string,
 	configMapName string,
 	configSource string,
 ) {
-	// Update resolved distribution
 	if instance.Status.ResolvedDistribution == nil {
 		instance.Status.ResolvedDistribution = &v1alpha2.ResolvedDistributionStatus{}
 	}
@@ -491,12 +492,14 @@ func (r *LlamaStackDistributionReconciler) UpdateV1Alpha2Status(
 	if generated != nil {
 		instance.Status.ResolvedDistribution.ConfigHash = generated.ContentHash
 
-		// Update config generation status
 		if instance.Status.ConfigGeneration == nil {
 			instance.Status.ConfigGeneration = &v1alpha2.ConfigGenerationStatus{}
 		}
+		configChanged := instance.Status.ConfigGeneration.ConfigMapName != configMapName
 		instance.Status.ConfigGeneration.ConfigMapName = configMapName
-		instance.Status.ConfigGeneration.GeneratedAt = metav1.Now()
+		if configChanged || instance.Status.ConfigGeneration.GeneratedAt.IsZero() {
+			instance.Status.ConfigGeneration.GeneratedAt = metav1.Now()
+		}
 		instance.Status.ConfigGeneration.ProviderCount = generated.ProviderCount
 		instance.Status.ConfigGeneration.ResourceCount = generated.ResourceCount
 		instance.Status.ConfigGeneration.ConfigVersion = generated.ConfigVersion
@@ -535,6 +538,104 @@ func SetV1Alpha2Condition(
 	}
 
 	status.Conditions = append(status.Conditions, condition)
+}
+
+// v1alpha2ConfigResult holds the results of v1alpha2 native config generation.
+type v1alpha2ConfigResult struct {
+	Generated    *llsconfig.GeneratedConfig
+	ResolvedImg  string
+	ConfigMap    string
+	ConfigSource string
+}
+
+// handleV1Alpha2NativeConfig fetches the CR as v1alpha2 and, if native providers/resources
+// are defined, generates a ConfigMap and wires it into the v1alpha1 instance for mounting.
+// Returns nil result if the CR does not use v1alpha2 native config features.
+func (r *LlamaStackDistributionReconciler) handleV1Alpha2NativeConfig(
+	ctx context.Context,
+	key types.NamespacedName,
+	v1Instance *llamav1alpha1.LlamaStackDistribution,
+) (*v1alpha2ConfigResult, error) {
+	logger := log.FromContext(ctx)
+
+	v2Instance := &v1alpha2.LlamaStackDistribution{}
+	if err := r.Get(ctx, key, v2Instance); err != nil {
+		return nil, fmt.Errorf("failed to fetch v1alpha2 instance: %w", err)
+	}
+
+	configSource := DetermineConfigSource(&v2Instance.Spec)
+	// Only generate config when v1alpha2-native fields (providers/resources/storage)
+	// are present. For override and distribution-default cases (including converted
+	// v1alpha1 CRs), let the standard reconciliation handle things.
+	if configSource != llsconfig.ConfigSourceGenerated {
+		return nil, nil
+	}
+
+	generated, resolvedImage, err := r.ReconcileV1Alpha2Config(ctx, v2Instance)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconcile v1alpha2 config: %w", err)
+	}
+
+	cmName, err := r.ReconcileGeneratedConfigMap(ctx, v2Instance, generated)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconcile generated ConfigMap: %w", err)
+	}
+
+	logger.Info("v1alpha2 native config applied", "configMap", cmName, "source", configSource)
+
+	// Wire the generated ConfigMap into the v1alpha1 instance so the standard
+	// reconciliation creates the volume mount and hash annotation.
+	v1Instance.Spec.Server.UserConfig = &llamav1alpha1.UserConfigSpec{
+		ConfigMapName: cmName,
+	}
+
+	return &v1alpha2ConfigResult{
+		Generated:    generated,
+		ResolvedImg:  resolvedImage,
+		ConfigMap:    cmName,
+		ConfigSource: string(configSource),
+	}, nil
+}
+
+// persistV1Alpha2Status merges the computed v1alpha1 status with v1alpha2-specific
+// fields and persists as a single v1alpha2 status update. This avoids an infinite
+// reconciliation loop that would occur if v1alpha1 and v1alpha2 status were updated
+// separately (the v1alpha1 update erases v1alpha2-specific fields via conversion).
+func (r *LlamaStackDistributionReconciler) persistV1Alpha2Status(
+	ctx context.Context,
+	key types.NamespacedName,
+	v1Instance *llamav1alpha1.LlamaStackDistribution,
+	result *v1alpha2ConfigResult,
+) error {
+	v2Instance := &v1alpha2.LlamaStackDistribution{}
+	if err := r.Get(ctx, key, v2Instance); err != nil {
+		return fmt.Errorf("failed to fetch v1alpha2 instance for status update: %w", err)
+	}
+
+	// Convert computed v1alpha1 status to v1alpha2 format using standard conversion.
+	converted := &v1alpha2.LlamaStackDistribution{}
+	if err := v1Instance.ConvertTo(converted); err != nil {
+		return fmt.Errorf("failed to convert status to v1alpha2: %w", err)
+	}
+
+	// Apply converted common status fields.
+	v2Instance.Status.Phase = converted.Status.Phase
+	v2Instance.Status.Version = converted.Status.Version
+	v2Instance.Status.AvailableReplicas = converted.Status.AvailableReplicas
+	v2Instance.Status.ServiceURL = converted.Status.ServiceURL
+	v2Instance.Status.RouteURL = converted.Status.RouteURL
+	v2Instance.Status.Conditions = converted.Status.Conditions
+	v2Instance.Status.DistributionConfig = converted.Status.DistributionConfig
+
+	// Set v1alpha2-specific fields.
+	r.updateV1Alpha2SpecificStatus(v2Instance, result.Generated, result.ResolvedImg, result.ConfigMap, result.ConfigSource)
+	SetV1Alpha2Condition(&v2Instance.Status, ConditionTypeConfigGenerated,
+		metav1.ConditionTrue, ReasonConfigGenSucceeded, "Configuration generated successfully")
+
+	if err := r.Status().Update(ctx, v2Instance); err != nil {
+		return fmt.Errorf("failed to update v1alpha2 status: %w", err)
+	}
+	return nil
 }
 
 // GetV1Alpha2ServerPort returns the server port from a v1alpha2 networking spec.
