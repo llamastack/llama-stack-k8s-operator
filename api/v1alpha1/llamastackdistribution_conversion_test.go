@@ -278,6 +278,39 @@ func TestConvertFromV1Alpha2Basic(t *testing.T) {
 	assert.Equal(t, LlamaStackDistributionPhaseReady, dst.Status.Phase)
 }
 
+func TestConvertFromV1Alpha2NilNetworking(t *testing.T) {
+	src := &v1alpha2.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{Name: "test"},
+		Spec: v1alpha2.LlamaStackDistributionSpec{
+			Distribution: v1alpha2.DistributionSpec{Name: "starter"},
+		},
+	}
+
+	dst := &LlamaStackDistribution{}
+	err := dst.ConvertFrom(src)
+	require.NoError(t, err)
+
+	assert.Equal(t, DefaultServerPort, dst.Spec.Server.ContainerSpec.Port,
+		"nil networking should default port to DefaultServerPort so Service is created")
+}
+
+func TestConvertFromV1Alpha2ZeroPort(t *testing.T) {
+	src := &v1alpha2.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{Name: "test"},
+		Spec: v1alpha2.LlamaStackDistributionSpec{
+			Distribution: v1alpha2.DistributionSpec{Name: "starter"},
+			Networking:   &v1alpha2.NetworkingSpec{Port: 0},
+		},
+	}
+
+	dst := &LlamaStackDistribution{}
+	err := dst.ConvertFrom(src)
+	require.NoError(t, err)
+
+	assert.Equal(t, DefaultServerPort, dst.Spec.Server.ContainerSpec.Port,
+		"zero port should default to DefaultServerPort so Service is created")
+}
+
 func TestConvertFromV1Alpha2WithOverrideConfig(t *testing.T) {
 	src := &v1alpha2.LlamaStackDistribution{
 		ObjectMeta: metav1.ObjectMeta{

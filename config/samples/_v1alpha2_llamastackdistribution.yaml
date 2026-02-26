@@ -12,5 +12,7 @@ spec:
   resources:
     models:
       - name: "llama3.2:1b"
+  networking:
+    port: 8321
   workload:
     replicas: 1

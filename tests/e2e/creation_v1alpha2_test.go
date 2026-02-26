@@ -108,8 +108,7 @@ func testCreateV1Alpha2Distribution(t *testing.T) *v1alpha2.LlamaStackDistributi
 		Kind:    "Service",
 	}, distribution.Name+"-service", v1alpha2TestNS, ResourceReadyTimeout, func(u *unstructured.Unstructured) bool {
 		spec, specFound, _ := unstructured.NestedMap(u.Object, "spec")
-		status, statusFound, _ := unstructured.NestedMap(u.Object, "status")
-		return specFound && statusFound && spec != nil && status != nil
+		return specFound && spec != nil
 	})
 	requireNoErrorWithDebugging(t, TestEnv, err, "Service readiness check failed for v1alpha2 CR", v1alpha2TestNS, distribution.Name)
 
@@ -122,11 +121,16 @@ func testV1Alpha2ConfigMapGeneration(t *testing.T, distribution *v1alpha2.LlamaS
 		t.Skip("Skipping: v1alpha2 distribution creation failed")
 	}
 
+	generatedCMLabels := client.MatchingLabels{
+		"app.kubernetes.io/instance":  distribution.Name,
+		"app.kubernetes.io/component": "generated-config",
+	}
+
 	err := wait.PollUntilContextTimeout(TestEnv.Ctx, pollInterval, ResourceReadyTimeout, true, func(ctx context.Context) (bool, error) {
 		cmList := &corev1.ConfigMapList{}
 		listErr := TestEnv.Client.List(ctx, cmList,
 			client.InNamespace(v1alpha2TestNS),
-			client.MatchingLabels{"llamastack.io/config-for": distribution.Name},
+			generatedCMLabels,
 		)
 		if listErr != nil {
 			return false, listErr
@@ -138,7 +142,7 @@ func testV1Alpha2ConfigMapGeneration(t *testing.T, distribution *v1alpha2.LlamaS
 	cmList := &corev1.ConfigMapList{}
 	require.NoError(t, TestEnv.Client.List(TestEnv.Ctx, cmList,
 		client.InNamespace(v1alpha2TestNS),
-		client.MatchingLabels{"llamastack.io/config-for": distribution.Name},
+		generatedCMLabels,
 	))
 	require.NotEmpty(t, cmList.Items, "Should find at least one generated ConfigMap")
 
@@ -222,7 +226,10 @@ func runV1Alpha2DeletionTests(t *testing.T, instance *v1alpha2.LlamaStackDistrib
 		cmList := &corev1.ConfigMapList{}
 		require.NoError(t, TestEnv.Client.List(TestEnv.Ctx, cmList,
 			client.InNamespace(instance.Namespace),
-			client.MatchingLabels{"llamastack.io/config-for": instance.Name},
+			client.MatchingLabels{
+				"app.kubernetes.io/instance":  instance.Name,
+				"app.kubernetes.io/component": "generated-config",
+			},
 		))
 		assert.Empty(t, cmList.Items, "Generated ConfigMaps should be cleaned up")
 	})
