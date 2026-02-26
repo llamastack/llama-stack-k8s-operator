@@ -238,8 +238,9 @@ This will cause all LlamaStackDistribution resources using the `starter` distrib
 
   **Note**:
   - The `image-buildx` target works with both Docker and Podman. It will automatically detect which tool is being used.
-  - **Native cross-compilation**: The Dockerfile uses `--platform=$BUILDPLATFORM` to run Go compilation natively on the build host, avoiding QEMU emulation for the build process. This dramatically improves build speed and reliability. Only the minimal final stage (package installation) runs under QEMU for cross-platform builds.
-  - **FIPS adherence**: Native builds use `CGO_ENABLED=1` with full OpenSSL FIPS support. Cross-compiled builds use `CGO_ENABLED=0` with pure Go FIPS (via `GOEXPERIMENT=strictfipsruntime`). Both approaches are Designed for FIPS.
+  - **Native builds in CI**: CI workflows use a matrix strategy with native runners for each architecture (AMD64 and ARM64). Each architecture is built on its own runner, avoiding QEMU emulation entirely. Per-architecture images are pushed separately, then combined into a single multi-arch manifest list. This ensures `CGO_ENABLED=1` with full OpenSSL FIPS support for all architectures.
+  - **Local cross-compilation**: For local development, the Dockerfile uses `--platform=$BUILDPLATFORM` to run Go compilation natively on the build host. When cross-compiling (e.g., building ARM64 on an AMD64 host), `CGO_ENABLED=0` is used with pure Go FIPS (via `GOEXPERIMENT=strictfipsruntime`). Native local builds use `CGO_ENABLED=1` with full OpenSSL FIPS support.
+  - **FIPS adherence**: All CI-produced images use `CGO_ENABLED=1` with full OpenSSL FIPS support via native builds on architecture-matched runners.
   - For Docker: Multi-arch builds require Docker Buildx. Ensure Docker Buildx is set up:
 
     ```commandline
@@ -248,6 +249,19 @@ This will cause all LlamaStackDistribution resources using the `starter` distrib
 
   - For Podman: Podman 4.0+ supports `podman buildx` (experimental). If buildx is unavailable, the Makefile will automatically fall back to using podman's native manifest-based multi-arch build approach.
   - The resulting images are multi-arch manifest lists, which means Kubernetes will automatically select the correct architecture when pulling the image.
+
+  **CI Build Targets**:
+
+  The CI workflows use the following Makefile targets for the matrix-based build strategy:
+
+  ```commandline
+  # Build and push a single-arch image (used by each matrix job on its native runner)
+  make image-build-push-single PLATFORM=linux/amd64 IMG=quay.io/<username>/llama-stack-k8s-operator:<tag>-amd64
+
+  # Create a multi-arch manifest from per-arch images (used by the final manifest job)
+  make image-create-manifest IMG=quay.io/<username>/llama-stack-k8s-operator:<tag> \
+    ARCH_IMGS="quay.io/<username>/llama-stack-k8s-operator:<tag>-amd64 quay.io/<username>/llama-stack-k8s-operator:<tag>-arm64"
+  ```
 
 - Building ARM64-only images
 
