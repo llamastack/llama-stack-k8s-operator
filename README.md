@@ -5,6 +5,8 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
 ## Features
 
 - Automated deployment of Llama Stack servers
+- Declarative provider, model, and storage configuration (v1alpha2)
+- Automatic `config.yaml` generation from the CR spec
 - Support for multiple [distributions](https://github.com/meta-llama/llama-stack?tab=readme-ov-file#distributions) (includes Ollama, vLLM, and others)
 - Customizable server configurations
 - Volume management for model storage
@@ -15,7 +17,10 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
 - [Quick Start](#quick-start)
     - [Installation](#installation)
     - [Deploying Llama Stack Server](#deploying-the-llama-stack-server)
+- [Configuration Examples](#configuration-examples)
 - [Enabling Network Policies](#enabling-network-policies)
+- [Image Mapping Overrides](#image-mapping-overrides)
+- [Migrating from v1alpha1](#migrating-from-v1alpha1)
 - [Developer Guide](#developer-guide)
     - [Prerequisites](#prerequisites)
     - [Building the Operator](#building-the-operator)
@@ -71,38 +76,213 @@ Deploy vLLM with GPU support:
 ./hack/deploy-quickstart.sh --provider vllm --runtime-env "VLLM_TARGET_DEVICE=gpu,CUDA_VISIBLE_DEVICES=0"
 ```
 
-2. Create LlamaStackDistribution CR to get the server running. Example:
-```
-apiVersion: llamastack.io/v1alpha1
+2. Create a `LlamaStackDistribution` CR to get the server running:
+
+```yaml
+apiVersion: llamastack.io/v1alpha2
 kind: LlamaStackDistribution
 metadata:
-  name: llamastackdistribution-sample
+  name: my-llsd
 spec:
-  replicas: 1
-  server:
-    distribution:
-      name: starter
-    containerSpec:
-      env:
-      - name: OLLAMA_INFERENCE_MODEL
-        value: "llama3.2:1b"
-      - name: OLLAMA_URL
-        value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
+  distribution:
+    name: starter
+  providers:
+    inference:
+      provider: ollama
+      endpoint: http://ollama-server-service.ollama-dist.svc.cluster.local:11434
+  resources:
+    models:
+      - name: "llama3.2:1b"
+  workload:
+    replicas: 1
+```
+
+The operator generates a `config.yaml` ConfigMap automatically from the `providers` and `resources` fields and mounts it into the server Pod.
+
+3. Verify the server pod is running in the user defined namespace.
+
+```bash
+kubectl get llsd my-llsd
+```
+
+## Configuration Examples
+
+### Using a Direct Image
+
+Instead of a distribution name, you can specify a container image directly:
+
+```yaml
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: my-llsd
+spec:
+  distribution:
+    image: quay.io/llamastack/distribution-starter:latest
+  providers:
+    inference:
+      provider: ollama
+      endpoint: http://ollama-server-service.ollama-dist.svc.cluster.local:11434
+  resources:
+    models:
+      - name: "llama3.2:1b"
+```
+
+### vLLM with API Key Authentication
+
+The `apiKey` field is a Kubernetes Secret reference (`secretKeyRef`). The operator injects it as an environment variable at runtime — the secret value never appears in the CR or the generated ConfigMap.
+
+```yaml
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: my-llsd
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      provider: vllm
+      endpoint: http://vllm-service.vllm-ns.svc:8000/v1
+      apiKey:
+        name: vllm-secret       # Secret name in the same namespace
+        key: api-key             # Key within the Secret
+  resources:
+    models:
+      - name: "meta-llama/Llama-3.2-1B"
+  workload:
+    replicas: 1
+```
+
+### Multiple Providers
+
+Configure multiple inference providers and assign models to specific providers:
+
+```yaml
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: my-llsd
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      - id: ollama-local
+        provider: ollama
+        endpoint: http://ollama.local.svc:11434
+      - id: vllm-gpu
+        provider: vllm
+        endpoint: http://vllm.gpu.svc:8000/v1
+  resources:
+    models:
+      - name: "llama3.2:1b"
+        provider: ollama-local
+      - name: "meta-llama/Llama-3.2-70B"
+        provider: vllm-gpu
+```
+
+### With Persistent Storage
+
+```yaml
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: my-llsd
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      provider: ollama
+      endpoint: http://ollama-server-service.ollama-dist.svc.cluster.local:11434
+  resources:
+    models:
+      - name: "llama3.2:1b"
+  workload:
+    replicas: 1
     storage:
       size: "20Gi"
       mountPath: "/home/lls/.lls"
 ```
-3. Verify the server pod is running in the user defined namespace.
 
-### Using a ConfigMap for config.yaml configuration
+### Using a ConfigMap for Full config.yaml Override
 
-A ConfigMap can be used to store config.yaml configuration for each LlamaStackDistribution.
-Updates to the ConfigMap will restart the Pod to load the new data.
+If you prefer to manage the full `config.yaml` yourself instead of using declarative `providers`/`resources`, use `overrideConfig`:
 
-Example to create a config.yaml ConfigMap, and a LlamaStackDistribution that references it:
+```yaml
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: my-llsd
+spec:
+  distribution:
+    name: starter
+  overrideConfig:
+    configMapName: llama-stack-config
+  workload:
+    replicas: 1
 ```
-kubectl apply -f config/samples/example-with-configmap.yaml
+
+> **Note:** `overrideConfig` is mutually exclusive with `providers`, `resources`, `storage`, and `disabled`. The CRD validation rejects CRs that specify both.
+
+See `config/samples/example-with-configmap.yaml` for a complete ConfigMap example.
+
+### TLS / CA Bundle
+
+```yaml
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: my-llsd
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      provider: ollama
+      endpoint: https://ollama-server-service.ollama-dist.svc.cluster.local:11434
+  resources:
+    models:
+      - name: "llama3.2:1b"
+  networking:
+    tls:
+      caBundle:
+        configMapName: custom-ca-bundle
 ```
+
+### State Storage (Redis / Postgres)
+
+```yaml
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: my-llsd
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      provider: ollama
+      endpoint: http://ollama.default.svc:11434
+  resources:
+    models:
+      - name: "llama3.2:1b"
+  storage:
+    kv:
+      type: redis
+      endpoint: redis://redis.default.svc:6379
+      password:
+        name: redis-secret
+        key: password
+    sql:
+      type: postgres
+      connectionString:
+        name: postgres-secret
+        key: dsn
+```
+
+If `storage` is omitted, the operator defaults to SQLite for both KV and SQL backends.
 
 ## Enabling Network Policies
 
@@ -130,32 +310,31 @@ EOF
 
 ### Configure Per-Instance Access
 
-Use `spec.network` to customize access controls:
+Use `spec.networking` to customize access controls:
 
 ```yaml
-apiVersion: llamastack.io/v1alpha1
+apiVersion: llamastack.io/v1alpha2
 kind: LlamaStackDistribution
 metadata:
   name: my-llsd
 spec:
-  server:
-    distribution:
-      name: starter
-  network:
-    exposeRoute: false          # Set true to create an Ingress for external access
+  distribution:
+    name: starter
+  networking:
+    expose: false
     allowedFrom:
-      namespaces:               # Explicit namespace names
+      namespaces:
         - my-app-namespace
         - monitoring
-      labels:                   # Namespaces matching these label keys
+      labels:
         - team=frontend
 ```
 
 | Field | Description |
 |-------|-------------|
-| `network.exposeRoute` | When `true`, creates an Ingress for external access (default: `false`) |
-| `network.allowedFrom.namespaces` | List of namespace names allowed to access the service. Use `"*"` to allow all namespaces |
-| `network.allowedFrom.labels` | List of namespace label keys. Namespaces with these labels are allowed |
+| `networking.expose` | When `true`, creates an Ingress for external access. Accepts a boolean or an object `{enabled: true, hostname: "my-host.example.com"}` |
+| `networking.allowedFrom.namespaces` | List of namespace names allowed to access the service. Use `"*"` to allow all namespaces |
+| `networking.allowedFrom.labels` | List of namespace label keys. Namespaces with these labels are allowed |
 
 Set `enabled: false` in the ConfigMap to disable; the operator will delete the managed policies.
 
@@ -187,6 +366,12 @@ kubectl patch configmap llama-stack-operator-config -n llama-stack-k8s-operator-
 ```
 
 This will cause all LlamaStackDistribution resources using the `starter` distribution to restart with the new image.
+
+## Migrating from v1alpha1
+
+If you have existing `v1alpha1` resources, they continue to work without changes. The conversion webhook translates between versions automatically.
+
+To take advantage of the new declarative configuration features, see the **[v1alpha1 to v1alpha2 Migration Guide](docs/migration-v1alpha1-to-v1alpha2.md)** for detailed field mappings and before/after examples.
 
 ## Developer Guide
 
