@@ -6129,7 +6129,7 @@ spec:
         env:
         - name: OPERATOR_VERSION
           value: latest
-        image: quay.io/vhire/llama-stack-k8s-operator:v1alpha2
+        image: quay.io/llamastack/llama-stack-k8s-operator:latest
         imagePullPolicy: Always
         livenessProbe:
           httpGet:
