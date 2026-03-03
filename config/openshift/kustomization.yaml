@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# OpenShift overlay: uses service-ca operator for webhook TLS
+# instead of cert-manager (used by config/default for vanilla Kubernetes).
+
+namespace: llama-stack-k8s-operator-system
+
+namePrefix: llama-stack-k8s-operator-
+
+resources:
+- ../crd
+- ../rbac
+- ../manager
+- ../webhook
+
+labels:
+- includeSelectors: true
+  pairs:
+    app.kubernetes.io/name: llama-stack-k8s-operator
+
+patches:
+- path: manager_webhook_patch.yaml
+- path: webhook_ca_patch.yaml
+- path: crd_ca_patch.yaml
+- target:
+    kind: CustomResourceDefinition
+    name: llamastackdistributions.llamastack.io
+  patch: |-
+    - op: remove
+      path: /metadata/annotations/cert-manager.io~1inject-ca-from
