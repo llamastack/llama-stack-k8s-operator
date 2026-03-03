@@ -110,6 +110,7 @@ func cloneBaseConfig(base *BaseConfig) *BaseConfig {
 		DatasetIOStore:    copyMap(base.DatasetIOStore),
 		Server:            copyMap(base.Server),
 		ExternalProviders: copyMap(base.ExternalProviders),
+		Extra:             copyMap(base.Extra),
 	}
 }
 

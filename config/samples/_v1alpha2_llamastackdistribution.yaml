@@ -8,7 +8,7 @@ spec:
   providers:
     inference:
       provider: ollama
-      endpoint: http://ollama-server-service.ollama-dist.svc.cluster.local:11434
+      endpoint: http://ollama-server-service.ollama-dist.svc.cluster.local:11434/v1
   resources:
     models:
       - name: "llama3.2:1b"

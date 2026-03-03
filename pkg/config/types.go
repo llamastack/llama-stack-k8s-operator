@@ -39,7 +39,10 @@ type BaseConfig struct {
 	DatasetIOStore    map[string]interface{}   `json:"datasetio_store,omitempty"     yaml:"datasetio_store,omitempty"`
 	Server            map[string]interface{}   `json:"server,omitempty"              yaml:"server,omitempty"`
 	ExternalProviders map[string]interface{}   `json:"external_providers,omitempty"  yaml:"external_providers,omitempty"`
-	Extra             map[string]interface{}   `json:"-"                             yaml:"-"`
+	// Extra captures all YAML fields not explicitly mapped above (e.g. distro_name,
+	// image_name, storage, registered_resources, vector_stores, safety, connectors).
+	// The inline tag ensures these survive the parse → merge → render round-trip.
+	Extra map[string]interface{} `json:"-" yaml:",inline"`
 }
 
 // GeneratedConfig is the output of the config generation pipeline.

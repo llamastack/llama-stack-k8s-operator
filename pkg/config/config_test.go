@@ -23,6 +23,7 @@ import (
 	v1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
@@ -476,4 +477,102 @@ func TestValidateConfigVersion(t *testing.T) {
 	require.NoError(t, ValidateConfigVersion(2))
 	require.Error(t, ValidateConfigVersion(0))
 	require.Error(t, ValidateConfigVersion(99))
+}
+
+func TestGenerateConfigPreservesExtraFields(t *testing.T) {
+	distImages := map[string]string{
+		"starter": "quay.io/llamastack/distribution-starter:latest",
+	}
+
+	spec := &v1alpha2.LlamaStackDistributionSpec{
+		Distribution: v1alpha2.DistributionSpec{Name: "starter"},
+		Providers: &v1alpha2.ProvidersSpec{
+			Inference: &apiextensionsv1.JSON{Raw: []byte(`{"provider": "ollama", "endpoint": "http://ollama:11434"}`)},
+		},
+		Resources: &v1alpha2.ResourcesSpec{
+			Models: []apiextensionsv1.JSON{{Raw: []byte(`"llama3.2:1b"`)}},
+		},
+	}
+
+	resolver := NewBaseConfigResolver(distImages, nil)
+	gen, _, err := GenerateConfig(context.Background(), spec, resolver)
+	require.NoError(t, err)
+
+	assert.Contains(t, gen.ConfigYAML, "distro_name: starter",
+		"generated config must include distro_name from embedded base config")
+	assert.Contains(t, gen.ConfigYAML, "storage:",
+		"generated config must include storage section from embedded base config")
+	assert.Contains(t, gen.ConfigYAML, "registered_resources:",
+		"generated config must include registered_resources from embedded base config")
+}
+
+func TestModelsAppearInRegisteredResources(t *testing.T) {
+	distImages := map[string]string{
+		"starter": "quay.io/llamastack/distribution-starter:latest",
+	}
+
+	spec := &v1alpha2.LlamaStackDistributionSpec{
+		Distribution: v1alpha2.DistributionSpec{Name: "starter"},
+		Providers: &v1alpha2.ProvidersSpec{
+			Inference: &apiextensionsv1.JSON{Raw: []byte(`{"provider": "ollama", "endpoint": "http://ollama:11434"}`)},
+		},
+		Resources: &v1alpha2.ResourcesSpec{
+			Models: []apiextensionsv1.JSON{
+				{Raw: []byte(`"llama3.2:1b"`)},
+			},
+		},
+	}
+
+	resolver := NewBaseConfigResolver(distImages, nil)
+	gen, _, err := GenerateConfig(context.Background(), spec, resolver)
+	require.NoError(t, err)
+
+	var parsed map[string]interface{}
+	err = yaml.Unmarshal([]byte(gen.ConfigYAML), &parsed)
+	require.NoError(t, err)
+
+	// Models must NOT appear at the top level
+	_, hasTopLevelModels := parsed["models"]
+	assert.False(t, hasTopLevelModels, "models must not appear at the top level; they belong under registered_resources")
+
+	// Models MUST appear under registered_resources
+	rr, ok := parsed["registered_resources"].(map[string]interface{})
+	require.True(t, ok, "registered_resources must be a map")
+
+	models, ok := rr["models"].([]interface{})
+	require.True(t, ok, "registered_resources.models must be a list")
+
+	var foundInference bool
+	for _, m := range models {
+		mm, ok := m.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if mm["model_id"] == "llama3.2:1b" {
+			foundInference = true
+		}
+	}
+	assert.True(t, foundInference, "inference model from CR must be in registered_resources.models")
+}
+
+func TestEmbeddingProviderPreservedAfterMerge(t *testing.T) {
+	distImages := map[string]string{
+		"starter": "quay.io/llamastack/distribution-starter:latest",
+	}
+
+	spec := &v1alpha2.LlamaStackDistributionSpec{
+		Distribution: v1alpha2.DistributionSpec{Name: "starter"},
+		Providers: &v1alpha2.ProvidersSpec{
+			Inference: &apiextensionsv1.JSON{Raw: []byte(`{"provider": "ollama", "endpoint": "http://ollama:11434"}`)},
+		},
+	}
+
+	resolver := NewBaseConfigResolver(distImages, nil)
+	gen, _, err := GenerateConfig(context.Background(), spec, resolver)
+	require.NoError(t, err)
+
+	// The sentence-transformers provider should survive even though
+	// inference providers were overridden with ollama only
+	assert.Contains(t, gen.ConfigYAML, "sentence-transformers",
+		"sentence-transformers provider must be preserved for embedding support")
 }

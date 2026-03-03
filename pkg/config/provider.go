@@ -119,9 +119,9 @@ func expandSingleProvider(pc v1alpha2.ProviderConfig, substitutions map[string]s
 
 	cfg := make(map[string]interface{})
 
-	// Map endpoint -> config.url
+	// Map endpoint -> config.base_url (used by all remote inference providers).
 	if pc.Endpoint != "" {
-		cfg["url"] = pc.Endpoint
+		cfg["base_url"] = pc.Endpoint
 	}
 
 	// Map apiKey -> config.api_key via env var substitution

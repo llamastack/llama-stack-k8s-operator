@@ -462,6 +462,23 @@ func testImageMappingOverrides(t *testing.T, distribution *v1alpha1.LlamaStackDi
 		Name:      "llama-stack-operator-config",
 	}, operatorConfigMap))
 
+	// Guarantee cleanup even if any assertion below fails, so stale overrides
+	// don't leak into subsequent test suites (e.g. v1alpha2-lifecycle).
+	t.Cleanup(func() {
+		cm := &corev1.ConfigMap{}
+		if err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
+			Namespace: TestOpts.OperatorNS,
+			Name:      "llama-stack-operator-config",
+		}, cm); err != nil {
+			return
+		}
+		if _, exists := cm.Data["image-overrides"]; exists {
+			delete(cm.Data, "image-overrides")
+			_ = TestEnv.Client.Update(TestEnv.Ctx, cm)
+			time.Sleep(15 * time.Second)
+		}
+	})
+
 	// Add image override for the distribution type
 	testOverrideImage := "quay.io/test/llama-stack:override-test"
 	if operatorConfigMap.Data == nil {

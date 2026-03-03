@@ -95,18 +95,9 @@ func expandSpecOverBase(spec *v1alpha2.LlamaStackDistributionSpec, base *BaseCon
 		providerCount = countBaseProviders(mergedConfig)
 	}
 
-	models, tools, shields, resourceCount, err := ExpandResources(spec.Resources, userProviders, base)
+	resourceCount, err := applyResources(spec, mergedConfig, userProviders, base)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed to expand resources: %w", err)
-	}
-	if models != nil {
-		mergedConfig.RegisteredModels = models
-	}
-	if tools != nil {
-		mergedConfig.ToolGroups = tools
-	}
-	if shields != nil {
-		mergedConfig.Shields = shields
+		return nil, 0, 0, err
 	}
 
 	mergedConfig, err = ExpandStorage(spec.Storage, mergedConfig)
@@ -114,34 +105,93 @@ func expandSpecOverBase(spec *v1alpha2.LlamaStackDistributionSpec, base *BaseCon
 		return nil, 0, 0, fmt.Errorf("failed to expand storage: %w", err)
 	}
 
-	if len(spec.Disabled) > 0 {
-		mergedConfig = ApplyDisabledAPIs(mergedConfig, spec.Disabled)
-	}
+	applyNetworkingOverrides(spec, mergedConfig)
 
 	return mergedConfig, providerCount, resourceCount, nil
 }
 
-// mergeProviders replaces base config providers with user-specified providers
-// for each API type that the user has configured.
+// applyResources expands CR resources and merges them into the config.
+func applyResources(spec *v1alpha2.LlamaStackDistributionSpec, config *BaseConfig, userProviders map[string][]ProviderEntry, base *BaseConfig) (int, error) {
+	models, tools, shields, resourceCount, err := ExpandResources(spec.Resources, userProviders, base)
+	if err != nil {
+		return 0, fmt.Errorf("failed to expand resources: %w", err)
+	}
+	if models != nil {
+		config.RegisteredModels = models
+	}
+	if tools != nil {
+		config.ToolGroups = tools
+	}
+	if shields != nil {
+		config.Shields = shields
+	}
+	return resourceCount, nil
+}
+
+// applyNetworkingOverrides applies disabled APIs and port overrides from the CR spec.
+func applyNetworkingOverrides(spec *v1alpha2.LlamaStackDistributionSpec, config *BaseConfig) {
+	if len(spec.Disabled) > 0 {
+		_ = ApplyDisabledAPIs(config, spec.Disabled)
+	}
+	if spec.Networking != nil && spec.Networking.Port > 0 {
+		overrideServerPort(config, int(spec.Networking.Port))
+	}
+}
+
+// overrideServerPort sets server.port in the config's Extra map so the
+// llama-stack server listens on the port specified in the CR.
+func overrideServerPort(config *BaseConfig, port int) {
+	if config.Extra == nil {
+		config.Extra = make(map[string]interface{})
+	}
+	serverSection, ok := config.Extra["server"].(map[string]interface{})
+	if !ok {
+		serverSection = make(map[string]interface{})
+	}
+	serverSection["port"] = port
+	config.Extra["server"] = serverSection
+}
+
+// mergeProviders merges user-specified providers into the base config by
+// provider_id. Matching IDs are replaced; unmatched user providers are appended.
+// Base config providers with IDs not specified by the user are preserved.
 func mergeProviders(base *BaseConfig, userProviders map[string][]ProviderEntry) *BaseConfig {
 	if base.Providers == nil {
 		base.Providers = make(map[string]interface{})
 	}
 
 	for apiType, entries := range userProviders {
-		provList := make([]interface{}, len(entries))
-		for i, e := range entries {
-			provList[i] = map[string]interface{}{
+		baseList, _ := base.Providers[apiType].([]interface{})
+
+		for _, e := range entries {
+			userEntry := map[string]interface{}{
 				"provider_id":   e.ProviderID,
 				"provider_type": e.ProviderType,
 				"config":        e.Config,
 			}
+
+			replaced := false
+			for i, bp := range baseList {
+				if m, ok := bp.(map[string]interface{}); ok {
+					if m["provider_id"] == e.ProviderID {
+						baseList[i] = userEntry
+						replaced = true
+						break
+					}
+				}
+			}
+
+			if !replaced {
+				baseList = append(baseList, userEntry)
+			}
 		}
-		base.Providers[apiType] = provList
+
+		base.Providers[apiType] = baseList
 	}
 
 	return base
 }
+
 
 // countBaseProviders counts the total number of providers in the base config.
 func countBaseProviders(config *BaseConfig) int {
@@ -196,6 +246,9 @@ func buildOrderedConfig(config *BaseConfig) map[string]interface{} {
 	out := make(map[string]interface{})
 	out["version"] = config.Version
 
+	// Explicit struct fields take precedence over Extra; write them first so
+	// the Extra loop (below) skips keys that are already set.
+
 	if len(config.APIs) > 0 {
 		apis := make([]string, len(config.APIs))
 		copy(apis, config.APIs)
@@ -216,15 +269,7 @@ func buildOrderedConfig(config *BaseConfig) map[string]interface{} {
 		out["providers"] = provMap
 	}
 
-	if len(config.RegisteredModels) > 0 {
-		out["models"] = config.RegisteredModels
-	}
-	if len(config.Shields) > 0 {
-		out["shields"] = config.Shields
-	}
-	if len(config.ToolGroups) > 0 {
-		out["tool_groups"] = config.ToolGroups
-	}
+	mergeResourcesIntoExtra(config)
 
 	addStoreIfNonNil(out, "metadata_store", config.MetadataStore)
 	addStoreIfNonNil(out, "inference_store", config.InferenceStore)
@@ -238,7 +283,76 @@ func buildOrderedConfig(config *BaseConfig) map[string]interface{} {
 	addStoreIfNonNil(out, "datasetio_store", config.DatasetIOStore)
 	addStoreIfNonNil(out, "server", config.Server)
 
+	// Emit all Extra fields that were captured via the inline YAML tag
+	// (e.g. distro_name, image_name, storage, registered_resources,
+	// vector_stores, safety, connectors). Skip keys already set above.
+	for k, v := range config.Extra {
+		if _, exists := out[k]; !exists {
+			out[k] = v
+		}
+	}
+
 	return out
+}
+
+// mergeResourcesIntoExtra merges RegisteredModels, Shields, and ToolGroups
+// from the struct fields into Extra["registered_resources"] so they appear
+// under the correct YAML key for the llama-stack server (StackConfig).
+// Resources are merged by their ID field (model_id, shield_id, toolgroup_id):
+// matching IDs are replaced, unmatched entries are appended, and base config
+// entries not specified by the CR are preserved.
+func mergeResourcesIntoExtra(config *BaseConfig) {
+	if len(config.RegisteredModels) == 0 && len(config.Shields) == 0 && len(config.ToolGroups) == 0 {
+		return
+	}
+
+	if config.Extra == nil {
+		config.Extra = make(map[string]interface{})
+	}
+
+	rr, ok := config.Extra["registered_resources"].(map[string]interface{})
+	if !ok {
+		rr = make(map[string]interface{})
+	}
+
+	if len(config.RegisteredModels) > 0 {
+		rr["models"] = mergeResourceList(rr["models"], config.RegisteredModels, "model_id")
+	}
+	if len(config.Shields) > 0 {
+		rr["shields"] = mergeResourceList(rr["shields"], config.Shields, "shield_id")
+	}
+	if len(config.ToolGroups) > 0 {
+		rr["tool_groups"] = mergeResourceList(rr["tool_groups"], config.ToolGroups, "toolgroup_id")
+	}
+
+	config.Extra["registered_resources"] = rr
+}
+
+// mergeResourceList merges new entries into an existing list by idKey.
+// Entries with matching IDs are replaced; unmatched entries are appended.
+func mergeResourceList(existing interface{}, incoming []map[string]interface{}, idKey string) []interface{} {
+	var base []interface{}
+	if list, ok := existing.([]interface{}); ok {
+		base = append(base, list...)
+	}
+
+	for _, entry := range incoming {
+		entryID, _ := entry[idKey].(string)
+		replaced := false
+		if entryID != "" {
+			for i, b := range base {
+				if m, ok := b.(map[string]interface{}); ok && m[idKey] == entryID {
+					base[i] = entry
+					replaced = true
+					break
+				}
+			}
+		}
+		if !replaced {
+			base = append(base, entry)
+		}
+	}
+	return base
 }
 
 func addStoreIfNonNil(out map[string]interface{}, key string, store map[string]interface{}) {
