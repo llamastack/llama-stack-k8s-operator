@@ -18,7 +18,6 @@ package controllers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -30,7 +29,6 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,24 +37,13 @@ import (
 
 // v1alpha2 Condition types.
 const (
-	ConditionTypeConfigGenerated   = "ConfigGenerated"
-	ConditionTypeDeploymentUpdated = "DeploymentUpdated"
-	ConditionTypeAvailable         = "Available"
-	ConditionTypeSecretsResolved   = "SecretsResolved"
+	ConditionTypeConfigGenerated = "ConfigGenerated"
 )
 
 // v1alpha2 Condition reasons.
 const (
-	ReasonConfigGenSucceeded  = "ConfigGenerationSucceeded"
-	ReasonConfigGenFailed     = "ConfigGenerationFailed"
-	ReasonBaseConfigRequired  = "BaseConfigRequired"
-	ReasonDeployUpdateSucceed = "DeploymentUpdateSucceeded"
-	ReasonDeployUpdateFailed  = "DeploymentUpdateFailed"
-	ReasonMinReplicasAvail    = "MinimumReplicasAvailable"
-	ReasonReplicasUnavail     = "ReplicasUnavailable"
-	ReasonAllSecretsFound     = "AllSecretsFound"
-	ReasonSecretNotFound      = "SecretNotFound"
-	ReasonUpgradeConfigFail   = "UpgradeConfigFailure"
+	ReasonConfigGenSucceeded = "ConfigGenerationSucceeded"
+	ReasonConfigGenFailed    = "ConfigGenerationFailed"
 )
 
 // DetermineConfigSource determines the configuration source for a v1alpha2 CR.
@@ -183,12 +170,7 @@ func (r *LlamaStackDistributionReconciler) handleDistributionDefault(
 	}
 
 	contentHash := llsconfig.ComputeContentHash(configYAML)
-	providerCount := 0
-	for _, v := range base.Providers {
-		if list, ok := v.([]interface{}); ok {
-			providerCount += len(list)
-		}
-	}
+	providerCount := llsconfig.CountProviders(base)
 
 	logger.V(1).Info("using distribution default config", "hash", contentHash[:8])
 
@@ -274,7 +256,7 @@ func (r *LlamaStackDistributionReconciler) cleanupOldConfigMaps(
 		"app.kubernetes.io/component": "generated-config",
 		"app.kubernetes.io/instance":  instance.Name,
 	}
-	if err := r.List(ctx, cmList, matchLabels(matchingLabels)); err != nil {
+	if err := r.List(ctx, cmList, client.MatchingLabels(matchingLabels)); err != nil {
 		return fmt.Errorf("failed to list generated ConfigMaps: %w", err)
 	}
 
@@ -298,16 +280,22 @@ func (r *LlamaStackDistributionReconciler) cleanupOldConfigMaps(
 	return nil
 }
 
-// matchLabels wraps a map as a client.MatchingLabels list option.
-func matchLabels(labels map[string]string) matchingLabelsOption {
-	return matchingLabelsOption(labels)
-}
-
-type matchingLabelsOption map[string]string
-
-func (o matchingLabelsOption) ApplyToList(opts *client.ListOptions) {
-	sel := labels.SelectorFromSet(map[string]string(o))
-	opts.LabelSelector = sel
+// validateV1Alpha2References runs all reference validations for a v1alpha2 CR
+// before config generation: secrets, ConfigMaps, and provider references.
+func (r *LlamaStackDistributionReconciler) validateV1Alpha2References(
+	ctx context.Context,
+	instance *v1alpha2.LlamaStackDistribution,
+) error {
+	if err := r.ValidateV1Alpha2SecretRefs(ctx, &instance.Spec, instance.Namespace); err != nil {
+		return fmt.Errorf("failed to validate secret references: %w", err)
+	}
+	if err := r.ValidateV1Alpha2ConfigMapRefs(ctx, &instance.Spec, instance.Namespace); err != nil {
+		return fmt.Errorf("failed to validate ConfigMap references: %w", err)
+	}
+	if err := ValidateProviderReferences(&instance.Spec); err != nil {
+		return fmt.Errorf("failed to validate provider references: %w", err)
+	}
+	return nil
 }
 
 // ValidateV1Alpha2SecretRefs validates that all secretKeyRef references in a v1alpha2 spec
@@ -457,21 +445,11 @@ func sortedKeys(m map[string]bool) []string {
 
 // resolveV1Alpha2Image resolves the container image for a v1alpha2 distribution spec.
 func (r *LlamaStackDistributionReconciler) resolveV1Alpha2Image(instance *v1alpha2.LlamaStackDistribution) (string, error) {
-	dist := instance.Spec.Distribution
-
-	if dist.Image != "" {
-		return dist.Image, nil
-	}
-
-	if override, ok := r.ImageMappingOverrides[dist.Name]; ok {
-		return override, nil
-	}
-
-	if image, ok := r.ClusterInfo.DistributionImages[dist.Name]; ok {
-		return image, nil
-	}
-
-	return "", fmt.Errorf("failed to resolve distribution name %q: not found in distributions.json", dist.Name)
+	resolver := llsconfig.NewBaseConfigResolver(
+		r.ClusterInfo.DistributionImages,
+		r.ImageMappingOverrides,
+	)
+	return resolver.ResolveImage(instance.Spec.Distribution)
 }
 
 // updateV1Alpha2SpecificStatus sets v1alpha2-specific status fields. Only updates
@@ -571,6 +549,11 @@ func (r *LlamaStackDistributionReconciler) handleV1Alpha2NativeConfig(
 		return nil, nil
 	}
 
+	// Validate references before generating config so the user gets clear errors.
+	if err := r.validateV1Alpha2References(ctx, v2Instance); err != nil {
+		return nil, err
+	}
+
 	generated, resolvedImage, err := r.ReconcileV1Alpha2Config(ctx, v2Instance)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reconcile v1alpha2 config: %w", err)
@@ -644,32 +627,4 @@ func GetV1Alpha2ServerPort(spec *v1alpha2.NetworkingSpec) int32 {
 		return spec.Port
 	}
 	return v1alpha2.DefaultServerPort
-}
-
-// ShouldExposeV1Alpha2 determines whether external access should be created.
-func ShouldExposeV1Alpha2(spec *v1alpha2.NetworkingSpec) (bool, string) {
-	if spec == nil || spec.Expose == nil || len(spec.Expose.Raw) == 0 {
-		return false, ""
-	}
-
-	// Try as boolean
-	var boolVal bool
-	if err := json.Unmarshal(spec.Expose.Raw, &boolVal); err == nil {
-		return boolVal, ""
-	}
-
-	// Try as object
-	var objVal struct {
-		Enabled  *bool  `json:"enabled,omitempty"`
-		Hostname string `json:"hostname,omitempty"`
-	}
-	if err := json.Unmarshal(spec.Expose.Raw, &objVal); err == nil {
-		if objVal.Enabled != nil {
-			return *objVal.Enabled, objVal.Hostname
-		}
-		// Empty object {} treated as true
-		return true, objVal.Hostname
-	}
-
-	return false, ""
 }

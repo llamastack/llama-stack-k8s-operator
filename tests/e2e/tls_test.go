@@ -147,7 +147,7 @@ func generateCertificates(t *testing.T) {
 	require.NoError(t, err, "Failed to get project root")
 
 	// Run the certificate generation script
-	scriptPath := filepath.Join(projectRoot, "config", "samples", "generate_certificates.sh")
+	scriptPath := filepath.Join(projectRoot, "config", "samples", "v1alpha1", "generate_certificates.sh")
 	t.Logf("Running certificate generation script: %s", scriptPath)
 
 	// Change to the project root directory to run the script
@@ -174,7 +174,7 @@ func createCABundleConfigMap(t *testing.T, targetNS string) error {
 	}
 
 	// Read CA bundle
-	caBundle, err := os.ReadFile(filepath.Join(projectRoot, "config", "samples", "vllm-ca-certs", controllers.DefaultCABundleKey))
+	caBundle, err := os.ReadFile(filepath.Join(projectRoot, "config", "samples", "v1alpha1", "vllm-ca-certs", controllers.DefaultCABundleKey))
 	if err != nil {
 		return fmt.Errorf("failed to read CA bundle: %w", err)
 	}
@@ -291,7 +291,7 @@ func updateCABundleConfigMap(t *testing.T, targetNS string) error {
 	}
 
 	// Read the actual CA bundle from the file
-	actualCABundle, err := os.ReadFile(filepath.Join(projectRoot, "config", "samples", "vllm-ca-certs", controllers.DefaultCABundleKey))
+	actualCABundle, err := os.ReadFile(filepath.Join(projectRoot, "config", "samples", "v1alpha1", "vllm-ca-certs", controllers.DefaultCABundleKey))
 	if err != nil {
 		return fmt.Errorf("failed to read CA bundle file: %w", err)
 	}
@@ -326,7 +326,7 @@ func deployLlamaStackWithCABundle(t *testing.T) error {
 		return fmt.Errorf("failed to get project root: %w", err)
 	}
 
-	llamaStackConfigPath := filepath.Join(projectRoot, "config", "samples", "example-with-ca-bundle.yaml")
+	llamaStackConfigPath := filepath.Join(projectRoot, "config", "samples", "v1alpha1", "example-with-ca-bundle.yaml")
 	llamaStackConfigData, err := os.ReadFile(llamaStackConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to read LlamaStack config: %w", err)

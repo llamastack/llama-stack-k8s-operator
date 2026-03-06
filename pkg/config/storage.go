@@ -31,17 +31,16 @@ const (
 	storageTypeSQLite = "sqlite"
 )
 
-// ExpandStorage merges user storage spec over the base config's storage sections.
-// When storage is nil, the base config's storage is preserved unchanged.
-func ExpandStorage(spec *v1alpha2.StateStorageSpec, base *BaseConfig) (*BaseConfig, error) {
+// ExpandStorage merges user storage spec over the config's storage sections in place.
+// When storage is nil, the config is returned unchanged.
+func ExpandStorage(spec *v1alpha2.StateStorageSpec, config *BaseConfig) (*BaseConfig, error) {
 	if spec == nil {
-		return base, nil
+		return config, nil
 	}
-	if base == nil {
-		return nil, errors.New("failed to expand storage: base config is nil")
+	if config == nil {
+		return nil, errors.New("failed to expand storage: config is nil")
 	}
 
-	clone := cloneBaseConfig(base)
 	substitutions := make(map[string]string)
 	if spec.KV != nil && spec.KV.Password != nil {
 		substitutions[kvRedisID+":password"] = "${env.LLSD_KV_REDIS_PASSWORD}"
@@ -50,10 +49,10 @@ func ExpandStorage(spec *v1alpha2.StateStorageSpec, base *BaseConfig) (*BaseConf
 		substitutions[sqlPostgresID+":connectionString"] = "${env.LLSD_SQL_POSTGRES_CONNECTIONSTRING}"
 	}
 
-	applyKVStorage(clone, spec.KV, substitutions)
-	applySQLStorage(clone, spec.SQL, substitutions)
+	applyKVStorage(config, spec.KV, substitutions)
+	applySQLStorage(config, spec.SQL, substitutions)
 
-	return clone, nil
+	return config, nil
 }
 
 func applyKVStorage(clone *BaseConfig, kv *v1alpha2.KVStorageSpec, substitutions map[string]string) {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -202,7 +203,7 @@ func extractProviderIDs(raw []byte) []string {
 	if err := json.Unmarshal(raw, &single); err == nil && single.Provider != "" {
 		id := single.ID
 		if id == "" {
-			id = single.Provider
+			id = deriveProviderID(single.Provider)
 		}
 		return []string{id}
 	}
@@ -216,7 +217,7 @@ func extractProviderIDs(raw []byte) []string {
 		for _, p := range list {
 			id := p.ID
 			if id == "" {
-				id = p.Provider
+				id = deriveProviderID(p.Provider)
 			}
 			ids = append(ids, id)
 		}
@@ -224,6 +225,15 @@ func extractProviderIDs(raw []byte) []string {
 	}
 
 	return nil
+}
+
+// deriveProviderID strips a "remote::" or similar prefix from a provider type
+// to produce the same ID that the config pipeline generates.
+func deriveProviderID(providerType string) string {
+	if idx := strings.LastIndex(providerType, "::"); idx >= 0 {
+		return providerType[idx+2:]
+	}
+	return providerType
 }
 
 func collectAllProviderIDs(spec *ProvidersSpec) map[string]bool {

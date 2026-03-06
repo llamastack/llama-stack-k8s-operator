@@ -24,10 +24,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
-// -----------------------------------------------------------------------------
-// Constants
-// -----------------------------------------------------------------------------
-
 const (
 	DefaultContainerName         = "llama-stack"
 	DefaultServerPort      int32 = 8321
@@ -45,10 +41,6 @@ var (
 	DefaultServerMemoryRequest = resource.MustParse("1Gi")
 )
 
-// -----------------------------------------------------------------------------
-// Distribution Types
-// -----------------------------------------------------------------------------
-
 // DistributionSpec identifies the LlamaStack distribution image to deploy.
 // Exactly one of name or image must be specified.
 // +kubebuilder:validation:XValidation:rule="!(has(self.name) && has(self.image))",message="Only one of name or image can be specified"
@@ -62,10 +54,6 @@ type DistributionSpec struct {
 	// +optional
 	Image string `json:"image,omitempty"`
 }
-
-// -----------------------------------------------------------------------------
-// Provider Types (Task 1.2)
-// -----------------------------------------------------------------------------
 
 // SecretKeyRef references a specific key in a Kubernetes Secret.
 type SecretKeyRef struct {
@@ -124,10 +112,6 @@ type ProvidersSpec struct {
 	Telemetry *apiextensionsv1.JSON `json:"telemetry,omitempty"`
 }
 
-// -----------------------------------------------------------------------------
-// Resource Types (Task 1.3)
-// -----------------------------------------------------------------------------
-
 // ModelConfig defines a model registration with optional provider assignment.
 // This type is used for JSON parsing of polymorphic model entries.
 type ModelConfig struct {
@@ -162,10 +146,6 @@ type ResourcesSpec struct {
 	// +optional
 	Shields []string `json:"shields,omitempty"`
 }
-
-// -----------------------------------------------------------------------------
-// Storage Types (Task 1.4)
-// -----------------------------------------------------------------------------
 
 // KVStorageSpec configures the key-value storage backend.
 type KVStorageSpec struct {
@@ -204,10 +184,6 @@ type StateStorageSpec struct {
 	// +optional
 	SQL *SQLStorageSpec `json:"sql,omitempty"`
 }
-
-// -----------------------------------------------------------------------------
-// Networking Types (Task 1.5)
-// -----------------------------------------------------------------------------
 
 // CABundleConfig defines the CA bundle configuration for custom certificates.
 type CABundleConfig struct {
@@ -258,10 +234,6 @@ type NetworkingSpec struct {
 	// +optional
 	AllowedFrom *AllowedFromSpec `json:"allowedFrom,omitempty"`
 }
-
-// -----------------------------------------------------------------------------
-// Workload Types (Task 1.6)
-// -----------------------------------------------------------------------------
 
 // PVCStorageSpec defines PVC storage for persistent data.
 type PVCStorageSpec struct {
@@ -349,10 +321,6 @@ type WorkloadSpec struct {
 	// +optional
 	Overrides *WorkloadOverrides `json:"overrides,omitempty"`
 }
-
-// -----------------------------------------------------------------------------
-// Override Config Types
-// -----------------------------------------------------------------------------
 
 // OverrideConfigSpec specifies a user-provided ConfigMap for full config.yaml override.
 // Mutually exclusive with providers, resources, storage, and disabled.

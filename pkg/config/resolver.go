@@ -53,7 +53,7 @@ func NewBaseConfigResolver(distImages, overrides map[string]string) *BaseConfigR
 func (r *BaseConfigResolver) Resolve(ctx context.Context, dist v1alpha2.DistributionSpec) (*BaseConfig, string, error) {
 	log := logr.FromContextOrDiscard(ctx)
 
-	image, err := r.resolveImage(dist)
+	image, err := r.ResolveImage(dist)
 	if err != nil {
 		return nil, "", err
 	}
@@ -90,8 +90,8 @@ func (r *BaseConfigResolver) loadEmbeddedConfig(name string) (*BaseConfig, error
 	return &config, nil
 }
 
-// resolveImage determines the concrete container image for a distribution spec.
-func (r *BaseConfigResolver) resolveImage(dist v1alpha2.DistributionSpec) (string, error) {
+// ResolveImage determines the concrete container image for a distribution spec.
+func (r *BaseConfigResolver) ResolveImage(dist v1alpha2.DistributionSpec) (string, error) {
 	if dist.Image != "" {
 		return dist.Image, nil
 	}

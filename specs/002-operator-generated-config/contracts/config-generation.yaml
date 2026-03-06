@@ -64,8 +64,15 @@ resource_mapping:
 # --- Merge Rules ---
 merge_rules:
   providers:
-    strategy: replace_by_api_type
-    description: "User providers fully replace base config providers for that API type"
+    strategy: merge_by_provider_id
+    description: |
+      User providers are merged into the base config by provider_id.
+      Matching IDs: user provider replaces the base provider.
+      Unmatched user IDs: appended to the base provider list.
+      Unmatched base IDs: preserved in the final config.
+      This is intentional, it preserves base config providers that the
+      user did not explicitly override (e.g., inline::sentence-transformers
+      for embeddings, inline::meta-reference for agents).
 
   storage:
     strategy: merge_by_subsection

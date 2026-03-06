@@ -555,6 +555,133 @@ func TestModelsAppearInRegisteredResources(t *testing.T) {
 	assert.True(t, foundInference, "inference model from CR must be in registered_resources.models")
 }
 
+func TestOverrideServerPort(t *testing.T) {
+	tests := []struct {
+		name          string
+		initialServer map[string]interface{}
+		port          int
+		wantPort      int
+	}{
+		{
+			name:          "nil server map is initialised",
+			initialServer: nil,
+			port:          8321,
+			wantPort:      8321,
+		},
+		{
+			name:          "existing server map is preserved",
+			initialServer: map[string]interface{}{"tls_certfile": "/certs/tls.crt"},
+			port:          9000,
+			wantPort:      9000,
+		},
+		{
+			name:          "existing port is overwritten",
+			initialServer: map[string]interface{}{"port": 5000},
+			port:          8080,
+			wantPort:      8080,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &BaseConfig{Server: tt.initialServer}
+			overrideServerPort(config, tt.port)
+			assert.Equal(t, tt.wantPort, config.Server["port"])
+
+			if tt.initialServer != nil {
+				for k, v := range tt.initialServer {
+					if k == "port" {
+						continue
+					}
+					assert.Equal(t, v, config.Server[k],
+						"existing key %q should be preserved", k)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyNetworkingOverrides(t *testing.T) {
+	tests := []struct {
+		name     string
+		spec     v1alpha2.LlamaStackDistributionSpec
+		baseAPIs []string
+		wantAPIs []string
+		wantPort interface{}
+	}{
+		{
+			name: "disabled APIs are removed",
+			spec: v1alpha2.LlamaStackDistributionSpec{
+				Disabled: []string{"safety", "agents"},
+			},
+			baseAPIs: []string{"inference", "safety", "agents", "telemetry"},
+			wantAPIs: []string{"inference", "telemetry"},
+			wantPort: nil,
+		},
+		{
+			name: "port is set from networking spec",
+			spec: v1alpha2.LlamaStackDistributionSpec{
+				Networking: &v1alpha2.NetworkingSpec{Port: 9000},
+			},
+			baseAPIs: []string{"inference"},
+			wantAPIs: []string{"inference"},
+			wantPort: 9000,
+		},
+		{
+			name: "both disabled APIs and port applied together",
+			spec: v1alpha2.LlamaStackDistributionSpec{
+				Disabled:   []string{"telemetry"},
+				Networking: &v1alpha2.NetworkingSpec{Port: 8321},
+			},
+			baseAPIs: []string{"inference", "telemetry"},
+			wantAPIs: []string{"inference"},
+			wantPort: 8321,
+		},
+		{
+			name:     "no-op when nothing is specified",
+			spec:     v1alpha2.LlamaStackDistributionSpec{},
+			baseAPIs: []string{"inference", "safety"},
+			wantAPIs: []string{"inference", "safety"},
+			wantPort: nil,
+		},
+		{
+			name: "zero port is ignored",
+			spec: v1alpha2.LlamaStackDistributionSpec{
+				Networking: &v1alpha2.NetworkingSpec{Port: 0},
+			},
+			baseAPIs: []string{"inference"},
+			wantAPIs: []string{"inference"},
+			wantPort: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &BaseConfig{
+				Version: 2,
+				APIs:    append([]string{}, tt.baseAPIs...),
+				Providers: map[string]interface{}{
+					"inference": []interface{}{},
+					"safety":    []interface{}{},
+					"agents":    []interface{}{},
+					"telemetry": []interface{}{},
+				},
+			}
+
+			applyNetworkingOverrides(&tt.spec, config)
+			assert.Equal(t, tt.wantAPIs, config.APIs)
+
+			if tt.wantPort != nil {
+				require.NotNil(t, config.Server)
+				assert.Equal(t, tt.wantPort, config.Server["port"])
+			} else if config.Server != nil {
+				_, hasPort := config.Server["port"]
+				assert.False(t, hasPort, "port should not be set")
+			}
+		})
+	}
+}
+
 func TestEmbeddingProviderPreservedAfterMerge(t *testing.T) {
 	distImages := map[string]string{
 		"starter": "quay.io/llamastack/distribution-starter:latest",

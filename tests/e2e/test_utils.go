@@ -284,7 +284,7 @@ func GetSampleCRForDistribution(t *testing.T, distType string) *v1alpha1.LlamaSt
 	require.NoError(t, err)
 
 	// Construct the path to the sample file
-	samplePath := filepath.Join(projectRoot, "config", "samples", "_v1alpha1_llamastackdistribution.yaml")
+	samplePath := filepath.Join(projectRoot, "config", "samples", "v1alpha1", "llamastackdistribution.yaml")
 
 	// Read the sample file
 	yamlFile, err := os.ReadFile(samplePath)
@@ -313,7 +313,7 @@ func GetV1Alpha2SampleCR(t *testing.T) *v1alpha2.LlamaStackDistribution {
 	projectRoot, err := filepath.Abs("../..")
 	require.NoError(t, err)
 
-	samplePath := filepath.Join(projectRoot, "config", "samples", "_v1alpha2_llamastackdistribution.yaml")
+	samplePath := filepath.Join(projectRoot, "config", "samples", "v1alpha2", "llamastackdistribution.yaml")
 	yamlFile, err := os.ReadFile(samplePath)
 	require.NoError(t, err)
 

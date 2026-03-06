@@ -1,0 +1,45 @@
+# vLLM inference with PostgreSQL storage and pgvector for RAG.
+# Prerequisites:
+#   - A vLLM server serving llama3.2-8b (e.g. via KServe or a Deployment)
+#   - A PostgreSQL instance with pgvector extension
+#   - Secrets: vllm-api-key (key: api-key), pg-credentials (key: dsn)
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: llamastack-vllm-pg
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      provider: vllm
+      endpoint: http://vllm-service.vllm.svc.cluster.local:8000/v1
+      apiKey:
+        name: vllm-api-key
+        key: api-key
+    vectorIo:
+      provider: pgvector
+      settings:
+        host: postgres-service.postgres.svc.cluster.local
+        port: 5432
+        db: llamastack
+  resources:
+    models:
+      - name: llama3.2-8b
+  storage:
+    kv:
+      type: redis
+      endpoint: redis://redis-service.redis.svc.cluster.local:6379
+    sql:
+      type: postgres
+      connectionString:
+        name: pg-credentials
+        key: dsn
+  disabled:
+    - safety
+  workload:
+    replicas: 2
+    resources:
+      requests:
+        cpu: "1"
+        memory: "2Gi"

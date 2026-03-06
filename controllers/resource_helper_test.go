@@ -68,14 +68,14 @@ func TestBuildContainerSpec(t *testing.T) {
 					Name:      "lls-storage",
 					MountPath: llamav1alpha1.DefaultMountPath,
 				}},
-			Env: []corev1.EnvVar{
-				{Name: "HF_HOME", Value: "/.llama"},
-				{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+				Env: []corev1.EnvVar{
+					{Name: "HF_HOME", Value: "/.llama"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+				},
 			},
 		},
-	},
-	{
-		name: "custom container values",
+		{
+			name: "custom container values",
 			instance: &llamav1alpha1.LlamaStackDistribution{
 				Spec: llamav1alpha1.LlamaStackDistributionSpec{
 					Server: llamav1alpha1.ServerSpec{
@@ -114,11 +114,11 @@ func TestBuildContainerSpec(t *testing.T) {
 						corev1.ResourceMemory: resource.MustParse("2Gi"),
 					},
 				},
-			Env: []corev1.EnvVar{
-				{Name: "HF_HOME", Value: "/custom/path"},
-				{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
-				{Name: "TEST_ENV", Value: "test-value"},
-			},
+				Env: []corev1.EnvVar{
+					{Name: "HF_HOME", Value: "/custom/path"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+					{Name: "TEST_ENV", Value: "test-value"},
+				},
 				VolumeMounts: []corev1.VolumeMount{{
 					Name:      "lls-storage",
 					MountPath: "/custom/path",
@@ -156,14 +156,14 @@ func TestBuildContainerSpec(t *testing.T) {
 					Name:      "lls-storage",
 					MountPath: llamav1alpha1.DefaultMountPath,
 				}},
-			Env: []corev1.EnvVar{
-				{Name: "HF_HOME", Value: "/.llama"},
-				{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+				Env: []corev1.EnvVar{
+					{Name: "HF_HOME", Value: "/.llama"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+				},
 			},
 		},
-	},
-	{
-		name: "uvicorn workers configured",
+		{
+			name: "uvicorn workers configured",
 			instance: &llamav1alpha1.LlamaStackDistribution{
 				Spec: llamav1alpha1.LlamaStackDistributionSpec{
 					Server: llamav1alpha1.ServerSpec{
@@ -187,15 +187,15 @@ func TestBuildContainerSpec(t *testing.T) {
 				},
 				Ports:        []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
 				StartupProbe: newDefaultStartupProbe(llamav1alpha1.DefaultServerPort),
-			Env: []corev1.EnvVar{
-				{Name: "HF_HOME", Value: "/.llama"},
-				{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+				Env: []corev1.EnvVar{
+					{Name: "HF_HOME", Value: "/.llama"},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+				},
+				VolumeMounts: []corev1.VolumeMount{{
+					Name:      "lls-storage",
+					MountPath: llamav1alpha1.DefaultMountPath,
+				}},
 			},
-			VolumeMounts: []corev1.VolumeMount{{
-				Name:      "lls-storage",
-				MountPath: llamav1alpha1.DefaultMountPath,
-			}},
-		},
 		},
 		{
 			name: "with user config",
@@ -223,20 +223,20 @@ func TestBuildContainerSpec(t *testing.T) {
 						corev1.ResourceMemory: llamav1alpha1.DefaultServerMemoryRequest,
 					},
 				},
-			Ports:        []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
-			StartupProbe: newDefaultStartupProbe(llamav1alpha1.DefaultServerPort),
-			Env: []corev1.EnvVar{
-				{Name: "HF_HOME", Value: llamav1alpha1.DefaultMountPath},
-				{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
-				{Name: "RUN_CONFIG_PATH", Value: "/etc/llama-stack/config.yaml"},
-			},
-			VolumeMounts: []corev1.VolumeMount{
-				{
-					Name:      "lls-storage",
-					MountPath: llamav1alpha1.DefaultMountPath,
+				Ports:        []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
+				StartupProbe: newDefaultStartupProbe(llamav1alpha1.DefaultServerPort),
+				Env: []corev1.EnvVar{
+					{Name: "HF_HOME", Value: llamav1alpha1.DefaultMountPath},
+					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+					{Name: "RUN_CONFIG_PATH", Value: "/etc/llama-stack/config.yaml"},
 				},
-				{
-					Name:      "user-config",
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "lls-storage",
+						MountPath: llamav1alpha1.DefaultMountPath,
+					},
+					{
+						Name:      "user-config",
 						MountPath: "/etc/llama-stack/",
 						ReadOnly:  true,
 					},

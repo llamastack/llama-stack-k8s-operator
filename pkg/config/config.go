@@ -92,7 +92,7 @@ func expandSpecOverBase(spec *v1alpha2.LlamaStackDistributionSpec, base *BaseCon
 		mergedConfig = mergeProviders(mergedConfig, userProviders)
 	}
 	if providerCount == 0 {
-		providerCount = countBaseProviders(mergedConfig)
+		providerCount = CountProviders(mergedConfig)
 	}
 
 	resourceCount, err := applyResources(spec, mergedConfig, userProviders, base)
@@ -138,18 +138,13 @@ func applyNetworkingOverrides(spec *v1alpha2.LlamaStackDistributionSpec, config 
 	}
 }
 
-// overrideServerPort sets server.port in the config's Extra map so the
-// llama-stack server listens on the port specified in the CR.
+// overrideServerPort sets server.port so the llama-stack server listens on the
+// port specified in the CR.
 func overrideServerPort(config *BaseConfig, port int) {
-	if config.Extra == nil {
-		config.Extra = make(map[string]interface{})
+	if config.Server == nil {
+		config.Server = make(map[string]interface{})
 	}
-	serverSection, ok := config.Extra["server"].(map[string]interface{})
-	if !ok {
-		serverSection = make(map[string]interface{})
-	}
-	serverSection["port"] = port
-	config.Extra["server"] = serverSection
+	config.Server["port"] = port
 }
 
 // mergeProviders merges user-specified providers into the base config by
@@ -192,9 +187,8 @@ func mergeProviders(base *BaseConfig, userProviders map[string][]ProviderEntry) 
 	return base
 }
 
-
-// countBaseProviders counts the total number of providers in the base config.
-func countBaseProviders(config *BaseConfig) int {
+// CountProviders counts the total number of providers in the config.
+func CountProviders(config *BaseConfig) int {
 	count := 0
 	for _, v := range config.Providers {
 		if list, ok := v.([]interface{}); ok {
