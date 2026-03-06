@@ -60,7 +60,7 @@ spec:
       - name: INFERENCE_MODEL
         value: "llama3.2:1b"
       - name: OLLAMA_URL
-        value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
+        value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434/v1"
     userConfig:
       configMapName: llama-stack-config
       # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR

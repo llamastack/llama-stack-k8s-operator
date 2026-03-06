@@ -23,6 +23,7 @@ import (
 	"os"
 
 	llamaxk8siov1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	llamaxk8siov1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 	"github.com/llamastack/llama-stack-k8s-operator/controllers"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"go.uber.org/zap/zapcore"
@@ -55,6 +56,7 @@ func init() { //nolint:gochecknoinits
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(llamaxk8siov1alpha1.AddToScheme(scheme))
+	utilruntime.Must(llamaxk8siov1alpha2.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -154,6 +156,11 @@ func main() {
 
 	if err := setupReconciler(ctx, setupClient, mgr, clusterInfo); err != nil {
 		setupLog.Error(err, "failed to set up reconciler")
+		os.Exit(1)
+	}
+
+	if err := llamaxk8siov1alpha2.SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "failed to set up webhooks")
 		os.Exit(1)
 	}
 

@@ -169,44 +169,83 @@ func getCABundleConfigMapNamespaceStandalone(llsd *llamav1alpha1.LlamaStackDistr
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.12.2/pkg/reconcile
 func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	// Create a logger with request-specific values and store it in the context.
-	// This ensures consistent logging across the reconciliation process and its sub-functions.
-	// The logger is retrieved from the context in each sub-function that needs it, maintaining
-	// the request-specific values throughout the call chain.
-	// Always ensure the name of the CR and the namespace are included in the logger.
 	logger := log.FromContext(ctx).WithValues("namespace", req.Namespace, "name", req.Name)
 	ctx = logr.NewContext(ctx, logger)
 
-	// Fetch the LlamaStack instance
 	instance, err := r.fetchInstance(ctx, req.NamespacedName)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-
 	if instance == nil {
 		logger.V(1).Info("LlamaStackDistribution resource not found, skipping reconciliation")
 		return ctrl.Result{}, nil
 	}
 
-	// Reconcile all resources, storing the error for later.
-	reconcileErr := r.reconcileResources(ctx, instance)
+	return r.reconcileInstance(ctx, req.NamespacedName, instance)
+}
 
-	// Update the status, passing in any reconciliation error.
-	if statusUpdateErr := r.updateStatus(ctx, instance, reconcileErr); statusUpdateErr != nil {
-		// Log the status update error, but prioritize the reconciliation error for return.
-		logger.Error(statusUpdateErr, "failed to update status")
-		if reconcileErr != nil {
-			return ctrl.Result{}, reconcileErr
-		}
-		return ctrl.Result{}, statusUpdateErr
+// reconcileInstance performs the full reconciliation for a fetched LlamaStackDistribution.
+func (r *LlamaStackDistributionReconciler) reconcileInstance(
+	ctx context.Context,
+	key types.NamespacedName,
+	instance *llamav1alpha1.LlamaStackDistribution,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Handle v1alpha2 native config generation before standard reconciliation.
+	v1a2Result, v1a2Err := r.handleV1Alpha2NativeConfig(ctx, key, instance)
+	if v1a2Err != nil {
+		logger.Error(v1a2Err, "failed to handle v1alpha2 native config")
 	}
 
-	// If reconciliation failed, return the error to trigger a requeue.
+	// Reconcile all resources, storing the error for later.
+	reconcileErr := r.reconcileResources(ctx, instance)
+	if reconcileErr == nil && v1a2Err != nil {
+		reconcileErr = v1a2Err
+	}
+
+	return r.finalizeReconciliation(ctx, key, instance, v1a2Result, reconcileErr)
+}
+
+// finalizeReconciliation handles status updates and determines the reconciliation result.
+// For v1alpha2 CRs with generated config, it uses a single v1alpha2 status update
+// to avoid an infinite loop caused by dual v1alpha1/v1alpha2 status updates
+// (the v1alpha1 update erases v1alpha2-specific fields, then the v1alpha2 update
+// restores them, triggering another reconciliation).
+func (r *LlamaStackDistributionReconciler) finalizeReconciliation(
+	ctx context.Context,
+	key types.NamespacedName,
+	instance *llamav1alpha1.LlamaStackDistribution,
+	v1a2Result *v1alpha2ConfigResult,
+	reconcileErr error,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	if v1a2Result != nil {
+		if err := r.computeStatus(ctx, instance, reconcileErr); err != nil {
+			logger.Error(err, "failed to compute status")
+			if reconcileErr != nil {
+				return ctrl.Result{}, reconcileErr
+			}
+			return ctrl.Result{}, err
+		}
+		if err := r.persistV1Alpha2Status(ctx, key, instance, v1a2Result); err != nil {
+			logger.Error(err, "failed to update v1alpha2 status")
+		}
+	} else {
+		if statusUpdateErr := r.updateStatus(ctx, instance, reconcileErr); statusUpdateErr != nil {
+			logger.Error(statusUpdateErr, "failed to update status")
+			if reconcileErr != nil {
+				return ctrl.Result{}, reconcileErr
+			}
+			return ctrl.Result{}, statusUpdateErr
+		}
+	}
+
 	if reconcileErr != nil {
 		return ctrl.Result{}, reconcileErr
 	}
 
-	// Check if requeue is needed based on phase
 	if instance.Status.Phase == llamav1alpha1.LlamaStackDistributionPhaseInitializing {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
@@ -1111,7 +1150,10 @@ func (r *LlamaStackDistributionReconciler) getVersionInfo(ctx context.Context, i
 }
 
 // updateStatus refreshes the LlamaStack status.
-func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, reconcileErr error) error {
+// computeStatus computes all status fields on the in-memory v1alpha1 instance
+// without persisting to the API server. This allows the caller to choose
+// whether to persist via v1alpha1 or v1alpha2 API.
+func (r *LlamaStackDistributionReconciler) computeStatus(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, reconcileErr error) error {
 	logger := log.FromContext(ctx)
 	instance.Status.Version.OperatorVersion = os.Getenv("OPERATOR_VERSION")
 	// A reconciliation error is the highest priority. It overrides all other status checks.
@@ -1157,12 +1199,19 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 		}
 	}
 
-	// Always update the status at the end of the function.
 	instance.Status.Version.LastUpdated = metav1.NewTime(metav1.Now().UTC())
+	return nil
+}
+
+// updateStatus computes and persists the v1alpha1 status. Used for v1alpha1 CRs
+// where there are no v1alpha2-specific status fields to preserve.
+func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, reconcileErr error) error {
+	if err := r.computeStatus(ctx, instance, reconcileErr); err != nil {
+		return err
+	}
 	if err := r.Status().Update(ctx, instance); err != nil {
 		return fmt.Errorf("failed to update status: %w", err)
 	}
-
 	return nil
 }
 

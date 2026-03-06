@@ -1,0 +1,43 @@
+# High-availability configuration: multiple replicas, autoscaling, PDB, and
+# topology spread constraints.
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: llamastack-ha
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      provider: ollama
+      endpoint: http://ollama-server-service.ollama-dist.svc.cluster.local:11434/v1
+  resources:
+    models:
+      - name: "llama3.2:1b"
+  workload:
+    replicas: 3
+    workers: 2
+    resources:
+      requests:
+        cpu: "2"
+        memory: "4Gi"
+      limits:
+        cpu: "4"
+        memory: "8Gi"
+    storage:
+      size: "20Gi"
+      mountPath: "/home/lls/.lls"
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 75
+      targetMemoryUtilizationPercentage: 70
+    podDisruptionBudget:
+      minAvailable: 1
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/instance: llamastack-ha

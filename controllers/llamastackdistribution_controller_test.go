@@ -10,6 +10,7 @@ import (
 	"time"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	llamav1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 	controllers "github.com/llamastack/llama-stack-k8s-operator/controllers"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/stretchr/testify/require"
@@ -981,4 +982,162 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 		deployment, func() bool {
 			return deployment.Spec.Template.Spec.Containers[0].Image == "quay.io/custom/llama-stack:starter"
 		}, "Deployment should be updated with new image")
+}
+
+func TestV1Alpha2SecretRefValidation(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-v1alpha2-secret-ref")
+	operatorNamespace := createTestNamespace(t, "test-v1alpha2-secret-op")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	// Create operator config ConfigMap (required by NewLlamaStackDistributionReconciler)
+	opConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+
+	// Create a v1alpha2 CR with a provider that references a non-existent secret
+	providerJSON := []byte(`{"provider":"ollama","endpoint":"http://ollama:11434/v1","apiKey":{"name":"nonexistent-secret","key":"api-key"}}`)
+	v2Instance := &llamav1alpha2.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret-ref",
+			Namespace: namespace.Name,
+		},
+		Spec: llamav1alpha2.LlamaStackDistributionSpec{
+			Distribution: llamav1alpha2.DistributionSpec{
+				Name: "starter",
+			},
+			Providers: &llamav1alpha2.ProvidersSpec{
+				Inference: &apiextensionsv1.JSON{Raw: providerJSON},
+			},
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), v2Instance))
+
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"starter": testImage},
+	}
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+		t.Context(), k8sClient, scheme.Scheme, clusterInfo,
+	)
+	require.NoError(t, err)
+
+	// Reconciliation should fail because the secret doesn't exist
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: v2Instance.Name, Namespace: namespace.Name},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nonexistent-secret",
+		"error should mention the missing secret name")
+}
+
+func TestV1Alpha2ConfigMapRefValidation(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-v1alpha2-cm-ref")
+	operatorNamespace := createTestNamespace(t, "test-v1alpha2-cm-op")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	opConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+
+	// Create a v1alpha2 CR with providers (so it takes the generated path)
+	// and a caBundle referencing a non-existent ConfigMap.
+	providerJSON := []byte(`{"provider":"ollama","endpoint":"http://ollama:11434/v1"}`)
+	v2Instance := &llamav1alpha2.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-cm-ref",
+			Namespace: namespace.Name,
+		},
+		Spec: llamav1alpha2.LlamaStackDistributionSpec{
+			Distribution: llamav1alpha2.DistributionSpec{
+				Name: "starter",
+			},
+			Providers: &llamav1alpha2.ProvidersSpec{
+				Inference: &apiextensionsv1.JSON{Raw: providerJSON},
+			},
+			Networking: &llamav1alpha2.NetworkingSpec{
+				TLS: &llamav1alpha2.TLSSpec{
+					CABundle: &llamav1alpha2.CABundleConfig{
+						ConfigMapName: "nonexistent-ca-bundle",
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), v2Instance))
+
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"starter": testImage},
+	}
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+		t.Context(), k8sClient, scheme.Scheme, clusterInfo,
+	)
+	require.NoError(t, err)
+
+	// Reconciliation should fail because the CA bundle ConfigMap doesn't exist
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: v2Instance.Name, Namespace: namespace.Name},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nonexistent-ca-bundle",
+		"error should mention the missing CA bundle ConfigMap name")
+}
+
+func TestV1Alpha2ProviderRefValidation(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-v1alpha2-prov-ref")
+	operatorNamespace := createTestNamespace(t, "test-v1alpha2-prov-op")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	opConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+
+	// Create a v1alpha2 CR where a model references a provider ID that doesn't exist
+	providerJSON := []byte(`{"provider":"ollama","endpoint":"http://ollama:11434/v1"}`)
+	modelJSON := []byte(`{"name":"llama3.2:1b","provider":"nonexistent-provider"}`)
+	v2Instance := &llamav1alpha2.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-prov-ref",
+			Namespace: namespace.Name,
+		},
+		Spec: llamav1alpha2.LlamaStackDistributionSpec{
+			Distribution: llamav1alpha2.DistributionSpec{
+				Name: "starter",
+			},
+			Providers: &llamav1alpha2.ProvidersSpec{
+				Inference: &apiextensionsv1.JSON{Raw: providerJSON},
+			},
+			Resources: &llamav1alpha2.ResourcesSpec{
+				Models: []apiextensionsv1.JSON{{Raw: modelJSON}},
+			},
+		},
+	}
+
+	// The validating webhook catches invalid provider references at admission
+	// time, so Create itself should be rejected.
+	err := k8sClient.Create(t.Context(), v2Instance)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nonexistent-provider",
+		"webhook should reject the CR with an invalid provider reference")
 }

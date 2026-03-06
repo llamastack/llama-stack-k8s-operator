@@ -3,7 +3,7 @@ kind: Kustomization
 
 ## Append samples you want in your CSV to this file as resources ##
 resources:
-- _v1alpha1_llamastackdistribution.yaml
-- example-with-configmap.yaml
-- example-with-ca-bundle.yaml
-- example-with-network-config.yaml
+- v1alpha1/llamastackdistribution.yaml
+- v1alpha1/example-with-configmap.yaml
+- v1alpha1/example-with-ca-bundle.yaml
+- v1alpha1/example-with-network-config.yaml

@@ -68,51 +68,6 @@ func getManagedCABundleConfigMapName(instance *llamav1alpha1.LlamaStackDistribut
 	return instance.Name + ManagedCABundleConfigMapSuffix
 }
 
-// startupScript is the script that will be used to start the server.
-var startupScript = `
-set -e
-
-# Determine which CLI to use based on llama-stack version
-VERSION_CODE=$(python -c "
-import sys
-from importlib.metadata import version
-from packaging import version as pkg_version
-
-try:
-    llama_version = version('llama_stack')
-    print(f'Detected llama-stack version: {llama_version}', file=sys.stderr)
-
-    v = pkg_version.parse(llama_version)
-    # Use base_version to ignore pre-release/post-release/dev suffixes
-    # This ensures that 0.3.0rc2, 0.3.0alpha1, etc. are treated as 0.3.0
-    base_v = pkg_version.parse(v.base_version)
-
-    if base_v < pkg_version.parse('0.2.17'):
-        print('Using legacy module path (llama_stack.distribution.server.server)', file=sys.stderr)
-        print(0)
-    elif base_v < pkg_version.parse('0.3.0'):
-        print('Using core module path (llama_stack.core.server.server)', file=sys.stderr)
-        print(1)
-    else:
-        print('Using uvicorn CLI command', file=sys.stderr)
-        print(2)
-except Exception as e:
-    print(f'Version detection failed, defaulting to new CLI: {e}', file=sys.stderr)
-    print(2)
-")
-
-PORT=${LLS_PORT:-8321}
-WORKERS=${LLS_WORKERS:-1}
-
-# Execute the appropriate CLI based on version
-case $VERSION_CODE in
-    0) python3 -m llama_stack.distribution.server.server --config /etc/llama-stack/config.yaml ;;
-    1) python3 -m llama_stack.core.server.server /etc/llama-stack/config.yaml ;;
-    2) exec uvicorn llama_stack.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
-    *) echo "Invalid version code: $VERSION_CODE, using uvicorn CLI command"; \
-       exec uvicorn llama_stack.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
-esac`
-
 const llamaStackConfigPath = "/etc/llama-stack/config.yaml"
 
 // validateConfigMapKeys validates that all ConfigMap keys contain only safe characters.
@@ -263,7 +218,6 @@ func getEffectiveWorkers(instance *llamav1alpha1.LlamaStackDistribution) (int32,
 // configureContainerEnvironment sets up environment variables for the container.
 func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
 	mountPath := getMountPath(instance)
-	workers, _ := getEffectiveWorkers(instance)
 
 	// Add HF_HOME variable to our mount path so that downloaded models and datasets are stored
 	// on the same volume as the storage. This is not critical but useful if the server is
@@ -284,21 +238,23 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 		})
 	}
 
-	// Always provide worker/port/config env for uvicorn; workers default to 1 when unspecified.
 	container.Env = append(container.Env,
-		corev1.EnvVar{
-			Name:  "LLS_WORKERS",
-			Value: strconv.Itoa(int(workers)),
-		},
-		corev1.EnvVar{
-			Name:  "LLS_PORT",
-			Value: strconv.Itoa(int(getContainerPort(instance))),
-		},
 		corev1.EnvVar{
 			Name:  "LLAMA_STACK_CONFIG",
 			Value: llamaStackConfigPath,
 		},
 	)
+
+	// When a UserConfig ConfigMap is mounted, set RUN_CONFIG_PATH so the
+	// image's built-in entrypoint uses `llama stack run <config>` instead of
+	// the default distribution startup. This keeps a single startup code path
+	// regardless of whether the config is operator-generated or user-provided.
+	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != "" {
+		container.Env = append(container.Env, corev1.EnvVar{
+			Name:  "RUN_CONFIG_PATH",
+			Value: llamaStackConfigPath,
+		})
+	}
 
 	// Finally, add the user provided env vars
 	container.Env = append(container.Env, instance.Spec.Server.ContainerSpec.Env...)
@@ -334,18 +290,10 @@ func hasAnyCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, in
 }
 
 // configureContainerCommands sets up container commands and args.
+// The image's built-in entrypoint is used by default; RUN_CONFIG_PATH env var
+// controls whether it loads a custom config. User-specified command/args in
+// the CR take precedence over the image entrypoint.
 func configureContainerCommands(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
-	// Override the container entrypoint to use the custom config file if user config is specified
-	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != "" {
-		// Override the container entrypoint to use the custom config file instead of the default
-		// template. The script will determine the llama-stack version and use the appropriate module
-		// path to start the server.
-
-		container.Command = []string{"/bin/sh", "-c", startupScript}
-		container.Args = []string{}
-	}
-
-	// Apply user-specified command and args (takes precedence)
 	if len(instance.Spec.Server.ContainerSpec.Command) > 0 {
 		container.Command = instance.Spec.Server.ContainerSpec.Command
 	}
