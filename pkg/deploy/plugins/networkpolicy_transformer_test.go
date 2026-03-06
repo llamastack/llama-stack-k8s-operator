@@ -52,28 +52,27 @@ func TestNetworkPolicyTransformer_Default(t *testing.T) {
 		InstanceName:      "test-instance",
 		ServicePort:       8321,
 		OperatorNamespace: "operator-ns",
-		NetworkSpec:       nil, // No network spec
+		NetworkSpec:       nil,
 	})
 
 	err = transformer.Transform(rm)
 	require.NoError(t, err)
 
-	// Verify the NetworkPolicy was transformed
 	transformedRes := rm.Resources()[0]
 	yamlBytes, err := transformedRes.AsYAML()
 	require.NoError(t, err)
 
 	yamlStr := string(yamlBytes)
 
-	// Should have pod selector with instance name
 	assert.Contains(t, yamlStr, "app.kubernetes.io/instance: test-instance")
-
-	// Should have ingress rules with default peers
 	assert.Contains(t, yamlStr, "app.kubernetes.io/part-of: llama-stack")
 	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
-
-	// Should have port rule
 	assert.Contains(t, yamlStr, "port: 8321")
+
+	// Without AllowedTo, egress should be unrestricted (no Egress policyType, no egress rules)
+	assert.NotContains(t, yamlStr, "Egress")
+	assert.NotContains(t, yamlStr, "k8s-app: kube-dns")
+	assert.NotContains(t, yamlStr, "cidr:")
 }
 
 func TestNetworkPolicyTransformer_AllNamespaces(t *testing.T) {
@@ -104,10 +103,7 @@ func TestNetworkPolicyTransformer_AllNamespaces(t *testing.T) {
 
 	yamlStr := string(yamlBytes)
 
-	// Should have empty namespace selector (all namespaces)
 	assert.Contains(t, yamlStr, "namespaceSelector: {}")
-
-	// Should NOT have the operator namespace selector (since all are allowed)
 	assert.NotContains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
 }
 
@@ -139,11 +135,8 @@ func TestNetworkPolicyTransformer_ExplicitNamespaces(t *testing.T) {
 
 	yamlStr := string(yamlBytes)
 
-	// Should have explicit namespace selectors
 	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: ns-a")
 	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: ns-b")
-
-	// Should also have operator namespace
 	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
 }
 
@@ -175,7 +168,6 @@ func TestNetworkPolicyTransformer_LabelSelectors(t *testing.T) {
 
 	yamlStr := string(yamlBytes)
 
-	// Should have label selectors with Exists operator
 	assert.Contains(t, yamlStr, "key: myproject/lls-allowed")
 	assert.Contains(t, yamlStr, "key: team/authorized")
 	assert.Contains(t, yamlStr, "operator: Exists")
@@ -205,7 +197,6 @@ func TestNetworkPolicyTransformer_CustomPort(t *testing.T) {
 
 	yamlStr := string(yamlBytes)
 
-	// Should have custom port
 	assert.Contains(t, yamlStr, "port: 9000")
 }
 
@@ -235,7 +226,6 @@ func TestNetworkPolicyTransformer_RouterPeersWhenNetworkSpecProvided(t *testing.
 
 	yamlStr := string(yamlBytes)
 
-	// Should have OpenShift router namespace selector when network spec is provided
 	assert.Contains(t, yamlStr, "network.openshift.io/policy-group: ingress")
 }
 
@@ -263,6 +253,87 @@ func TestNetworkPolicyTransformer_NoRouterPeersWhenNetworkSpecNil(t *testing.T) 
 
 	yamlStr := string(yamlBytes)
 
-	// Should NOT have OpenShift router namespace selector when network spec is nil
 	assert.NotContains(t, yamlStr, "network.openshift.io/policy-group: ingress")
+}
+
+func TestNetworkPolicyTransformer_AllowedTo(t *testing.T) {
+	rf := resource.NewFactory(nil)
+	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
+	require.NoError(t, err)
+
+	rm := resmap.New()
+	require.NoError(t, rm.Append(res))
+
+	ollamaPort := int32(11434)
+	transformer := CreateNetworkPolicyTransformer(NetworkPolicyTransformerConfig{
+		InstanceName:      "test-instance",
+		ServicePort:       8321,
+		OperatorNamespace: "operator-ns",
+		APIServerHost:     "10.96.0.1",
+		APIServerPort:     443,
+		NetworkSpec: &llamav1alpha1.NetworkSpec{
+			AllowedTo: []llamav1alpha1.EgressRule{
+				{Namespace: "ollama-dist", Port: &ollamaPort},
+			},
+		},
+	})
+
+	err = transformer.Transform(rm)
+	require.NoError(t, err)
+
+	transformedRes := rm.Resources()[0]
+	yamlBytes, err := transformedRes.AsYAML()
+	require.NoError(t, err)
+
+	yamlStr := string(yamlBytes)
+
+	// Egress policyType should be added
+	assert.Contains(t, yamlStr, "Egress")
+
+	// DNS egress rules
+	assert.Contains(t, yamlStr, "k8s-app: kube-dns")
+	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: kube-system")
+	assert.Contains(t, yamlStr, "port: 53")
+
+	// API server egress rule
+	assert.Contains(t, yamlStr, "cidr: 10.96.0.1/32")
+	assert.Contains(t, yamlStr, "port: 443")
+
+	// User-specified destination
+	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: ollama-dist")
+	assert.Contains(t, yamlStr, "port: 11434")
+}
+
+func TestNetworkPolicyTransformer_AllowedToWithoutPort(t *testing.T) {
+	rf := resource.NewFactory(nil)
+	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
+	require.NoError(t, err)
+
+	rm := resmap.New()
+	require.NoError(t, rm.Append(res))
+
+	transformer := CreateNetworkPolicyTransformer(NetworkPolicyTransformerConfig{
+		InstanceName:      "test-instance",
+		ServicePort:       8321,
+		OperatorNamespace: "operator-ns",
+		APIServerHost:     "10.96.0.1",
+		APIServerPort:     443,
+		NetworkSpec: &llamav1alpha1.NetworkSpec{
+			AllowedTo: []llamav1alpha1.EgressRule{
+				{Namespace: "model-serving"},
+			},
+		},
+	})
+
+	err = transformer.Transform(rm)
+	require.NoError(t, err)
+
+	transformedRes := rm.Resources()[0]
+	yamlBytes, err := transformedRes.AsYAML()
+	require.NoError(t, err)
+
+	yamlStr := string(yamlBytes)
+
+	assert.Contains(t, yamlStr, "Egress")
+	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: model-serving")
 }

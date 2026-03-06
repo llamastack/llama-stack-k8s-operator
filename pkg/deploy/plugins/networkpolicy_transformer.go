@@ -28,6 +28,7 @@ import (
 
 const (
 	networkPolicyKind = "NetworkPolicy"
+	dnsPort           = 53
 	// AllNamespacesSelector is the special value to allow all namespaces.
 	AllNamespacesSelector = "*"
 	// Allow traffic from OpenShift router namespaces.
@@ -43,6 +44,10 @@ type NetworkPolicyTransformerConfig struct {
 	ServicePort int32
 	// OperatorNamespace is the namespace where the operator is running.
 	OperatorNamespace string
+	// APIServerHost is the Kubernetes API server ClusterIP.
+	APIServerHost string
+	// APIServerPort is the Kubernetes API server port.
+	APIServerPort int32
 	// NetworkSpec is the network configuration from the CR spec.
 	NetworkSpec *llamav1alpha1.NetworkSpec
 }
@@ -91,9 +96,14 @@ func (t *networkPolicyTransformer) transformNetworkPolicy(res *resource.Resource
 		return err
 	}
 
-	// Build and set ingress rules
 	ingressRules := t.buildIngressRules()
 	spec["ingress"] = ingressRules
+
+	if t.hasEgressConfig() {
+		policyTypes, _ := spec["policyTypes"].([]any)
+		spec["policyTypes"] = append(policyTypes, "Egress")
+		spec["egress"] = t.buildEgressRules()
+	}
 
 	return updateResource(res, data)
 }
@@ -262,4 +272,79 @@ func (t *networkPolicyTransformer) buildRouterPeers() []any {
 // Config implements the resmap.TransformerPlugin interface.
 func (t *networkPolicyTransformer) Config(_ *resmap.PluginHelpers, _ []byte) error {
 	return nil
+}
+
+func (t *networkPolicyTransformer) hasEgressConfig() bool {
+	return t.config.NetworkSpec != nil && len(t.config.NetworkSpec.AllowedTo) > 0
+}
+
+func (t *networkPolicyTransformer) buildEgressRules() []any {
+	numDestinations := len(t.config.NetworkSpec.AllowedTo)
+	rules := make([]any, 0, 2+numDestinations)
+	rules = append(rules,
+		map[string]any{
+			"to": []any{
+				map[string]any{
+					"podSelector": map[string]any{
+						"matchLabels": map[string]any{
+							"k8s-app": "kube-dns"}},
+					"namespaceSelector": map[string]any{
+						"matchLabels": map[string]any{
+							"kubernetes.io/metadata.name": "kube-system",
+						},
+					},
+				},
+			},
+			"ports": []any{
+				map[string]any{
+					"protocol": "TCP",
+					"port":     dnsPort,
+				},
+				map[string]any{
+					"protocol": "UDP",
+					"port":     dnsPort,
+				},
+			},
+		},
+		map[string]any{
+			"to": []any{
+				map[string]any{
+					"ipBlock": map[string]any{
+						"cidr": fmt.Sprintf("%s/32", t.config.APIServerHost),
+					},
+				},
+			},
+			"ports": []any{
+				map[string]any{
+					"protocol": "TCP",
+					"port":     t.config.APIServerPort,
+				},
+			},
+		},
+	)
+
+	for _, dest := range t.config.NetworkSpec.AllowedTo {
+		rule := map[string]any{
+			"to": []any{
+				map[string]any{
+					"namespaceSelector": map[string]any{
+						"matchLabels": map[string]any{
+							"kubernetes.io/metadata.name": dest.Namespace,
+						},
+					},
+				},
+			},
+		}
+		if dest.Port != nil {
+			rule["ports"] = []any{
+				map[string]any{
+					"protocol": "TCP",
+					"port":     *dest.Port,
+				},
+			}
+		}
+		rules = append(rules, rule)
+	}
+
+	return rules
 }
