@@ -54,7 +54,7 @@ specs/002-operator-generated-config/
 ├── research.md          # Technical decisions and rationale
 ├── data-model.md        # Entity definitions and relationships
 ├── quickstart.md        # User-facing configuration examples
-├── review_summary.md    # Executive brief
+├── REVIEW.md            # Review guide for spec PR reviewers
 ├── contracts/
 │   ├── config-generation.yaml  # Config generator interface contract
 │   ├── crd-schema.yaml         # CRD schema reference
