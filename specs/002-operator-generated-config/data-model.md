@@ -9,14 +9,14 @@
 LlamaStackDistribution (CR)
 ├── Spec
 │   ├── DistributionSpec          # Image source (name or direct image)
-│   ├── ProvidersSpec             # Provider configuration (polymorphic per API type)
-│   │   ├── Inference             # ProviderConfigOrList
-│   │   ├── Safety                # ProviderConfigOrList
-│   │   ├── VectorIo              # ProviderConfigOrList
-│   │   ├── ToolRuntime           # ProviderConfigOrList
-│   │   └── Telemetry             # ProviderConfigOrList
+│   ├── ProvidersSpec             # Provider configuration (typed slices per API type)
+│   │   ├── Inference             # []ProviderConfig
+│   │   ├── Safety                # []ProviderConfig
+│   │   ├── VectorIo              # []ProviderConfig
+│   │   ├── ToolRuntime           # []ProviderConfig
+│   │   └── Telemetry             # []ProviderConfig
 │   ├── ResourcesSpec             # Registered resources
-│   │   ├── Models                # ModelConfigOrString[]
+│   │   ├── Models                # []ModelConfig
 │   │   ├── Tools                 # string[]
 │   │   └── Shields               # string[]
 │   ├── StorageSpec               # State storage backends
@@ -26,7 +26,7 @@ LlamaStackDistribution (CR)
 │   ├── NetworkingSpec            # Network configuration
 │   │   ├── Port                  # int32
 │   │   ├── TLS                   # TLSSpec
-│   │   ├── Expose                # ExposeConfig (polymorphic)
+│   │   ├── Expose                # ExposeConfig (enabled + hostname)
 │   │   └── AllowedFrom           # AllowedFromSpec
 │   ├── WorkloadSpec              # Deployment settings
 │   │   ├── Replicas              # *int32
@@ -80,32 +80,35 @@ LlamaStackDistribution (CR)
 
 | Field | Type | Required | Default | Validation | Description |
 |-------|------|----------|---------|------------|-------------|
-| `id` | string | Conditional | Auto-generated from `provider` (FR-035) | Required when multiple providers per API type (FR-034) | Unique provider identifier |
+| `id` | string | Conditional | Auto-generated from `provider` (FR-035) | Required when list has >1 element (FR-034, CEL) | Unique provider identifier |
 | `provider` | string | Yes | - | Required | Provider type (e.g., `vllm`, `llama-guard`, `pgvector`) |
 | `endpoint` | string | No | - | URL format | Provider endpoint URL |
 | `apiKey` | *SecretKeyRef | No | - | - | Secret reference for API authentication |
-| `settings` | map[string]interface{} | No | - | Unstructured (escape hatch) | Provider-specific settings merged into config |
+| `secretRefs` | map[string]SecretKeyRef | No | - | - | Named secret references for provider-specific connection fields |
+| `settings` | map[string]interface{} | No | - | Unstructured (escape hatch) | Provider-specific settings merged into config (NO secret resolution) |
 
 **Mapping to config.yaml**:
 - `provider` maps to `provider_type` with `remote::` prefix (FR-030)
 - `endpoint` maps to `config.url` (FR-031)
 - `apiKey` maps to `config.api_key` via env var `${env.LLSD_<PROVIDER_ID>_API_KEY}` (FR-032)
-- `settings.*` merged into `config.*` (FR-033)
+- `secretRefs.<key>` maps to `config.<key>` via env var `${env.LLSD_<PROVIDER_ID>_<KEY>}` (FR-032)
+- `settings.*` merged into `config.*` (FR-033), passed through without secret resolution
 
 ---
 
-### ProviderConfigOrList
+### Provider Lists
 
-**Purpose**: Polymorphic wrapper allowing single provider object or list of providers.
+**Purpose**: Each provider API type field is a typed `[]ProviderConfig` slice. A single provider is expressed as a one-element list. This provides kubebuilder validation, IDE autocompletion, and CEL inspection support.
 
-| Form | Example | ID Requirement |
-|------|---------|----------------|
-| Single object | `inference: {provider: vllm, endpoint: "..."}` | Optional (auto-generated from `provider`) |
-| List | `inference: [{id: primary, provider: vllm, ...}, {id: fallback, ...}]` | Required on each item |
+| Scenario | Example | ID Requirement |
+|----------|---------|----------------|
+| Single provider | `inference: [{provider: vllm, endpoint: "..."}]` | Optional (auto-generated from `provider`) |
+| Multiple providers | `inference: [{id: primary, provider: vllm, ...}, {id: fallback, ...}]` | Required on each item |
 
-**Validation rules**:
-- When list form: each item MUST have explicit `id` (FR-034, CEL)
-- All provider IDs MUST be unique across all API types (FR-072, CEL)
+**Validation rules (CEL)**:
+- When list has >1 element: each item MUST have explicit `id` (FR-034)
+- All provider IDs MUST be unique across all API types (FR-072)
+- No provider type may appear in both `providers` and `disabled` (FR-079d)
 
 ---
 
@@ -130,25 +133,25 @@ LlamaStackDistribution (CR)
 
 | Field | Type | Required | Default | Validation | Description |
 |-------|------|----------|---------|------------|-------------|
-| `models` | []ModelConfigOrString | No | - | - | Models to register |
+| `models` | []ModelConfig | No | - | - | Models to register |
 | `tools` | []string | No | - | - | Tool groups to register |
 | `shields` | []string | No | - | - | Safety shields to register |
 
 ---
 
-### ModelConfig (full form of ModelConfigOrString)
+### ModelConfig
 
-**Purpose**: Detailed model registration with provider assignment.
+**Purpose**: Model registration with optional provider assignment and metadata.
 
 | Field | Type | Required | Default | Validation | Description |
 |-------|------|----------|---------|------------|-------------|
-| `name` | string | Yes | - | - | Model identifier (e.g., `llama3.2-8b`) |
+| `name` | string | Yes | - | kubebuilder Required | Model identifier (e.g., `llama3.2-8b`) |
 | `provider` | string | No | First inference provider | Must reference valid provider ID (webhook) | Provider ID for this model |
 | `contextLength` | int | No | - | - | Model context window size |
 | `modelType` | string | No | - | - | Model type classification |
 | `quantization` | string | No | - | - | Quantization method |
 
-**Polymorphic**: Can be specified as a simple string (just the model name) or a full object. Simple string form uses the first inference provider.
+**Usage**: Always specified as a typed struct. For simple model references, only `name` is required (e.g., `{name: "llama3.2-8b"}`). The first inference provider is used when `provider` is omitted.
 
 ---
 
@@ -197,23 +200,20 @@ LlamaStackDistribution (CR)
 
 ---
 
-### ExposeConfig (polymorphic)
+### ExposeConfig
 
 **Purpose**: Controls external service exposure via Ingress/Route.
 
-| Form | Value | Behavior |
-|------|-------|----------|
-| Boolean true | `expose: true` | Create Ingress/Route with auto-generated hostname |
-| Empty object | `expose: {}` | Treated as `expose: true` |
-| Object with hostname | `expose: {hostname: "llama.example.com"}` | Create Ingress/Route with specified hostname |
-| Not specified / false | `expose: false` or omitted | No external access |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `enabled` | *bool | No | false | Enable external access via Ingress/Route |
+| `hostname` | string | No | auto-generated | Custom hostname for Ingress/Route |
 
-**Go representation**:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `enabled` | *bool | Explicit enable/disable |
-| `hostname` | string | Custom hostname for Ingress/Route |
+**Behavior**:
+- `expose: {enabled: true}`: Create Ingress/Route with auto-generated hostname
+- `expose: {enabled: true, hostname: "llama.example.com"}`: Create with specified hostname
+- `expose: {}`: Treated as enabled with defaults (presence implies intent)
+- Not specified: No external access
 
 ---
 
@@ -411,7 +411,7 @@ ExternalProviders (spec 001) ──► Merged into config ──────┘
 | `PodOverrides` | `WorkloadOverrides` | Rename + expand |
 | `PodDisruptionBudgetSpec` | `WorkloadSpec.PodDisruptionBudget` | Direct move |
 | `TopologySpreadConstraints` | `WorkloadSpec.TopologySpreadConstraints` | Direct move |
-| `NetworkSpec.ExposeRoute` | `NetworkingSpec.Expose` | Bool to polymorphic |
+| `NetworkSpec.ExposeRoute` | `NetworkingSpec.Expose` | Bool to typed struct (enabled + hostname) |
 | `NetworkSpec.AllowedFrom` | `NetworkingSpec.AllowedFrom` | Direct move |
 | *(new)* | `ProvidersSpec` | New in v1alpha2 |
 | *(new)* | `ResourcesSpec` | New in v1alpha2 |

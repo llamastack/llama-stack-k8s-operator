@@ -22,8 +22,8 @@ spec:
     name: starter
   providers:
     inference:
-      provider: vllm
-      endpoint: "http://vllm-service:8000"
+      - provider: vllm
+        endpoint: "http://vllm-service:8000"
 ```
 
 Apply and verify:
@@ -60,12 +60,12 @@ spec:
     name: remote-vllm
   providers:
     inference:
-      provider: vllm
-      endpoint: "https://vllm.example.com"
-      apiKey:
-        secretKeyRef:
-          name: vllm-creds
-          key: token
+      - provider: vllm
+        endpoint: "https://vllm.example.com"
+        apiKey:
+          secretKeyRef:
+            name: vllm-creds
+            key: token
 ```
 
 The operator resolves the secret reference to an environment variable (`LLSD_VLLM_API_KEY`) and injects it into the Deployment. The secret value never appears in the ConfigMap.
@@ -116,7 +116,7 @@ spec:
         endpoint: "http://vllm-secondary:8000"
   resources:
     models:
-      - "llama3.2-8b"                        # Uses first inference provider
+      - name: "llama3.2-8b"                  # Uses first inference provider
       - name: "llama3.2-70b"                 # Uses specified provider
         provider: vllm-secondary
         contextLength: 128000
@@ -127,7 +127,7 @@ spec:
       - llama-guard
 ```
 
-Simple model strings (e.g., `"llama3.2-8b"`) are registered with the first inference provider. Use the object form to assign models to specific providers.
+When `provider` is omitted, models are registered with the first inference provider. Specify `provider` to assign models to specific providers.
 
 ## Example 5: PostgreSQL State Storage
 
@@ -149,8 +149,8 @@ spec:
     name: starter
   providers:
     inference:
-      provider: vllm
-      endpoint: "http://vllm:8000"
+      - provider: vllm
+        endpoint: "http://vllm:8000"
   storage:
     sql:
       type: postgres
@@ -183,11 +183,11 @@ spec:
         apiKey:
           secretKeyRef: {name: vllm-creds, key: token}
     safety:
-      provider: llama-guard
+      - provider: llama-guard
 
   resources:
     models:
-      - "llama3.2-8b"
+      - name: "llama3.2-8b"
     shields:
       - llama-guard
 
@@ -207,6 +207,7 @@ spec:
       enabled: true
       secretName: llama-tls
     expose:
+      enabled: true
       hostname: "llama.example.com"
     allowedFrom:
       namespaces: ["app-ns"]
@@ -274,7 +275,7 @@ kubectl patch llsd my-stack --type merge -p '
 spec:
   providers:
     safety:
-      provider: llama-guard
+      - provider: llama-guard
 '
 
 # Watch the rollout

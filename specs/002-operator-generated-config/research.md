@@ -19,40 +19,46 @@
 
 ## Research Areas
 
-### R1: Polymorphic JSON Parsing in Go CRD Types
+### R1: Provider and Resource Type Design
 
-**Decision**: Use `json.RawMessage` with custom `UnmarshalJSON` methods for polymorphic fields (single object vs list).
+**Decision**: Use typed `[]ProviderConfig` slices for all provider fields. A single provider is expressed as a one-element list. Use `[]ModelConfig` (with only `name` required) for models. No polymorphic types.
 
-**Rationale**: Kubebuilder CRDs cannot natively express "object OR array" in OpenAPI v3 schema. Using `json.RawMessage` allows runtime parsing while keeping the CRD schema flexible via `// +kubebuilder:validation:Type=object` or `apiextensionsv1.JSON`.
+**Rationale** (revised after PR #253 review):
+The original design used `json.RawMessage` / `apiextensionsv1.JSON` for polymorphic fields (single object OR list). PR #253 review revealed this creates several problems:
+1. Kubebuilder validation markers don't apply to opaque JSON fields
+2. CEL rules (FR-071, FR-072) cannot inspect opaque JSON, making provider ID validation impossible at admission time
+3. ~500 lines of parsing code needed (`ParsePolymorphicProvider`, `collectSecretRefsFromProviderField`, etc.)
+4. Heuristic secret detection (`extractDirectSecretRef` matching any map with `name`+`key`) produces false positives
+5. Contradicts constitution §2.1 ("MUST use kubebuilder validation tags")
+
+**Trade-off**: Users write `- provider: vllm` (list syntax) instead of `provider: vllm` (object syntax). This is a one-character YAML difference per provider, versus eliminating all parsing complexity and enabling full CRD validation.
 
 **Alternatives considered**:
-- `apiextensionsv1.JSON` (used in v1alpha1 for `ProviderInfo.Config`): Works but loses schema validation. Good for escape hatches like `settings`, not ideal for structured polymorphic types.
-- Custom OpenAPI schema markers: Too complex for multi-form types. Kubebuilder does not support oneOf natively.
-- Separate fields (`InferenceProvider` + `InferenceProviders`): Verbose, poor UX. Users would need to choose the correct field based on provider count.
+- `json.RawMessage` with custom unmarshaling (original design): Rejected due to above issues
+- `apiextensionsv1.JSON`: Same problems, plus no IDE autocompletion
+- Separate fields (`InferenceProvider` + `InferenceProviders`): Verbose, users must choose correct field
 
 **Implementation pattern**:
 ```go
-type ProviderConfigOrList struct {
-    raw json.RawMessage
+type ProvidersSpec struct {
+    Inference   []ProviderConfig `json:"inference,omitempty"`
+    Safety      []ProviderConfig `json:"safety,omitempty"`
+    VectorIo    []ProviderConfig `json:"vectorIo,omitempty"`
+    ToolRuntime []ProviderConfig `json:"toolRuntime,omitempty"`
+    Telemetry   []ProviderConfig `json:"telemetry,omitempty"`
 }
 
-func (p *ProviderConfigOrList) UnmarshalJSON(data []byte) error {
-    p.raw = data
-    return nil
-}
-
-func (p *ProviderConfigOrList) Resolve() ([]ProviderConfig, error) {
-    // Try single object first, then list
-    var single ProviderConfig
-    if err := json.Unmarshal(p.raw, &single); err == nil {
-        return []ProviderConfig{single}, nil
-    }
-    var list []ProviderConfig
-    return list, json.Unmarshal(p.raw, &list)
+type ProviderConfig struct {
+    ID         string                       `json:"id,omitempty"`
+    Provider   string                       `json:"provider"`
+    Endpoint   string                       `json:"endpoint,omitempty"`
+    APIKey     *SecretKeyRef                `json:"apiKey,omitempty"`
+    SecretRefs map[string]SecretKeyRef      `json:"secretRefs,omitempty"`
+    Settings   apiextensionsv1.JSON         `json:"settings,omitempty"`
 }
 ```
 
-**Risk**: CRD OpenAPI schema will show `type: object` without detailed subschema for the polymorphic fields. Users rely on documentation and examples rather than schema-driven editor completion for these fields.
+**Risk**: Low. The only UX cost is requiring list syntax for single providers.
 
 ---
 
@@ -213,7 +219,7 @@ The resolution chain is:
 
 | Area | Decision | Risk Level |
 |------|----------|------------|
-| Polymorphic JSON | `json.RawMessage` with custom unmarshaling | Medium (limited schema validation) |
+| Provider/resource types | Typed `[]ProviderConfig` slices, `[]ModelConfig` | Low (full schema validation) |
 | Base config source | Embedded `go:embed` (Phase 1) + OCI labels (Phase 2) | Low |
 | Config merging | Deep merge with provider replacement semantics | Low |
 | Env var naming | `LLSD_<PROVIDER_ID>_<FIELD>` | Low |

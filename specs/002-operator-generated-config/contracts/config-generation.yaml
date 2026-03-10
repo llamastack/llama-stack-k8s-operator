@@ -22,7 +22,8 @@ provider_mapping:
   provider: provider_type     # With "remote::" prefix (e.g., vllm → remote::vllm)
   endpoint: config.url
   apiKey: config.api_key      # Via env var substitution: ${env.LLSD_<PROVIDER_ID>_API_KEY}
-  settings.*: config.*        # Merged into provider config section
+  secretRefs.<key>: config.<key>  # Each entry resolved to env var: ${env.LLSD_<PROVIDER_ID>_<KEY>}
+  settings.*: config.*        # Merged into provider config section (NO secret resolution)
   id: provider_id             # Direct mapping
 
 # --- Env Var Naming Convention ---
@@ -65,7 +66,22 @@ resource_mapping:
 merge_rules:
   providers:
     strategy: replace_by_api_type
-    description: "User providers fully replace base config providers for that API type"
+    description: >
+      When user specifies providers for an API type, ALL base config providers
+      for that API type are replaced. Base providers with unmatched IDs are NOT
+      preserved. If the user wants to keep a base provider, they must re-declare
+      it in their provider list.
+    examples:
+      - description: "Full replacement"
+        base: [{provider_id: base-inf, provider_type: "remote::vllm"}]
+        user: [{id: custom-inf, provider: ollama, endpoint: "http://ollama:11434"}]
+        result: [{provider_id: custom-inf, provider_type: "remote::ollama", config: {url: "http://ollama:11434"}}]
+        note: "base-inf is removed because user specified inference providers"
+      - description: "No user providers for API type"
+        base: [{provider_id: base-inf, provider_type: "remote::vllm"}]
+        user: []  # providers.inference not specified
+        result: [{provider_id: base-inf, provider_type: "remote::vllm"}]
+        note: "Base providers preserved when user does not specify that API type"
 
   storage:
     strategy: merge_by_subsection
@@ -83,19 +99,31 @@ merge_rules:
     strategy: override
     description: "User value replaces base value"
 
-# --- Settings SecretKeyRef Discovery ---
-settings_secret_resolution:
-  depth: top_level_only
-  description: "secretKeyRef is recognized only at the top level of settings values"
-  recognized_pattern: "settings.<fieldName>.secretKeyRef"
-  ignored_pattern: "settings.<fieldName>.<nested>.<...>.secretKeyRef"
+# --- Secret Resolution ---
+secret_resolution:
+  description: >
+    Secrets are resolved from two explicit typed fields only: apiKey and secretRefs.
+    The settings map is NEVER inspected for secret references. This eliminates
+    heuristic matching (any map with name+key fields) and provides a clear,
+    unambiguous boundary for secret resolution.
+  sources:
+    - field: "apiKey.secretKeyRef"
+      env_var_suffix: "API_KEY"
+      description: "Standard API key authentication"
+    - field: "secretRefs.<key>.secretKeyRef"
+      env_var_suffix: "<KEY uppercased, hyphens to underscores>"
+      description: "Named secret references for provider-specific connection fields"
   examples:
-    - path: "settings.host.secretKeyRef"
-      resolved: true
-      description: "Top-level value, resolved to env var"
-    - path: "settings.database.connection.secretKeyRef"
-      resolved: false
-      description: "Nested value, passed through as literal map"
+    - provider_id: "pgvector"
+      field: "secretRefs.host"
+      secret: {name: pg-creds, key: host}
+      env_var: "LLSD_PGVECTOR_HOST"
+      config_value: "${env.LLSD_PGVECTOR_HOST}"
+    - provider_id: "vllm-primary"
+      field: "apiKey"
+      secret: {name: vllm-creds, key: token}
+      env_var: "LLSD_VLLM_PRIMARY_API_KEY"
+      config_value: "${env.LLSD_VLLM_PRIMARY_API_KEY}"
 
 # --- ConfigMap Naming ---
 configmap:

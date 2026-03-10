@@ -1,189 +1,126 @@
-# Spec Brief: Operator-Generated Config (v1alpha2)
+# Review Summary: Operator-Generated Server Configuration (v1alpha2)
 
-**Full spec:** [spec.md](spec.md) | **Status:** Draft | **Priority:** P1
+**Feature**: 002-operator-generated-config
+**Branch**: 002-reimpl
+**Review Date**: 2026-03-10
 
-## Problem Statement
+## How to Review This Spec (30-Minute Recipe)
 
-Users currently must provide a complete `config.yaml` via ConfigMap to configure LlamaStack. This requires deep knowledge of the config schema and results in verbose, error-prone YAML.
+This is a spec-only PR. No implementation code. The goal is to validate the design before writing code, so we catch issues like the polymorphism problem from PR #253 early.
 
-## Solution
+### Step 1: Understand the Goal (3 min)
 
-Introduce v1alpha2 API with high-level abstractions that the operator expands into a complete `config.yaml`. Users write 10-20 lines instead of 200+.
+Read the **Purpose** and **Configuration Tiers** table in `spec.md` (lines 9-11, 581-583). The core idea: users write 10-20 lines of YAML instead of a 200-line ConfigMap. Three tiers: simple inline, advanced settings, full override.
 
-## Before/After Example
+### Step 2: Review the CRD Example (5 min)
 
-**Before (v1alpha1):** User provides 200+ line ConfigMap manually
+Read the **Complete v1alpha2 Spec Structure** YAML in `spec.md` (lines 379-473). This is what users will write. Ask yourself:
 
-**After (v1alpha2):**
-```yaml
-apiVersion: llamastack.io/v1alpha2
-kind: LlamaStackDistribution
-metadata:
-  name: my-stack
-spec:
-  distribution:
-    name: starter
-  providers:
-    inference:
-      provider: vllm
-      endpoint: "http://vllm:8000"
-      apiKey:
-        secretKeyRef: {name: vllm-creds, key: token}
-  resources:
-    models: ["llama3.2-8b"]
-  storage:
-    sql:
-      type: postgres
-      connectionString:
-        secretKeyRef: {name: pg-creds, key: url}
-```
+- Does this YAML feel natural for a Kubernetes user?
+- Are the field names intuitive?
+- Would you know what to write without reading docs?
 
-## Key Design Decisions
+Key design decision to validate: **providers are always lists** (e.g., `inference: [{provider: vllm}]` not `inference: {provider: vllm}`). We chose this to enable kubebuilder validation and CEL rules, at the cost of slightly more verbose YAML for single providers. If you disagree, this is the most impactful thing to flag.
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Config extraction | OCI image labels | Single-phase reconcile, works with imagePullSecrets |
-| Secret handling | Environment variables | Never embed secrets in ConfigMap |
-| Multiple providers | Explicit `id` required for providers 2..N | Avoid ambiguity in provider references |
-| Backward compat | Conversion webhook | v1alpha1 CRs continue working |
-| Override escape hatch | `overrideConfig` field | Power users can bypass generation |
+### Step 3: Check the Three Critical Design Decisions (10 min)
 
-## Configuration Tiers
+These are the decisions that will be hardest to change after implementation starts:
 
-| Tier | Mechanism |
-|------|-----------|
-| Simple (80%) | Inline provider fields |
-| Advanced (15%) | Per-provider `settings` |
-| Full Control (5%) | ConfigMap override |
+**Decision 1: Typed slices instead of polymorphic JSON** (spec.md FR-004, research.md R1)
 
-## New Spec Sections
+The original PR #253 used `apiextensionsv1.JSON` for polymorphic fields (object OR list). This caused: no kubebuilder validation, impossible CEL rules, ~500 lines of parsing code, false-positive secret detection bugs. The new design uses `[]ProviderConfig` everywhere. Tradeoff: users always write list syntax. Verify this is acceptable.
 
-```
-spec:
-  distribution:     # Image source (name or direct image)
-  providers:        # Inference, safety, vectorIo, toolRuntime, telemetry
-  resources:        # Models, tools, shields to register
-  storage:          # KV (sqlite/redis) and SQL (sqlite/postgres)
-  disabled:         # APIs to disable
-  networking:       # Port, TLS, expose, allowedFrom
-  workload:         # Replicas, resources, autoscaling, PDB
-  overrideConfig:   # Escape hatch: use ConfigMap directly
-```
+**Decision 2: Explicit `secretRefs` field instead of heuristic detection** (spec.md FR-005, contracts/config-generation.yaml)
 
-## What Reviewers Should Focus On
+The original PR #253 scanned the `settings` map for any `{name, key}` structure and treated it as a Secret reference. This caused false positives. The new design adds an explicit `secretRefs: map[string]SecretKeyRef` field on ProviderConfig. The `settings` map is passed through without any secret resolution. Check `contracts/config-generation.yaml` "Secret Resolution" section for examples.
 
-1. **API Design**: Does the field structure make sense? Any awkward names?
-2. **Polymorphic Fields**: Single object vs list forms (providers, models)
-3. **Storage Abstraction**: Is kv/sql split intuitive?
-4. **Edge Cases**: Are the 12 documented edge cases reasonable?
-5. **Phased Base Config**: Is the embedded configs (Phase 1) + OCI labels (Phase 2) approach acceptable? Any better idea how to extract the `config.yaml` from the distribution OCI image?
-6. **OQ-004**: Should the operator auto-create a default LLSD instance on install?
+**Decision 3: Provider merge = full API-type replacement** (contracts/config-generation.yaml merge_rules)
 
-## Requirements Summary
+When a user specifies `providers.inference`, ALL base config inference providers are replaced. Base providers with unmatched IDs are dropped. The contract has before/after examples. Verify this matches your expectation. The alternative (merge-by-ID, preserving unmatched base providers) was the original PR #253 behavior but contradicted the contract.
 
-| Category | Count | Coverage |
-|----------|-------|----------|
-| CRD Schema | FR-001 to FR-014 | All new fields defined |
-| Config Generation | FR-020 to FR-029 | Extraction, merging, versioning |
-| Providers | FR-030 to FR-035 | Field mapping, ID generation |
-| Resources | FR-040 to FR-044 | Models, tools, shields |
-| Storage | FR-050 to FR-053 | KV and SQL backends |
-| Networking | FR-060 to FR-066 | Port, TLS, expose, NetworkPolicy |
-| Validation | FR-070 to FR-075 | CEL rules, secret/ConfigMap checks |
-| Conversion | FR-080 to FR-083 | v1alpha1 ↔ v1alpha2 webhook |
-| Integration | FR-090 to FR-092 | Spec 001 external providers |
+### Step 4: Spot-Check CEL Validation Rules (5 min)
 
-## User Stories (P1 only)
+Read `contracts/crd-schema.yaml` CEL rules section (bottom of file). There are 11 rules. Focus on:
 
-1. **Simple Inference**: Deploy with just `providers.inference` config
-2. **Multiple Providers**: Configure primary + fallback providers
-3. **Resource Registration**: Register models/tools declaratively
-4. **State Storage**: Configure PostgreSQL for persistence
+- **Rule 6** (provider ID required when list > 1): Can CEL express `self.providers.inference.size() <= 1 || self.providers.inference.all(p, has(p.id))`? This is the rule that was impossible with JSON types.
+- **Rule 8** (disabled + provider conflict): Should this be an error or a warning? We chose error. If you prefer warning, flag it.
+- **Rules 9-11** (conditional fields): TLS needs secretName when enabled, Redis needs endpoint, Postgres needs connectionString. These were missing in the original spec.
 
-## Dependencies
+### Step 5: Scan Edge Cases (4 min)
 
-- **Spec 001**: External providers merge into generated config (not mandatory, but was already included in this design)
-- **Distribution images**: Must include OCI labels with base config (check: build system must support this, registry must support label queries (check for disconnected))
+Read the **Edge Cases** section in `spec.md` (lines 130-176). There are 13 edge cases. Focus on the ones that affect data integrity:
 
-## Open Questions
+- "Secret references via settings vs secretRefs": confirms settings map is never inspected for secrets
+- "Disabled APIs conflict with providers": now an error, not a warning
+- "Config generation failure on update": preserves running Deployment, critical for production
 
-Previously open questions (OQ-001 through OQ-003) have been resolved:
+### Step 6: Verify Conversion Strategy (3 min)
 
-- **OQ-001** (Resolved): `expose: {}` is treated as `expose: true`
-- **OQ-002** (Resolved): Disabled API + provider config conflict produces a warning (not error). Disabled takes precedence.
-- **OQ-003** (Resolved): Env var naming uses provider ID: `LLSD_<PROVIDER_ID>_<FIELD>` (unique, collision-free)
+Read the **Field Mapping: v1alpha1 to v1alpha2** table in `spec.md` (lines 477-499). Check that existing v1alpha1 fields all have a v1alpha2 home. New v1alpha2-only fields (providers, resources, storage, disabled) are stored as JSON annotation for round-trip fidelity. This is the standard kubebuilder pattern.
 
-Currently open:
+### What NOT to Review
 
-- **OQ-004**: Should the operator create a default LlamaStackDistribution instance when installed? If adopted, it should be opt-in via operator configuration (e.g., a Helm value or OLM parameter).
+- `plan.md`: Implementation details, will change during coding
+- `tasks.md`: Task breakdown, auto-generated, will evolve
+- `data-model.md`: Derived from spec, no independent decisions
+- `quickstart.md`: Examples only, validated against CRD schema
 
-## Implementation Estimate
+## Key Changes from PR #253
 
-5 phases, 38 tasks (see [tasks.md](tasks.md) for details)
+This spec addresses all critical issues raised in the PR #253 review:
 
----
+| PR #253 Issue | Resolution | Spec Location |
+|--------------|------------|---------------|
+| Polymorphic JSON types lose kubebuilder validation | Replaced with typed `[]ProviderConfig` slices | FR-004, research.md R1 |
+| CEL rules impossible on `apiextensionsv1.JSON` | CEL now works because providers are typed | FR-071, FR-072 |
+| `extractDirectSecretRef` false positives | Explicit `secretRefs` field, no heuristic matching | FR-005 |
+| `sortedMapKeys` doesn't sort | Determinism addressed in NFR-001, merge.go | NFR-001 |
+| Missing CEL for TLS/storage conditionals | Added FR-079, FR-079a-c | Validation section |
+| Disabled + provider should be error not warning | Changed to validation error | OQ-002, edge case |
+| Status conditions defined but unwired | Tasks T036, T055, T090 wire all 4 conditions | tasks.md |
+| Missing test coverage for FR-097, FR-096, FR-100 | Dedicated tasks T053-T058 | tasks.md Phase 7 |
+| Contract says replace but code does merge-by-ID | Contract updated with explicit examples | config-generation.yaml |
 
-## Changes Since Initial Spec (2026-02-10)
+## Coverage Matrix
 
-The following spec.md updates were applied after a cross-artifact consistency analysis. These are additive refinements, not structural redesigns.
+| Spec Requirement | Plan Section | Task(s) | Status |
+|-----------------|-------------|---------|--------|
+| FR-001 v1alpha2 API version | 1.1 CRD Schema | T001-T002 | Covered |
+| FR-002 Distribution name/image | 1.1 CRD Schema | T003 | Covered |
+| FR-003 Provider types | 1.1 CRD Schema | T004 | Covered |
+| FR-004 Typed provider slices | 1.1 CRD Schema | T004 | Covered |
+| FR-005 ProviderConfig fields + secretRefs | 1.1 CRD Schema | T004-T005 | Covered |
+| FR-006-007 Resources (ModelConfig) | 1.1 CRD Schema | T006 | Covered |
+| FR-008 Storage subsections | 1.1 CRD Schema | T007 | Covered |
+| FR-010-011 Networking + ExposeConfig | 1.1 CRD Schema | T008 | Covered |
+| FR-012 WorkloadSpec | 1.1 CRD Schema | T009 | Covered |
+| FR-013 OverrideConfig mutual exclusivity | 1.1 CEL rules | T010, T012 | Covered |
+| FR-020 Distribution resolution | 1.4 Controller | T033 | Covered |
+| FR-021 Config generation | 1.2 Pipeline | T023 | Covered |
+| FR-022 SecretKeyRef resolution | 1.2 Pipeline | T020 | Covered |
+| FR-023-025 ConfigMap creation + owner ref | 1.4 Controller | T031-T032 | Covered |
+| FR-025a ConfigMap cleanup (retain 2) | 1.4 Controller | T032 | Covered |
+| FR-027a1 ConfigResolver interface | 1.3 ConfigResolver | T014 | Covered |
+| FR-027a-e Embedded configs | 1.3 ConfigResolver | T014-T016 | Covered |
+| FR-030-035 Provider field mapping | 1.2 Pipeline | T019 | Covered |
+| FR-040-044 Resource registration | 1.2 Pipeline | T021, T045-T048 | Covered |
+| FR-050-053 Storage configuration | 1.2 Pipeline | T022, T049-T052 | Covered |
+| FR-060-066 Networking | 1.4 Controller | T059-T063 | Covered |
+| FR-070-072 CEL validation | 1.1 CEL rules | T012 | Covered |
+| FR-073-078 Webhook validation | 1.5 Webhook | T074-T080 | Covered |
+| FR-079-079d Conditional CEL + webhook | 1.1/1.5 | T012, T074 | Covered |
+| FR-080-083 Conversion webhook | 1.6 Conversion | T068-T073 | Covered |
+| FR-095-098 Runtime updates | 1.4 Controller | T053-T058 | Covered |
+| FR-099 Status conditions | 1.4 Controller | T036, T055, T090 | Covered |
+| FR-100 Atomic deployment update | 1.4 Controller | T035 | Covered |
+| NFR-001 Deterministic output | 1.2 Pipeline | T030 | Covered |
+| NFR-005 Immutable ConfigMaps | 1.4 Controller | T031 | Covered |
+| NFR-007 Kubernetes Events | 1.4 Controller | T037 | Covered |
 
-### New: User Story 8 (Runtime Configuration Updates, P1)
+## Summary Statistics
 
-Covers day-2 operations: CR updates trigger config regeneration, no-op detection (skip restart when config unchanged), failure preservation (current Deployment kept running on error), and atomic image+config updates on distribution changes.
-
-### New: Phased Base Config Extraction (FR-027a to FR-027j)
-
-Replaced the single "OCI label extraction" approach with a two-phase strategy:
-- **Phase 1 (MVP)**: Embedded default configs via `go:embed`, no distribution image changes needed
-- **Phase 2 (Enhancement)**: OCI label extraction takes precedence when labels are present
-
-This introduces new **Operator Build Requirements**: the operator binary must ship with `distributions.json` (mapping distribution names to image references) and a `configs/<name>/config.yaml` for each named distribution. These are maintained together and updated as part of the operator release process. Downstream builds (e.g., RHOAI) use the existing `image-overrides` mechanism to remap image references without rebuilding the operator.
-
-### New: Runtime Configuration Requirements (FR-095 to FR-101)
-
-- **FR-095-096**: Regenerate on spec change; skip restart when content hash is identical
-- **FR-097**: On failure, preserve the current running Deployment unchanged
-- **FR-098-099**: Atomic updates when distribution changes; status conditions reflect update state
-- **FR-100**: Image + config updated in a single Deployment update (no intermediate mismatch)
-- **FR-101**: Operator upgrade failure handling with `UpgradeConfigFailure` reason
-
-### New: Validation Webhook Requirements (FR-076 to FR-078)
-
-Validating admission webhook for constraints beyond CEL: Secret existence, ConfigMap references, cross-field provider ID validation. Deployed via kustomize. Cluster-scoped `ValidatingWebhookConfiguration` documented as an accepted deviation from constitution §1.1.
-
-### Expanded: Six New Edge Cases
-
-- CR update during active rollout (supersedes in-progress rollout)
-- Operator upgrade with running instances (atomic image+config update)
-- Config generation failure on update (preserve current Deployment)
-- Deeply nested secretKeyRef (top-level only, deeper nesting passed through)
-- Tools without toolRuntime provider (fallback to base config, then error)
-- Shields without safety provider (same fallback pattern)
-
-### Refined: Existing Requirements
-
-- **FR-005**: secretKeyRef discovery depth constrained to top-level settings values only
-- **FR-013**: overrideConfig ConfigMap must be in the same namespace as the CR
-- **FR-020**: Expanded into FR-020/020a/020b/020c covering distribution resolution, status tracking, and image+config consistency
-- **FR-032**: Env var naming clarified with provider ID example (`LLSD_VLLM_PRIMARY_API_KEY`)
-- **FR-043/FR-044**: Tool/shield provider assignment now falls back to base config before erroring
-- **FR-070**: Mutual exclusivity expanded to cover all four fields (`providers`, `resources`, `storage`, `disabled`)
-
-### New: Printer Columns (constitution §2.5)
-
-Default `kubectl get llsd`: Phase, Providers, Available, Age. Wide output adds Distribution image and Config name.
-
-### New: Status Fields
-
-- `resolvedDistribution` (image, configSource, configHash) for change detection across reconciliations and operator upgrades
-- `DeploymentUpdated` and `Available` conditions added alongside existing `ConfigGenerated` and `SecretsResolved`
-
-### CRD Schema Corrections
-
-- API group fixed: `llamastack.io` (was `llamastack.ai` in draft)
-- `targetCPUUtilizationPercentage` aligned with existing v1alpha1 naming
-- Provider `host` field moved into `settings` (uniform provider schema)
-
----
-
-**Ready for detailed review?** See [spec.md](spec.md) for full requirements.
+- **Total tasks**: 91 across 12 phases
+- **Tasks per user story**: US1: 11, US2: 3, US3: 4, US4: 4, US5: 5, US6: 4, US7: 6, US8: 6
+- **Parallel execution streams**: 4 independent streams after foundational phase
+- **MVP checkpoint**: Phase 3 (US1: minimal inference config)
+- **Estimated implementation PRs**: 5 focused PRs

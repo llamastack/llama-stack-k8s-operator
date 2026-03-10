@@ -22,7 +22,7 @@ As a developer, I want to deploy a llama-stack instance with a vLLM backend usin
 
 **Acceptance Scenarios**:
 
-1. **Given** a LLSD CR with `providers.inference: {provider: vllm, endpoint: "http://vllm:8000"}`, **When** I apply the CR, **Then** the operator generates a valid config.yaml with the vLLM provider configured
+1. **Given** a LLSD CR with `providers.inference: [{provider: vllm, endpoint: "http://vllm:8000"}]`, **When** I apply the CR, **Then** the operator generates a valid config.yaml with the vLLM provider configured
 2. **Given** a LLSD CR with `providers.inference.apiKey.secretKeyRef`, **When** I apply the CR, **Then** the secret value is injected via environment variable and the provider can authenticate
 3. **Given** a LLSD CR with only `distribution.name: starter`, **When** I apply the CR, **Then** the distribution's default config.yaml is used unchanged
 
@@ -36,9 +36,9 @@ As a platform engineer, I want to configure multiple inference providers (primar
 
 **Acceptance Scenarios**:
 
-1. **Given** a LLSD CR with `providers.inference` as a list of two providers with explicit IDs, **When** I apply the CR, **Then** both providers are configured and accessible
-2. **Given** a LLSD CR with multiple providers without explicit IDs, **When** I apply the CR, **Then** validation fails with a clear error message requiring explicit IDs
-3. **Given** a LLSD CR with duplicate provider IDs, **When** I apply the CR, **Then** validation fails with a clear error message listing the duplicate IDs
+1. **Given** a LLSD CR with `providers.inference` containing two `ProviderConfig` entries with explicit IDs, **When** I apply the CR, **Then** both providers are configured and accessible, and status condition `ConfigGenerated` is `True`
+2. **Given** a LLSD CR with multiple providers in a list without explicit IDs, **When** I apply the CR, **Then** CEL validation rejects the CR at admission with a clear error message requiring explicit IDs
+3. **Given** a LLSD CR with duplicate provider IDs across any provider types, **When** I apply the CR, **Then** CEL validation rejects the CR at admission with a clear error message listing the duplicate IDs
 
 ### User Story 3 - Resource Registration (Priority: P1)
 
@@ -50,7 +50,7 @@ As a developer, I want to register models and tools declaratively in the CR, so 
 
 **Acceptance Scenarios**:
 
-1. **Given** a LLSD CR with `resources.models: ["llama3.2-8b"]`, **When** I apply the CR, **Then** the model is registered with the first configured inference provider
+1. **Given** a LLSD CR with `resources.models: [{name: "llama3.2-8b"}]`, **When** I apply the CR, **Then** the model is registered with the first configured inference provider
 2. **Given** a LLSD CR with a model specifying explicit provider assignment, **When** I apply the CR, **Then** the model is registered with the specified provider
 3. **Given** a LLSD CR with `resources.tools: [websearch, rag]`, **When** I apply the CR, **Then** the tool groups are registered and available
 
@@ -135,13 +135,13 @@ As a platform operator, I want to update the LLSD CR (e.g., add a provider, chan
   - What: `secretKeyRef` points to a secret that doesn't exist
   - Expected: Reconciliation fails with clear error, status shows "Secret not found: {name}"
 
-- **Polymorphic expose with empty object**:
+- **Expose with empty object**:
   - What: User specifies `expose: {}`
-  - Expected: Treated as `expose: true` (enabled with defaults)
+  - Expected: Treated as expose enabled with defaults (auto-generated hostname)
 
 - **Disabled APIs conflict with providers**:
   - What: User configures `providers.inference` but also `disabled: [inference]`
-  - Expected: Warning logged, disabled takes precedence, provider config is ignored
+  - Expected: Validation fails with error: "spec.providers.inference conflicts with spec.disabled: inference API is disabled but has providers configured. Remove the provider configuration or remove 'inference' from the disabled list." Accepting contradictory config and silently ignoring part of it leads to user confusion. Failing fast is more Kubernetes-idiomatic.
 
 - **Model references non-existent provider**:
   - What: `resources.models[].provider` references an ID not in `providers`
@@ -163,9 +163,9 @@ As a platform operator, I want to update the LLSD CR (e.g., add a provider, chan
   - What: User changes CR in a way that produces an invalid merged config (e.g., references a provider type not supported by the distribution)
   - Expected: Operator keeps the current running config and Deployment unchanged, sets `ConfigGenerated=False` with a descriptive error, and does not trigger a Pod restart
 
-- **Deeply nested secretKeyRef in settings**:
-  - What: User specifies `settings: {database: {connection: {secretKeyRef: {name: db, key: url}}}}`
-  - Expected: The nested secretKeyRef is NOT resolved as a secret reference. Only top-level settings values are inspected for secretKeyRef (e.g., `settings.host.secretKeyRef`). The deeply nested object is passed through to config.yaml as a literal map.
+- **Secret references via settings vs secretRefs**:
+  - What: User puts a secretKeyRef inside `settings` instead of using the `secretRefs` field
+  - Expected: The `settings` map is passed through to config.yaml as-is without any secret resolution. Only the explicit `apiKey` and `secretRefs` fields trigger secret-to-env-var resolution. This is a clear, unambiguous boundary (no heuristic matching of map shapes).
 
 - **Tools specified without toolRuntime provider**:
   - What: User specifies `resources.tools: [websearch]` but does not configure `providers.toolRuntime`
@@ -184,14 +184,14 @@ As a platform operator, I want to update the LLSD CR (e.g., add a provider, chan
 - **FR-001**: The CRD MUST define a new API version `v1alpha2` with the redesigned schema
 - **FR-002**: The `spec.distribution` field MUST support both `name` (mapped) and `image` (direct) forms, mutually exclusive
 - **FR-003**: The `spec.providers` section MUST support provider types: `inference`, `safety`, `vectorIo`, `toolRuntime`, `telemetry`
-- **FR-004**: Each provider MUST support polymorphic form: single object OR list of objects with explicit `id` field
-- **FR-005**: Each provider MUST support fields: `provider` (type), `endpoint`, `apiKey` (secretKeyRef), `settings` (escape hatch). Provider-specific connection fields (e.g., `host` for vectorIo) MUST use `secretKeyRef` within `settings` rather than top-level named fields, keeping the provider schema uniform. The operator MUST recognize `secretKeyRef` objects only at the top level of `settings` values (i.e., `settings.<fieldName>.secretKeyRef`), not at arbitrary nesting depth. Deeper nesting is passed through to config.yaml as-is without secret resolution.
+- **FR-004**: Each provider field MUST be a list of `ProviderConfig` objects (`[]ProviderConfig`). A single provider is expressed as a one-element list. This ensures kubebuilder validation markers apply to all provider fields and CEL rules can inspect provider IDs for uniqueness.
+- **FR-005**: Each `ProviderConfig` MUST support fields: `id` (unique provider identifier), `provider` (type, required), `endpoint`, `apiKey` (secretKeyRef), `secretRefs` (named secret references map), `settings` (escape hatch). Provider-specific connection fields (e.g., `host` for vectorIo) MUST use `secretRefs` entries rather than embedding `secretKeyRef` inside `settings`. The `secretRefs` field is a `map[string]SecretKeyRef` where each key becomes the env var field suffix. The `settings` map is passed through to config.yaml as-is without secret resolution.
 - **FR-006**: The `spec.resources` section MUST support: `models`, `tools`, `shields`
-- **FR-007**: Resources MUST support polymorphic form: simple string OR object with metadata
+- **FR-007**: `resources.models` MUST be a list of `ModelConfig` objects (`[]ModelConfig`), where only the `name` field is required. Simple model references use `ModelConfig` with just `name` set. `resources.tools` and `resources.shields` MUST be lists of strings.
 - **FR-008**: The `spec.storage` section MUST have subsections: `kv` (key-value) and `sql` (relational)
 - **FR-009**: The `spec.disabled` field MUST be a list of API names to disable
 - **FR-010**: The `spec.networking` section MUST consolidate: `port`, `tls`, `expose`, `allowedFrom`
-- **FR-011**: The `networking.expose` field MUST support polymorphic form: boolean OR object with `hostname`
+- **FR-011**: The `networking.expose` field MUST be an object with optional `enabled` (bool) and `hostname` (string) fields. When `enabled` is true (or when the object is present with defaults), an Ingress/Route is created. When `hostname` is specified, it is used for the Ingress/Route hostname.
 - **FR-012**: The `spec.workload` section MUST contain K8s deployment settings: `replicas`, `workers`, `resources`, `autoscaling`, `storage`, `podDisruptionBudget`, `topologySpreadConstraints`, `overrides`
 - **FR-013**: The `spec.overrideConfig` field MUST be mutually exclusive with `providers`, `resources`, `storage`, `disabled`. The referenced ConfigMap MUST reside in the same namespace as the LLSD CR (consistent with namespace-scoped RBAC, constitution section 1.1)
 - **FR-014**: The `spec.externalProviders` field MUST remain for integration with spec 001
@@ -207,6 +207,7 @@ As a platform operator, I want to update the LLSD CR (e.g., add a provider, chan
 - **FR-023**: The operator MUST create a ConfigMap containing the generated config.yaml
 - **FR-024**: The ConfigMap name MUST include a content hash for change detection
 - **FR-025**: The operator MUST set owner references on the generated ConfigMap for garbage collection
+- **FR-025a**: During each reconciliation, the controller MUST delete generated ConfigMaps beyond the most recent 2 (current + previous). ConfigMaps are identified by the `app.kubernetes.io/managed-by` label and sorted by creation timestamp. This prevents accumulation of stale ConfigMaps during the CR's lifetime.
 - **FR-026**: The operator MUST add a hash annotation to the Deployment to trigger rollouts on config changes
 - **FR-027**: The operator MUST detect the config.yaml schema version from the base configuration
 - **FR-028**: The operator MUST support config.yaml schema versions n and n-1 (current and previous)
@@ -219,6 +220,7 @@ The base config extraction follows a phased approach. Phase 1 provides an implem
 **Phase 1 - Embedded Default Configs (MVP)**
 
 - **FR-027a**: The operator MUST include embedded default configurations for all distribution names defined in `distributions.json`, shipped as part of the operator binary
+- **FR-027a1**: The base config extraction MUST be implemented behind a `ConfigResolver` interface with a `Resolve(image string) ([]byte, error)` method. Phase 1 provides `EmbeddedConfigResolver`; Phase 2 adds `OCIConfigResolver`. The controller selects the resolver based on available config sources (OCI labels take precedence over embedded, per FR-027g).
 - **FR-027b**: When `distribution.name` is specified, the operator MUST use the embedded config for that distribution as the base for config generation
 - **FR-027c**: When `distribution.image` is specified (direct image reference, no named distribution), the operator MUST require `overrideConfig.configMapName` to provide the base configuration. If `overrideConfig` is not set and no OCI config labels are found (see Phase 2), the operator MUST set `ConfigGenerated=False` with reason `BaseConfigRequired` and message: "Direct image references require either overrideConfig.configMapName or OCI config labels on the image. See docs/configuration.md for details."
 - **FR-027d**: The embedded configs MUST be versioned together with the distribution image mappings in `distributions.json`, ensuring each distribution name maps to a consistent (image, config) pair per operator release
@@ -238,10 +240,10 @@ The base config extraction follows a phased approach. Phase 1 provides an implem
 
 - **FR-030**: Provider `provider` field MUST map to `provider_type` with `remote::` prefix (e.g., `vllm` becomes `remote::vllm`)
 - **FR-031**: Provider `endpoint` field MUST map to `config.url` in config.yaml
-- **FR-032**: Provider `apiKey.secretKeyRef` MUST be resolved to an environment variable and referenced as `${env.LLSD_<PROVIDER_ID>_<FIELD>}`, where `<PROVIDER_ID>` is the provider's unique `id` (explicit or auto-generated per FR-035), uppercased with hyphens replaced by underscores. Example: provider ID `vllm-primary` with field `apiKey` produces `LLSD_VLLM_PRIMARY_API_KEY`.
+- **FR-032**: Provider `apiKey.secretKeyRef` and `secretRefs` entries MUST be resolved to environment variables and referenced as `${env.LLSD_<PROVIDER_ID>_<FIELD>}`, where `<PROVIDER_ID>` is the provider's unique `id` (explicit or auto-generated per FR-035), uppercased with hyphens replaced by underscores. For `apiKey`, the field suffix is `API_KEY`. For `secretRefs`, the map key is uppercased with hyphens replaced by underscores. Example: provider ID `vllm-primary` with `apiKey` produces `LLSD_VLLM_PRIMARY_API_KEY`; `secretRefs.host` produces `LLSD_VLLM_PRIMARY_HOST`.
 - **FR-033**: Provider `settings` MUST be merged into the provider's `config` section in config.yaml
-- **FR-034**: When multiple providers are specified, each MUST have an explicit `id` field
-- **FR-035**: Single provider without `id` MUST auto-generate `provider_id` from the `provider` field value
+- **FR-034**: When multiple providers are specified for the same API type, each MUST have an explicit `id` field. CEL validation enforces this at admission time.
+- **FR-035**: A single provider (one-element list) without `id` MUST auto-generate `provider_id` from the `provider` field value
 
 #### Telemetry Provider
 
@@ -278,14 +280,19 @@ The base config extraction follows a phased approach. Phase 1 provides an implem
 #### Validation
 
 - **FR-070**: CEL validation MUST enforce mutual exclusivity between `overrideConfig` and each of `providers`, `resources`, `storage`, and `disabled`
-- **FR-071**: CEL validation MUST require explicit `id` when multiple providers are specified for the same API
-- **FR-072**: CEL validation MUST enforce unique provider IDs across all provider types
+- **FR-071**: CEL validation MUST require explicit `id` on each `ProviderConfig` when a provider list has more than one element. Rule applied per provider type field (e.g., `self.providers.inference.size() <= 1 || self.providers.inference.all(p, has(p.id))`)
+- **FR-072**: CEL validation MUST enforce unique provider IDs across all provider types. Since providers are typed slices, CEL can inspect IDs directly (e.g., check that the union of all provider IDs has no duplicates)
 - **FR-073**: Controller validation MUST verify referenced Secrets exist before generating config
 - **FR-074**: Controller validation MUST verify referenced ConfigMaps exist for `overrideConfig` and `caBundle`
 - **FR-075**: Validation errors MUST include actionable messages with field paths
 - **FR-076**: A validating admission webhook MUST validate CR creation and update operations for constraints that cannot be expressed in CEL (e.g., Secret existence checks, ConfigMap existence for `overrideConfig`, cross-field semantic validation such as provider ID references in resources)
 - **FR-077**: The validating webhook MUST return structured error responses with field paths and actionable messages following Kubernetes API conventions
 - **FR-078**: The validating webhook MUST be deployed as part of the operator installation and configured via the operator's kustomize manifests with appropriate certificate management
+- **FR-079**: CEL validation MUST enforce that `networking.tls.secretName` is required when `networking.tls.enabled` is true: `!self.tls.enabled || has(self.tls.secretName)`
+- **FR-079a**: CEL validation MUST enforce that `storage.kv.endpoint` is required when `storage.kv.type` is `redis`: `self.storage.kv.type != 'redis' || has(self.storage.kv.endpoint)`
+- **FR-079b**: CEL validation MUST enforce that `storage.sql.connectionString` is required when `storage.sql.type` is `postgres`: `self.storage.sql.type != 'postgres' || has(self.storage.sql.connectionString)`
+- **FR-079c**: CEL validation SHOULD warn when `storage.kv.endpoint` or `storage.kv.password` are specified with `storage.kv.type: sqlite` (unused fields)
+- **FR-079d**: The validating webhook MUST reject CRs where `distribution.name` references a name not present in the embedded distribution registry (`distributions.json`). The error message MUST list available distribution names: "Unknown distribution \"{name}\". Available distributions: {list}"
 
 #### API Version Conversion
 
@@ -321,6 +328,7 @@ The base config extraction follows a phased approach. Phase 1 provides an implem
 - **NFR-004**: Error messages MUST be actionable (user can resolve without operator knowledge)
 - **NFR-005**: The generated ConfigMap MUST be immutable (new ConfigMap on changes, not updates)
 - **NFR-006**: Config extraction from images MUST be cached to avoid repeated image pulls
+- **NFR-007**: The operator MUST emit Kubernetes Events for significant state changes: `ConfigGenerated` (Normal), `DeploymentUpdated` (Normal), `ConfigGenerationFailed` (Warning), `SecretResolutionFailed` (Warning). Events provide a time-ordered audit trail complementing status conditions (which only show current state).
 
 ### External Dependencies
 
@@ -369,7 +377,7 @@ crane mutate ${IMAGE}:build \
 - **StorageSpec**: Configuration for state storage (kv and sql backends)
 - **NetworkingSpec**: Configuration for network exposure (port, TLS, expose, allowedFrom)
 - **WorkloadSpec**: Kubernetes deployment settings (replicas, resources, autoscaling)
-- **ExposeConfig**: Polymorphic expose configuration (bool or object with hostname)
+- **ExposeConfig**: Expose configuration with `enabled` (bool) and `hostname` (string) fields
 - **ResolvedDistributionStatus**: Tracks the resolved image reference, config source (embedded/oci-label), and config hash for change detection
 
 ## CRD Schema
@@ -395,16 +403,16 @@ spec:
         settings:
           max_tokens: 8192
     safety:
-      provider: llama-guard
+      - provider: llama-guard
     vectorIo:
-      provider: pgvector
-      settings:
-        host:
-          secretKeyRef: {name: pg-creds, key: host}
+      - provider: pgvector
+        secretRefs:
+          host:
+            secretKeyRef: {name: pg-creds, key: host}
 
   resources:
     models:
-      - "llama3.2-8b"
+      - name: "llama3.2-8b"
       - name: "llama3.2-70b"
         provider: vllm-primary
         contextLength: 128000
@@ -433,8 +441,9 @@ spec:
       secretName: llama-tls
       caBundle:
         configMapName: custom-ca
-    expose: true
-    # OR: expose: {hostname: "llama.example.com"}
+    expose:
+      enabled: true
+      # hostname: "llama.example.com"  # Optional: custom hostname
     allowedFrom:
       namespaces: ["app-ns"]
       labels: ["llama-access"]
@@ -576,8 +585,8 @@ spec:
 
 | Tier | Use Case | Mechanism | Example |
 |------|----------|-----------|---------|
-| 1 | Simple (80%) | Inline provider fields | `providers.inference: {provider: vllm, endpoint: "..."}` |
-| 2 | Advanced (15%) | Per-provider settings | `providers.inference: {..., settings: {max_tokens: 8192}}` |
+| 1 | Simple (80%) | Inline provider fields | `providers.inference: [{provider: vllm, endpoint: "..."}]` |
+| 2 | Advanced (15%) | Per-provider settings | `providers.inference: [{..., settings: {max_tokens: 8192}}]` |
 | 3 | Full Control (5%) | ConfigMap override | `overrideConfig: {configMapName: my-config}` |
 
 ## Status Reporting
@@ -645,12 +654,22 @@ status:
 - **Environment Variable Naming**: Use deterministic, prefixed names: `LLSD_<PROVIDER_ID>_<FIELD>` (e.g., `LLSD_VLLM_PRIMARY_API_KEY`). Provider ID is uppercased with hyphens replaced by underscores.
 - **ConfigMap Permissions**: Generated ConfigMaps inherit namespace RBAC
 - **Image Extraction**: Config extraction from images uses read-only operations
-- **Webhook Permissions**: The `ValidatingWebhookConfiguration` is a cluster-scoped resource, installed by OLM or kustomize during operator setup (not by the operator at runtime). This is a standard pattern for Kubernetes operators with admission webhooks and is an accepted deviation from constitution §1.1. The operator itself remains namespace-scoped at runtime.
+- **Webhook Permissions**: The `ValidatingWebhookConfiguration` is a cluster-scoped resource, installed by OLM or kustomize during operator setup (not by the operator at runtime). This is a standard pattern for Kubernetes operators with admission webhooks and is an accepted deviation from constitution §1.1 (documented per constitution §Exceptions). The operator itself remains namespace-scoped at runtime.
+- **Disabled + Provider Conflict**: Specifying providers for a disabled API type is a validation error, not a warning. This prevents contradictory config from being accepted and silently ignored.
+
+## Clarifications
+
+### Session 2026-03-10
+
+- Q: How should the operator clean up old generated ConfigMaps during a CR's lifetime? → A: Controller deletes ConfigMaps beyond the last 2 during each reconciliation.
+- Q: How should Phase 1 code handle the Phase 2 (OCI label) extension point? → A: Define a `ConfigResolver` interface now, implement `EmbeddedConfigResolver` for Phase 1. Phase 2 adds an `OCIConfigResolver` without refactoring.
+- Q: Should the operator emit Kubernetes Events for config generation lifecycle? → A: Yes, emit Events for: config generated, deployment updated, config generation failed, secret resolution failed.
+- Q: When should unknown distribution name be validated? → A: Webhook validates at admission time for instant feedback. The distribution registry is a static embedded resource, cheap to load in the webhook.
 
 ## Open Questions
 
 - ~~**OQ-001**~~: Resolved. `expose: {}` is treated as `expose: true` (see Edge Cases).
-- ~~**OQ-002**~~: Resolved. Disabled API + provider config conflict produces a **warning** (not an error). The `disabled` list takes precedence: the provider config is accepted but ignored at runtime. Warning is logged and reported in status conditions. (From PR #242 review; resolved per edge case "Disabled APIs conflict with providers")
+- ~~**OQ-002**~~: Resolved. Disabled API + provider config conflict produces a **validation error** (not a warning). Accepting contradictory config and silently ignoring part of it leads to user confusion. The webhook rejects CRs where a provider type appears in both `providers` and `disabled`. (Originally resolved as warning in PR #242 review, changed to error after PR #253 review feedback from eoinfennessy)
 - ~~**OQ-003**~~: Resolved. Environment variable naming uses the **provider ID** (not provider type or API type): `LLSD_<PROVIDER_ID>_<FIELD>`. The provider ID is unique across all providers (enforced by FR-072), ensuring no collisions. For single providers without explicit `id`, the auto-generated ID from FR-035 is used. Examples: `LLSD_VLLM_PRIMARY_API_KEY`, `LLSD_PGVECTOR_HOST`. Characters not valid in env var names (hyphens) are replaced with underscores and uppercased. (From PR #242 review)
 - **OQ-004**: Should the operator create a default LlamaStackDistribution instance when installed? This is uncommon for Kubernetes operators but could improve the getting-started experience. If adopted, it should be opt-in via operator configuration (e.g., a Helm value or OLM parameter). (From team discussion, 2026-02-10)
 
