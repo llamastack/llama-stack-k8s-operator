@@ -26,9 +26,15 @@ Key design decision to validate: **providers are always lists** (e.g., `inferenc
 
 These are the decisions that will be hardest to change after implementation starts:
 
-**Decision 1: Typed slices instead of polymorphic JSON** (spec.md FR-004, research.md R1)
+**Decision 1: Typed structs instead of polymorphic JSON** (spec.md FR-004, FR-007, FR-011, research.md R1)
 
-The original PR #253 used `apiextensionsv1.JSON` for polymorphic fields (object OR list). This caused: no kubebuilder validation, impossible CEL rules, ~500 lines of parsing code, false-positive secret detection bugs. The new design uses `[]ProviderConfig` everywhere. Tradeoff: users always write list syntax. Verify this is acceptable.
+The original PR #253 used `apiextensionsv1.JSON` for three polymorphic fields. All three are replaced with typed alternatives:
+
+- **Providers** (`ProviderConfigOrList`): Now `[]ProviderConfig`. Users always write list syntax (FR-004).
+- **Models** (`[]apiextensionsv1.JSON`): Now `[]ModelConfig` with only `name` required (FR-007). Users write `- name: "llama3.2-8b"` instead of `- "llama3.2-8b"`.
+- **Expose** (`*apiextensionsv1.JSON`): Now `ExposeConfig` struct with `enabled` bool + `hostname` string (FR-011). Users write `expose: {enabled: true}` instead of `expose: true`.
+
+This eliminates: no kubebuilder validation, impossible CEL rules, ~500 lines of parsing code, false-positive secret detection bugs. Verify the tradeoffs are acceptable.
 
 **Decision 2: Explicit `secretRefs` field instead of heuristic detection** (spec.md FR-005, contracts/config-generation.yaml)
 
@@ -72,6 +78,8 @@ This spec addresses all critical issues raised in the PR #253 review:
 | PR #253 Issue | Resolution | Spec Location |
 |--------------|------------|---------------|
 | Polymorphic JSON types lose kubebuilder validation | Replaced with typed `[]ProviderConfig` slices | FR-004, research.md R1 |
+| Polymorphic models (`[]apiextensionsv1.JSON`) | Replaced with typed `[]ModelConfig` (only `name` required) | FR-007, data-model.md ModelConfig |
+| Polymorphic expose (`*apiextensionsv1.JSON`) | Replaced with typed `ExposeConfig` struct (`enabled` bool + `hostname` string) | FR-011, data-model.md ExposeConfig |
 | CEL rules impossible on `apiextensionsv1.JSON` | CEL now works because providers are typed | FR-071, FR-072 |
 | `extractDirectSecretRef` false positives | Explicit `secretRefs` field, no heuristic matching | FR-005 |
 | `sortedMapKeys` doesn't sort | Determinism addressed in NFR-001, merge.go | NFR-001 |
