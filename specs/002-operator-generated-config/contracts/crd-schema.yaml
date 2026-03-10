@@ -16,11 +16,11 @@ spec:
 
   # --- Providers (optional, mutually exclusive with overrideConfig) ---
   providers:
-    inference: []ProviderConfig      # Always a list (single provider = one-element list)
-    safety: []ProviderConfig
-    vectorIo: []ProviderConfig
-    toolRuntime: []ProviderConfig
-    telemetry: []ProviderConfig
+    inference: "[]ProviderConfig"      # Always a list (single provider = one-element list)
+    safety: "[]ProviderConfig"
+    vectorIo: "[]ProviderConfig"
+    toolRuntime: "[]ProviderConfig"
+    telemetry: "[]ProviderConfig"
 
   # ProviderConfig schema:
   # - id: string (required when list has >1 element; auto-generated for single-element lists)
