@@ -69,7 +69,7 @@ func TestNetworkPolicyTransformer_Default(t *testing.T) {
 	assert.Contains(t, yamlStr, "app.kubernetes.io/instance: test-instance")
 
 	// Should have ingress rules with default peers
-	assert.Contains(t, yamlStr, "app.kubernetes.io/part-of: llama-stack")
+	assert.Contains(t, yamlStr, "podSelector: {}")
 	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
 
 	// Should have port rule

@@ -107,7 +107,7 @@ kubectl apply -f config/samples/example-with-configmap.yaml
 ## Enabling Network Policies
 
 The operator can create an ingress-only `NetworkPolicy` for each `LlamaStackDistribution`. By default, traffic is limited to:
-- Pods with label `app.kubernetes.io/part-of: llama-stack` in the same namespace
+- All pods within the same namespace
 - The operator namespace (`llama-stack-k8s-operator-system`)
 
 ### Enable the Feature Flag

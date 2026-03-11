@@ -167,18 +167,13 @@ func (t *networkPolicyTransformer) isAllNamespacesAllowed() bool {
 }
 
 // buildDefaultPeers builds the default NetworkPolicy peers:
-// 1. Pods within the same namespace with app.kubernetes.io/part-of=llama-stack label.
+// 1. All pods within the same namespace (no pod-level restriction).
 // 2. All pods from the operator namespace.
 func (t *networkPolicyTransformer) buildDefaultPeers() []any {
 	return []any{
-		// Allow from pods in the same namespace with part-of label
+		// Allow from all pods in the same namespace
 		map[string]any{
-			"podSelector": map[string]any{
-				"matchLabels": map[string]any{
-					"app.kubernetes.io/part-of": "llama-stack",
-				},
-			},
-			"namespaceSelector": map[string]any{}, // Same namespace
+			"podSelector": map[string]any{},
 		},
 		// Allow from operator namespace (no podSelector to allow all pods in the namespace)
 		map[string]any{

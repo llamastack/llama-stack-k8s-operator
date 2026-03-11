@@ -372,13 +372,13 @@ func AssertNetworkPolicyAllowsDeploymentPort(t *testing.T, networkPolicy *networ
 	require.Len(t, deployment.Spec.Template.Spec.Containers[0].Ports, 1, "Container should have exactly one port")
 	containerPort := deployment.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
 
-	// Behavior 1: Verify a rule exists for intra-stack communication.
-	intraStackPredicate := func(peer networkingv1.NetworkPolicyPeer) bool {
-		return peer.PodSelector != nil && peer.PodSelector.MatchLabels["app.kubernetes.io/part-of"] == "llama-stack"
+	// Behavior 1: Verify a rule exists for same-namespace communication.
+	sameNamespacePredicate := func(peer networkingv1.NetworkPolicyPeer) bool {
+		return peer.PodSelector != nil && len(peer.PodSelector.MatchLabels) == 0 && peer.NamespaceSelector == nil
 	}
 	require.True(t,
-		hasMatchingIngressRule(t, networkPolicy, containerPort, intraStackPredicate),
-		"NetworkPolicy is missing a rule to allow traffic from other Llama Stack components on port %d", containerPort)
+		hasMatchingIngressRule(t, networkPolicy, containerPort, sameNamespacePredicate),
+		"NetworkPolicy is missing a rule to allow traffic from all pods in the same namespace on port %d", containerPort)
 
 	// Behavior 2: Verify a rule for operator communication exists.
 	// This allows the operator to communicate with the server pods it manages
