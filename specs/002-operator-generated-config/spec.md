@@ -244,6 +244,7 @@ The base config extraction follows a phased approach. Phase 1 provides an implem
 - **FR-033**: Provider `settings` MUST be merged into the provider's `config` section in config.yaml
 - **FR-034**: When multiple providers are specified for the same API type, each MUST have an explicit `id` field. CEL validation enforces this at admission time.
 - **FR-035**: A single provider (one-element list) without `id` MUST auto-generate `provider_id` from the `provider` field value
+- **FR-035a**: When merging user providers with base config providers, the operator MUST use overlay-by-provider-ID semantics: matching provider IDs are replaced by the user's provider, unmatched user provider IDs are appended, and unmatched base provider IDs are preserved. This ensures distributions that ship multiple default providers (e.g., `inline::sentence-transformers` for embeddings) are not broken by user overrides of a single provider.
 
 #### Telemetry Provider
 
