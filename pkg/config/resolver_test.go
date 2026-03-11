@@ -36,7 +36,7 @@ func TestEmbeddedConfigResolver_Resolve(t *testing.T) {
 			name:        "unknown distribution returns error",
 			distro:      "nonexistent",
 			wantErr:     true,
-			errContains: "no embedded config found",
+			errContains: "failed to load embedded config",
 		},
 	}
 

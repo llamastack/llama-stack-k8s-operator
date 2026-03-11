@@ -35,7 +35,7 @@ func expandSingleProvider(p v1alpha2.ProviderConfig, isSingle bool) (configProvi
 	id := p.ID
 	if id == "" {
 		if !isSingle {
-			return configProvider{}, fmt.Errorf("provider %q missing required 'id' field in multi-provider list", p.Provider)
+			return configProvider{}, fmt.Errorf("failed to expand provider %q: missing required 'id' field in multi-provider list", p.Provider)
 		}
 		// Auto-generate ID from provider field for single-element lists (FR-035)
 		id = p.Provider

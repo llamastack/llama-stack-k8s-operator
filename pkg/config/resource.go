@@ -100,7 +100,7 @@ func expandModel(
 		var err error
 		providerID, providerType, err = findProviderForAPI("inference", userProviders, baseConfig)
 		if err != nil {
-			return registeredResource{}, fmt.Errorf("model %q has no provider and no inference provider is configured", model.Name)
+			return registeredResource{}, fmt.Errorf("failed to register model %q: no provider specified and no inference provider is configured", model.Name)
 		}
 	}
 
@@ -144,7 +144,7 @@ func findProviderForAPI(
 		return id, pt, nil
 	}
 
-	return "", "", fmt.Errorf("no %s provider found", apiType)
+	return "", "", fmt.Errorf("failed to find %s provider", apiType)
 }
 
 func findUserProvider(apiType string, providers *v1alpha2.ProvidersSpec) (string, string, bool) {

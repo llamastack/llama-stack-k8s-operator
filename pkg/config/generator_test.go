@@ -156,7 +156,7 @@ func TestGenerateConfig_UnsupportedVersion(t *testing.T) {
 
 	_, err := GenerateConfig(spec, []byte("version: 99\n"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported config.yaml version")
+	assert.Contains(t, err.Error(), "failed to validate config version")
 }
 
 func TestGenerateConfig_WithStorage(t *testing.T) {

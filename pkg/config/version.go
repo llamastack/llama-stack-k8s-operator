@@ -26,14 +26,14 @@ func DetectConfigVersion(config map[string]interface{}) (int, error) {
 	case int64:
 		return int(val), nil
 	default:
-		return 0, fmt.Errorf("config.yaml 'version' field has unexpected type %T", v)
+		return 0, fmt.Errorf("failed to parse config.yaml version: unexpected type %T", v)
 	}
 }
 
 // ValidateConfigVersion checks that the config version is supported.
 func ValidateConfigVersion(version int) error {
 	if version != SupportedConfigVersion {
-		return fmt.Errorf("unsupported config.yaml version %d (expected %d)", version, SupportedConfigVersion)
+		return fmt.Errorf("failed to validate config version: version %d is not supported (expected %d)", version, SupportedConfigVersion)
 	}
 	return nil
 }

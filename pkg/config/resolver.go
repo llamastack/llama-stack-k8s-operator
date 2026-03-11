@@ -32,7 +32,7 @@ func NewEmbeddedConfigResolverFromFS(fs embed.FS) *EmbeddedConfigResolver {
 func (r *EmbeddedConfigResolver) Resolve(name string) ([]byte, error) {
 	data, err := r.fs.ReadFile(fmt.Sprintf("configs/%s/config.yaml", name))
 	if err != nil {
-		return nil, fmt.Errorf("no embedded config found for distribution %q: %w", name, err)
+		return nil, fmt.Errorf("failed to load embedded config for distribution %q: %w", name, err)
 	}
 	return data, nil
 }
