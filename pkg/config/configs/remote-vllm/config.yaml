@@ -1,0 +1,43 @@
+version: 2
+apis:
+  - agents
+  - inference
+  - safety
+  - telemetry
+  - tool_runtime
+  - vector_io
+providers:
+  inference:
+    - provider_id: remote::vllm
+      provider_type: remote::vllm
+      config:
+        url: https://localhost:8000/v1
+  safety:
+    - provider_id: inline::llama-guard
+      provider_type: inline::llama-guard
+      config: {}
+  agents:
+    - provider_id: inline::meta-reference
+      provider_type: inline::meta-reference
+      config:
+        persistence_store:
+          type: sqlite
+          db_path: /data/distributions/remote-vllm/agents_store.db
+  vector_io:
+    - provider_id: inline::faiss
+      provider_type: inline::faiss
+      config:
+        kvstore:
+          type: sqlite
+          db_path: /data/distributions/remote-vllm/faiss_store.db
+  telemetry:
+    - provider_id: inline::meta-reference
+      provider_type: inline::meta-reference
+      config: {}
+  tool_runtime:
+    - provider_id: inline::rag-runtime
+      provider_type: inline::rag-runtime
+      config: {}
+metadata_store:
+  type: sqlite
+  db_path: /data/distributions/remote-vllm/registry.db

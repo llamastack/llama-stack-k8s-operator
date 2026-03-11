@@ -1,0 +1,60 @@
+version: 2
+apis:
+  - agents
+  - datasetio
+  - eval
+  - inference
+  - safety
+  - scoring
+  - telemetry
+  - tool_runtime
+  - vector_io
+providers:
+  inference:
+    - provider_id: remote::vllm
+      provider_type: remote::vllm
+      config:
+        url: https://localhost:8000/v1
+  safety:
+    - provider_id: inline::llama-guard
+      provider_type: inline::llama-guard
+      config: {}
+  agents:
+    - provider_id: inline::meta-reference
+      provider_type: inline::meta-reference
+      config:
+        persistence_store:
+          type: postgres
+          connection_string: postgresql://postgres:postgres@localhost:5432/agents
+  vector_io:
+    - provider_id: remote::pgvector
+      provider_type: remote::pgvector
+      config:
+        host: localhost
+        port: 5432
+        db: pgvector
+        user: postgres
+        password: postgres
+  telemetry:
+    - provider_id: inline::meta-reference
+      provider_type: inline::meta-reference
+      config: {}
+  eval:
+    - provider_id: inline::meta-reference
+      provider_type: inline::meta-reference
+      config: {}
+  datasetio:
+    - provider_id: inline::localfs
+      provider_type: inline::localfs
+      config: {}
+  scoring:
+    - provider_id: inline::basic
+      provider_type: inline::basic
+      config: {}
+  tool_runtime:
+    - provider_id: inline::rag-runtime
+      provider_type: inline::rag-runtime
+      config: {}
+metadata_store:
+  type: postgres
+  connection_string: postgresql://postgres:postgres@localhost:5432/llamastack
