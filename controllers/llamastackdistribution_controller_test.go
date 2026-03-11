@@ -960,17 +960,8 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 	configMap.Data["image-overrides"] = "starter: quay.io/custom/llama-stack:starter"
 	require.NoError(t, k8sClient.Update(t.Context(), configMap))
 
-	// Simulate ConfigMap update by recreating reconciler (in real scenario this would be triggered by watch)
-	updatedReconciler, err := controllers.NewLlamaStackDistributionReconciler(
-		t.Context(),
-		k8sClient,
-		scheme.Scheme,
-		clusterInfo,
-	)
-	require.NoError(t, err)
-
-	// Reconcile with updated overrides
-	_, err = updatedReconciler.Reconcile(t.Context(), ctrl.Request{
+	// Reconcile with updated overrides using the same reconciler instance.
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
 	})
 	require.NoError(t, err)
@@ -981,4 +972,62 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 		deployment, func() bool {
 			return deployment.Spec.Template.Spec.Containers[0].Image == "quay.io/custom/llama-stack:starter"
 		}, "Deployment should be updated with new image")
+}
+
+func TestSuccessfulReconcileReturnsRequeueAfterFallback(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-requeue-fallback")
+	operatorNamespace := createTestNamespace(t, "llama-stack-k8s-operator-system")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{
+			"featureFlags": `enableNetworkPolicy:
+    enabled: false`,
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), configMap))
+
+	instance := NewDistributionBuilder().
+		WithName("test-requeue-fallback").
+		WithNamespace(namespace.Name).
+		WithDistribution("starter").
+		Build()
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"starter": "default-starter-image"},
+	}
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+		t.Context(),
+		k8sClient,
+		scheme.Scheme,
+		clusterInfo,
+	)
+	require.NoError(t, err)
+
+	// First reconcile creates resources.
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
+	})
+	require.NoError(t, err)
+
+	// Mark deployment as ready so reconcile can return the non-initializing path.
+	deployment := &appsv1.Deployment{}
+	waitForResource(t, k8sClient, instance.Namespace, instance.Name, deployment)
+	deployment.Status.ReadyReplicas = 1
+	deployment.Status.Replicas = 1
+	require.NoError(t, k8sClient.Status().Update(t.Context(), deployment))
+
+	result, err := reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 60*time.Second, result.RequeueAfter)
 }

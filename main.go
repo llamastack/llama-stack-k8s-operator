@@ -25,11 +25,14 @@ import (
 	llamaxk8siov1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/llamastack/llama-stack-k8s-operator/controllers"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
 	"go.uber.org/zap/zapcore"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -101,9 +104,24 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	operatorNamespace, err := deploy.GetOperatorNamespace()
+	if err != nil {
+		setupLog.Error(err, "failed to detect operator namespace for scoped ConfigMap cache")
+		os.Exit(1)
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                     scheme,
-		Metrics:                    metricsserver.Options{BindAddress: metricsAddr},
+		Scheme:  scheme,
+		Metrics: metricsserver.Options{BindAddress: metricsAddr},
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.ConfigMap{}: {
+					Namespaces: map[string]cache.Config{
+						operatorNamespace: {},
+					},
+				},
+			},
+		},
 		HealthProbeBindAddress:     probeAddr,
 		LeaderElection:             enableLeaderElection,
 		LeaderElectionID:           "54e06e98.llamastack.io",
