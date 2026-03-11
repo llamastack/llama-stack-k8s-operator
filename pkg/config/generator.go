@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 
@@ -41,8 +42,8 @@ func GenerateConfig(spec *v1alpha2.LlamaStackDistributionSpec, baseConfigYAML []
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateConfigVersion(configVersion); err != nil {
-		return nil, err
+	if vErr := ValidateConfigVersion(configVersion); vErr != nil {
+		return nil, vErr
 	}
 
 	// Merge user config onto base config
@@ -74,7 +75,7 @@ func GenerateConfig(spec *v1alpha2.LlamaStackDistributionSpec, baseConfigYAML []
 
 	// Compute content hash
 	hash := sha256.Sum256([]byte(configYAML))
-	contentHash := fmt.Sprintf("%x", hash)
+	contentHash := hex.EncodeToString(hash[:])
 
 	return &GeneratedConfig{
 		ConfigYAML:    configYAML,

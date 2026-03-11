@@ -33,7 +33,7 @@ func TestGenerateConfig_MinimalInference(t *testing.T) {
 	assert.NotEmpty(t, result.ContentHash)
 	assert.Len(t, result.ContentHash, 64, "SHA256 hex hash should be 64 chars")
 	assert.Empty(t, result.EnvVars, "no secrets configured")
-	assert.Greater(t, result.ProviderCount, 0)
+	assert.Positive(t, result.ProviderCount)
 	assert.Equal(t, 0, result.ResourceCount)
 	assert.Equal(t, 2, result.ConfigVersion)
 }
@@ -193,7 +193,7 @@ func TestGenerateConfig_EmptySpec(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, result.ConfigYAML)
-	assert.Greater(t, result.ProviderCount, 0, "base config providers should be counted")
+	assert.Positive(t, result.ProviderCount, "base config providers should be counted")
 	assert.Equal(t, 0, result.ResourceCount)
 }
 

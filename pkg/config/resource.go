@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 
 	v1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
@@ -44,7 +45,7 @@ func ExpandResources(
 	if len(resources.Tools) > 0 {
 		providerID, providerType, err := findProviderForAPI("tool_runtime", userProviders, baseConfig)
 		if err != nil {
-			return nil, fmt.Errorf("resources.tools requires at least one toolRuntime provider to be configured")
+			return nil, errors.New("resources.tools requires at least one toolRuntime provider to be configured")
 		}
 		for _, tool := range resources.Tools {
 			result = append(result, registeredResource{
@@ -64,7 +65,7 @@ func ExpandResources(
 	if len(resources.Shields) > 0 {
 		providerID, providerType, err := findProviderForAPI("safety", userProviders, baseConfig)
 		if err != nil {
-			return nil, fmt.Errorf("resources.shields requires at least one safety provider to be configured")
+			return nil, errors.New("resources.shields requires at least one safety provider to be configured")
 		}
 		for _, shield := range resources.Shields {
 			result = append(result, registeredResource{
@@ -132,46 +133,71 @@ func findProviderForAPI(
 	apiType string,
 	userProviders *v1alpha2.ProvidersSpec,
 	baseConfig map[string]interface{},
-) (providerID, providerType string, err error) {
+) (string, string, error) {
 	// Check user providers first
-	if userProviders != nil {
-		var providers []v1alpha2.ProviderConfig
-		switch apiType {
-		case "inference":
-			providers = userProviders.Inference
-		case "safety":
-			providers = userProviders.Safety
-		case "vector_io":
-			providers = userProviders.VectorIo
-		case "tool_runtime":
-			providers = userProviders.ToolRuntime
-		case "telemetry":
-			providers = userProviders.Telemetry
-		}
-		if len(providers) > 0 {
-			p := providers[0]
-			id := p.ID
-			if id == "" {
-				id = p.Provider
-			}
-			return id, "remote::" + p.Provider, nil
-		}
+	if id, pt, ok := findUserProvider(apiType, userProviders); ok {
+		return id, pt, nil
 	}
 
 	// Fall back to base config
-	if baseConfig != nil {
-		if providersMap, ok := baseConfig["providers"].(map[string]interface{}); ok {
-			if apiProviderList, ok := providersMap[apiType].([]interface{}); ok && len(apiProviderList) > 0 {
-				if firstProvider, ok := apiProviderList[0].(map[string]interface{}); ok {
-					pid, _ := firstProvider["provider_id"].(string)
-					pt, _ := firstProvider["provider_type"].(string)
-					if pid != "" {
-						return pid, pt, nil
-					}
-				}
-			}
-		}
+	if id, pt, ok := findBaseConfigProvider(apiType, baseConfig); ok {
+		return id, pt, nil
 	}
 
 	return "", "", fmt.Errorf("no %s provider found", apiType)
+}
+
+func findUserProvider(apiType string, providers *v1alpha2.ProvidersSpec) (string, string, bool) {
+	if providers == nil {
+		return "", "", false
+	}
+
+	var list []v1alpha2.ProviderConfig
+	switch apiType {
+	case "inference":
+		list = providers.Inference
+	case "safety":
+		list = providers.Safety
+	case "vector_io":
+		list = providers.VectorIo
+	case "tool_runtime":
+		list = providers.ToolRuntime
+	case "telemetry":
+		list = providers.Telemetry
+	}
+
+	if len(list) == 0 {
+		return "", "", false
+	}
+
+	p := list[0]
+	id := p.ID
+	if id == "" {
+		id = p.Provider
+	}
+	return id, "remote::" + p.Provider, true
+}
+
+func findBaseConfigProvider(apiType string, baseConfig map[string]interface{}) (string, string, bool) {
+	if baseConfig == nil {
+		return "", "", false
+	}
+	providersMap, ok := baseConfig["providers"].(map[string]interface{})
+	if !ok {
+		return "", "", false
+	}
+	apiProviderList, ok := providersMap[apiType].([]interface{})
+	if !ok || len(apiProviderList) == 0 {
+		return "", "", false
+	}
+	firstProvider, ok := apiProviderList[0].(map[string]interface{})
+	if !ok {
+		return "", "", false
+	}
+	pid, _ := firstProvider["provider_id"].(string)
+	pt, _ := firstProvider["provider_type"].(string)
+	if pid == "" {
+		return "", "", false
+	}
+	return pid, pt, true
 }

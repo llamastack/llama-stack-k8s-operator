@@ -512,20 +512,20 @@ const (
 	ConditionTypeAvailable         = "Available"
 	ConditionTypeSecretsResolved   = "SecretsResolved"
 
-	// ConfigGenerated reasons
+	// ConfigGenerated reasons.
 	ReasonConfigGenerationSucceeded = "ConfigGenerationSucceeded"
 	ReasonConfigGenerationFailed    = "ConfigGenerationFailed"
 	ReasonBaseConfigRequired        = "BaseConfigRequired"
 
-	// DeploymentUpdated reasons
+	// DeploymentUpdated reasons.
 	ReasonDeploymentUpdateSucceeded = "DeploymentUpdateSucceeded"
 	ReasonDeploymentUpdateFailed    = "DeploymentUpdateFailed"
 
-	// Available reasons
+	// Available reasons.
 	ReasonMinimumReplicasAvailable = "MinimumReplicasAvailable"
 	ReasonReplicasUnavailable      = "ReplicasUnavailable"
 
-	// SecretsResolved reasons
+	// SecretsResolved reasons.
 	ReasonAllSecretsFound = "AllSecretsFound"
 	ReasonSecretNotFound  = "SecretNotFound"
 )
@@ -582,6 +582,7 @@ type ProviderInfo struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.resources)",message="overrideConfig and resources are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.storage)",message="overrideConfig and storage are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.disabled)",message="overrideConfig and disabled are mutually exclusive"
+//nolint:lll // kubebuilder markers cannot be split across lines.
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d, d == 'inference') || !has(self.providers.inference) || self.providers.inference.size() == 0",message="inference cannot be both in providers and disabled"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d, d == 'safety') || !has(self.providers.safety) || self.providers.safety.size() == 0",message="safety cannot be both in providers and disabled"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d, d == 'vectorIo') || !has(self.providers.vectorIo) || self.providers.vectorIo.size() == 0",message="vectorIo cannot be both in providers and disabled"

@@ -4,6 +4,8 @@ import (
 	v1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 )
 
+const storageTypeSQLite = "sqlite"
+
 // ApplyStorage applies storage configuration from the CRD to the base config.
 // Uses merge_by_subsection strategy: kv and sql are independently replaced if specified.
 func ApplyStorage(storage *v1alpha2.StorageSpec, config map[string]interface{}) {
@@ -23,7 +25,7 @@ func ApplyStorage(storage *v1alpha2.StorageSpec, config map[string]interface{}) 
 func applyKVStorage(kv *v1alpha2.KVStorageSpec, config map[string]interface{}) {
 	kvType := kv.Type
 	if kvType == "" {
-		kvType = "sqlite"
+		kvType = storageTypeSQLite
 	}
 
 	kvConfig := map[string]interface{}{
@@ -38,7 +40,7 @@ func applyKVStorage(kv *v1alpha2.KVStorageSpec, config map[string]interface{}) {
 		if kv.Password != nil {
 			kvConfig["password"] = "${env.LLSD_STORAGE_KV_PASSWORD}"
 		}
-	case "sqlite":
+	case storageTypeSQLite:
 		kvConfig["db_path"] = "/data/kv_store.db"
 	}
 
@@ -48,7 +50,7 @@ func applyKVStorage(kv *v1alpha2.KVStorageSpec, config map[string]interface{}) {
 func applySQLStorage(sql *v1alpha2.SQLStorageSpec, config map[string]interface{}) {
 	sqlType := sql.Type
 	if sqlType == "" {
-		sqlType = "sqlite"
+		sqlType = storageTypeSQLite
 	}
 
 	sqlConfig := map[string]interface{}{
@@ -60,7 +62,7 @@ func applySQLStorage(sql *v1alpha2.SQLStorageSpec, config map[string]interface{}
 		if sql.ConnectionString != nil {
 			sqlConfig["connection_string"] = "${env.LLSD_STORAGE_SQL_CONNECTION_STRING}"
 		}
-	case "sqlite":
+	case storageTypeSQLite:
 		sqlConfig["db_path"] = "/data/inference_store.db"
 	}
 

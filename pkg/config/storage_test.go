@@ -4,9 +4,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	v1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 )
+
+func requireStore(t *testing.T, config map[string]interface{}, key string) map[string]interface{} {
+	t.Helper()
+	v, ok := config[key].(map[string]interface{})
+	require.True(t, ok, "expected map at key %q", key)
+	return v
+}
 
 func TestApplyStorage_Nil(t *testing.T) {
 	config := map[string]interface{}{
@@ -14,8 +22,9 @@ func TestApplyStorage_Nil(t *testing.T) {
 	}
 
 	ApplyStorage(nil, config)
-	assert.Equal(t, "sqlite", config["metadata_store"].(map[string]interface{})["type"])
-	assert.Equal(t, "/data/original.db", config["metadata_store"].(map[string]interface{})["db_path"])
+	kv := requireStore(t, config, "metadata_store")
+	assert.Equal(t, "sqlite", kv["type"])
+	assert.Equal(t, "/data/original.db", kv["db_path"])
 }
 
 func TestApplyStorage_KV_SQLite(t *testing.T) {
@@ -25,7 +34,7 @@ func TestApplyStorage_KV_SQLite(t *testing.T) {
 		KV: &v1alpha2.KVStorageSpec{Type: "sqlite"},
 	}, config)
 
-	kv := config["metadata_store"].(map[string]interface{})
+	kv := requireStore(t, config, "metadata_store")
 	assert.Equal(t, "sqlite", kv["type"])
 	assert.Equal(t, "/data/kv_store.db", kv["db_path"])
 }
@@ -37,7 +46,7 @@ func TestApplyStorage_KV_SQLiteDefault(t *testing.T) {
 		KV: &v1alpha2.KVStorageSpec{},
 	}, config)
 
-	kv := config["metadata_store"].(map[string]interface{})
+	kv := requireStore(t, config, "metadata_store")
 	assert.Equal(t, "sqlite", kv["type"])
 }
 
@@ -52,7 +61,7 @@ func TestApplyStorage_KV_Redis(t *testing.T) {
 		},
 	}, config)
 
-	kv := config["metadata_store"].(map[string]interface{})
+	kv := requireStore(t, config, "metadata_store")
 	assert.Equal(t, "redis", kv["type"])
 	assert.Equal(t, "redis://redis:6379", kv["endpoint"])
 	assert.Equal(t, "${env.LLSD_STORAGE_KV_PASSWORD}", kv["password"])
@@ -65,7 +74,7 @@ func TestApplyStorage_SQL_Sqlite(t *testing.T) {
 		SQL: &v1alpha2.SQLStorageSpec{Type: "sqlite"},
 	}, config)
 
-	sql := config["inference_store"].(map[string]interface{})
+	sql := requireStore(t, config, "inference_store")
 	assert.Equal(t, "sqlite", sql["type"])
 	assert.Equal(t, "/data/inference_store.db", sql["db_path"])
 }
@@ -80,7 +89,7 @@ func TestApplyStorage_SQL_Postgres(t *testing.T) {
 		},
 	}, config)
 
-	sql := config["inference_store"].(map[string]interface{})
+	sql := requireStore(t, config, "inference_store")
 	assert.Equal(t, "postgres", sql["type"])
 	assert.Equal(t, "${env.LLSD_STORAGE_SQL_CONNECTION_STRING}", sql["connection_string"])
 }
@@ -99,10 +108,10 @@ func TestApplyStorage_IndependentSubsections(t *testing.T) {
 		},
 	}, config)
 
-	kv := config["metadata_store"].(map[string]interface{})
+	kv := requireStore(t, config, "metadata_store")
 	assert.Equal(t, "redis", kv["type"])
 
-	sql := config["inference_store"].(map[string]interface{})
+	sql := requireStore(t, config, "inference_store")
 	assert.Equal(t, "sqlite", sql["type"])
 	assert.Equal(t, "/old/sql.db", sql["db_path"])
 }

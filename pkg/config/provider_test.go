@@ -11,8 +11,10 @@ import (
 	v1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 )
 
-func jsonSettings(m map[string]interface{}) *apiextensionsv1.JSON {
-	data, _ := json.Marshal(m)
+func jsonSettings(t *testing.T, m map[string]interface{}) *apiextensionsv1.JSON {
+	t.Helper()
+	data, err := json.Marshal(m)
+	require.NoError(t, err)
 	return &apiextensionsv1.JSON{Raw: data}
 }
 
@@ -89,7 +91,7 @@ func TestExpandProviders_WithSettings(t *testing.T) {
 		{
 			Provider: "vllm",
 			Endpoint: "http://vllm:8000",
-			Settings: jsonSettings(map[string]interface{}{
+			Settings: jsonSettings(t, map[string]interface{}{
 				"max_tokens":  4096,
 				"temperature": 0.7,
 			}),
@@ -101,8 +103,8 @@ func TestExpandProviders_WithSettings(t *testing.T) {
 	require.Len(t, result, 1)
 
 	assert.Equal(t, "http://vllm:8000", result[0].Config["url"])
-	assert.Equal(t, float64(4096), result[0].Config["max_tokens"])
-	assert.Equal(t, 0.7, result[0].Config["temperature"])
+	assert.InDelta(t, float64(4096), result[0].Config["max_tokens"], 0)
+	assert.InDelta(t, 0.7, result[0].Config["temperature"], 1e-9)
 }
 
 func TestExpandProviders_WithAPIKey(t *testing.T) {

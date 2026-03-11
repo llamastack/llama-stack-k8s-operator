@@ -1,6 +1,9 @@
 package config
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 const (
 	// SupportedConfigVersion is the config.yaml version this operator supports.
@@ -12,7 +15,7 @@ const (
 func DetectConfigVersion(config map[string]interface{}) (int, error) {
 	v, ok := config["version"]
 	if !ok {
-		return 0, fmt.Errorf("config.yaml missing required 'version' field")
+		return 0, errors.New("config.yaml missing required 'version' field")
 	}
 
 	switch val := v.(type) {
