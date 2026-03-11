@@ -148,7 +148,7 @@ All technical decisions have been researched and documented in [research.md](res
 |------|----------|------|
 | Provider/resource types | Typed `[]ProviderConfig` slices (no polymorphism) | Low |
 | Base config source | Embedded `go:embed` (Phase 1) + ConfigResolver interface | Low |
-| Config merging | Deep merge with full API-type replacement semantics | Low |
+| Config merging | Deep merge with provider overlay-by-ID semantics | Low |
 | Env var naming | `LLSD_<PROVIDER_ID>_<FIELD>` | Low |
 | Conversion | v1alpha2 hub, v1alpha1 spoke with annotation preservation | Low |
 | Validation layers | CEL + webhook + controller | Low |
@@ -248,7 +248,7 @@ Input: v1alpha2 Spec + base config ([]byte)
   │   └── From spec.Storage (connectionString, password)
   │
   ├── MergeConfig(baseConfig, userConfig) → merged config
-  │   ├── Providers: full API-type replacement
+  │   ├── Providers: overlay by provider ID (match→replace, new→append, unmatched→preserve)
   │   ├── Storage: per-subsection replacement
   │   ├── Resources: additive
   │   └── Disabled: subtractive
