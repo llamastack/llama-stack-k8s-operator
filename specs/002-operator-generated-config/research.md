@@ -94,17 +94,18 @@ configs/
 
 ### R3: Config Merging Strategy
 
-**Decision**: Deep merge user configuration over base config using a recursive map merge, with provider replacement semantics (user providers replace base providers by API type, not merge into them).
+**Decision**: Deep merge user configuration over base config using a recursive map merge, with provider overlay semantics (user providers are overlaid onto base providers by provider ID, preserving unmatched base providers).
 
-**Rationale**: Users expect that specifying `providers.inference` replaces the entire inference provider section from the base config, not merges individual fields. This matches Kubernetes strategic merge patch behavior for typed fields.
+**Rationale**: Distributions ship default providers (e.g., `inline::sentence-transformers` for embeddings, `inline::meta-reference` for agents) that users should not need to re-declare. Overlay-by-ID lets users override specific providers while preserving the rest, avoiding breaking changes when layering on top of existing distributions. For distributions created from scratch the base is empty, so overlay behaves identically to full replacement.
 
 **Alternatives considered**:
+- **Replace by API type**: When user specifies providers for an API type, all base providers of that type are dropped. Simple but destructive; breaks distributions that ship multiple providers per API type.
 - **JSON Merge Patch (RFC 7386)**: Simple but cannot handle arrays properly (replaces entire arrays). Models and tools are arrays, so this is insufficient.
 - **JSON Patch (RFC 6902)**: Too low-level for user-facing configuration. Users would need to specify operations (add, replace, remove).
 - **Strategic Merge Patch**: Kubernetes-native but requires CRD schema annotations for merge keys. Adds complexity to the internal config model.
 
 **Merge rules**:
-1. Provider sections: Replace entire API type block (e.g., `inference` section is fully replaced if user specifies it)
+1. Provider sections: Overlay by provider ID (matching IDs replaced, unmatched user IDs appended, unmatched base IDs preserved)
 2. Storage sections: Merge at subsection level (`kv`, `sql` each independently replaced if specified)
 3. Resources: Additive (user resources added to base registered_resources)
 4. Disabled APIs: Subtractive (remove matching APIs from generated config)
@@ -221,7 +222,7 @@ The resolution chain is:
 |------|----------|------------|
 | Provider/resource types | Typed `[]ProviderConfig` slices, `[]ModelConfig` | Low (full schema validation) |
 | Base config source | Embedded `go:embed` (Phase 1) + OCI labels (Phase 2) | Low |
-| Config merging | Deep merge with provider replacement semantics | Low |
+| Config merging | Deep merge with provider overlay-by-ID semantics | Low |
 | Env var naming | `LLSD_<PROVIDER_ID>_<FIELD>` | Low |
 | Conversion | v1alpha2 hub, v1alpha1 spoke with annotation preservation | Low |
 | Validation layers | CEL + webhook + controller | Low |

@@ -65,18 +65,33 @@ resource_mapping:
 # --- Merge Rules ---
 merge_rules:
   providers:
-    strategy: replace_by_api_type
+    strategy: overlay_by_provider_id
     description: >
-      When user specifies providers for an API type, ALL base config providers
-      for that API type are replaced. Base providers with unmatched IDs are NOT
-      preserved. If the user wants to keep a base provider, they must re-declare
-      it in their provider list.
+      User providers are overlaid onto the base config by provider_id.
+      Matching IDs: user provider replaces the base provider.
+      Unmatched user IDs: appended to the base provider list.
+      Unmatched base IDs: preserved in the final config.
+      This preserves base config providers that the user did not explicitly
+      override (e.g., inline::sentence-transformers for embeddings,
+      inline::meta-reference for agents), which avoids breaking changes
+      when layering user config on top of existing distributions.
     examples:
-      - description: "Full replacement"
+      - description: "Override by ID, preserve unmatched base providers"
+        base:
+          - {provider_id: base-inf, provider_type: "remote::vllm"}
+          - {provider_id: sentence-transformers, provider_type: "inline::sentence-transformers"}
+        user: [{id: base-inf, provider: ollama, endpoint: "http://ollama:11434"}]
+        result:
+          - {provider_id: base-inf, provider_type: "remote::ollama", config: {url: "http://ollama:11434"}}
+          - {provider_id: sentence-transformers, provider_type: "inline::sentence-transformers"}
+        note: "base-inf is replaced; sentence-transformers is preserved (unmatched base ID)"
+      - description: "Append new provider, preserve all base providers"
         base: [{provider_id: base-inf, provider_type: "remote::vllm"}]
         user: [{id: custom-inf, provider: ollama, endpoint: "http://ollama:11434"}]
-        result: [{provider_id: custom-inf, provider_type: "remote::ollama", config: {url: "http://ollama:11434"}}]
-        note: "base-inf is removed because user specified inference providers"
+        result:
+          - {provider_id: base-inf, provider_type: "remote::vllm"}
+          - {provider_id: custom-inf, provider_type: "remote::ollama", config: {url: "http://ollama:11434"}}
+        note: "custom-inf is appended (unmatched user ID); base-inf is preserved"
       - description: "No user providers for API type"
         base: [{provider_id: base-inf, provider_type: "remote::vllm"}]
         user: []  # providers.inference not specified
