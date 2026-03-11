@@ -2863,14 +2863,17 @@ spec:
                         image:
                           description: Image is the container image containing the
                             provider implementation.
+                          minLength: 1
                           type: string
                         providerId:
                           description: ProviderID is the unique provider identifier.
+                          minLength: 1
                           type: string
                       required:
                       - image
                       - providerId
                       type: object
+                    minItems: 1
                     type: array
                 type: object
               networking:
@@ -2884,32 +2887,43 @@ spec:
                         description: Labels is a list of namespace label keys for
                           access control (OR semantics).
                         items:
+                          minLength: 1
                           type: string
+                        minItems: 1
                         type: array
                       namespaces:
                         description: |-
                           Namespaces is a list of namespace names allowed to access the service.
                           Use "*" to allow all namespaces.
                         items:
+                          minLength: 1
                           type: string
+                        minItems: 1
                         type: array
                     type: object
                   expose:
                     description: Expose controls external service exposure via Ingress/Route.
                     properties:
                       enabled:
-                        description: Enabled activates external access via Ingress/Route.
+                        description: |-
+                          Enabled activates external access via Ingress/Route.
+                          nil = not specified (no Ingress), false = explicitly disabled, true = create Ingress.
                         type: boolean
                       hostname:
                         description: |-
                           Hostname sets a custom hostname for the Ingress/Route.
-                          If not specified, an auto-generated hostname is used.
+                          When omitted, an auto-generated hostname is used.
                         type: string
                     type: object
+                    x-kubernetes-validations:
+                    - message: hostname must not be empty if specified
+                      rule: '!has(self.hostname) || self.hostname != '''''
                   port:
                     default: 8321
                     description: Port is the server listen port.
                     format: int32
+                    maximum: 65535
+                    minimum: 1
                     type: integer
                   tls:
                     description: TLS configures TLS for the server.
@@ -2922,12 +2936,15 @@ spec:
                               ConfigMapKeys specifies keys within the ConfigMap containing CA bundle data.
                               All certificates from these keys will be concatenated. Defaults to ["ca-bundle.crt"].
                             items:
+                              minLength: 1
                               type: string
                             maxItems: 50
+                            minItems: 1
                             type: array
                           configMapName:
                             description: ConfigMapName is the name of the ConfigMap
                               containing CA bundle certificates.
+                            minLength: 1
                             type: string
                           configMapNamespace:
                             description: ConfigMapNamespace is the namespace of the
@@ -2936,6 +2953,10 @@ spec:
                         required:
                         - configMapName
                         type: object
+                        x-kubernetes-validations:
+                        - message: configMapNamespace must not be empty if specified
+                          rule: '!has(self.configMapNamespace) || self.configMapNamespace
+                            != '''''
                       enabled:
                         description: Enabled activates TLS on the server.
                         type: boolean
@@ -2947,6 +2968,10 @@ spec:
                     x-kubernetes-validations:
                     - message: secretName is required when TLS is enabled
                       rule: '!self.enabled || has(self.secretName)'
+                    - message: secretName is only valid when TLS is enabled
+                      rule: '!has(self.secretName) || self.enabled'
+                    - message: caBundle is only valid when TLS is enabled
+                      rule: '!has(self.caBundle) || self.enabled'
                 type: object
               overrideConfig:
                 description: |-
@@ -2957,6 +2982,7 @@ spec:
                     description: |-
                       ConfigMapName is the name of the ConfigMap containing config.yaml.
                       The ConfigMap must reside in the same namespace as the CR.
+                    minLength: 1
                     type: string
                 required:
                 - configMapName
@@ -2979,9 +3005,11 @@ spec:
                           properties:
                             key:
                               description: Key is the key within the Secret.
+                              minLength: 1
                               type: string
                             name:
                               description: Name is the name of the Kubernetes Secret.
+                              minLength: 1
                               type: string
                           required:
                           - key
@@ -3000,6 +3028,7 @@ spec:
                           description: |-
                             Provider is the provider type (e.g., vllm, ollama, pgvector).
                             Maps to provider_type with "remote::" prefix in config.yaml.
+                          minLength: 1
                           type: string
                         secretRefs:
                           additionalProperties:
@@ -3008,9 +3037,11 @@ spec:
                             properties:
                               key:
                                 description: Key is the key within the Secret.
+                                minLength: 1
                                 type: string
                               name:
                                 description: Name is the name of the Kubernetes Secret.
+                                minLength: 1
                                 type: string
                             required:
                             - key
@@ -3019,6 +3050,7 @@ spec:
                           description: |-
                             SecretRefs contains named secret references for provider-specific connection fields.
                             Each entry is resolved to an env var LLSD_<PROVIDER_ID>_<KEY>.
+                          minProperties: 1
                           type: object
                         settings:
                           description: |-
@@ -3028,6 +3060,10 @@ spec:
                       required:
                       - provider
                       type: object
+                      x-kubernetes-validations:
+                      - message: id must not be empty if specified
+                        rule: '!has(self.id) || self.id != '''''
+                    minItems: 1
                     type: array
                     x-kubernetes-validations:
                     - message: each provider must have an explicit id when multiple
@@ -3046,9 +3082,11 @@ spec:
                           properties:
                             key:
                               description: Key is the key within the Secret.
+                              minLength: 1
                               type: string
                             name:
                               description: Name is the name of the Kubernetes Secret.
+                              minLength: 1
                               type: string
                           required:
                           - key
@@ -3067,6 +3105,7 @@ spec:
                           description: |-
                             Provider is the provider type (e.g., vllm, ollama, pgvector).
                             Maps to provider_type with "remote::" prefix in config.yaml.
+                          minLength: 1
                           type: string
                         secretRefs:
                           additionalProperties:
@@ -3075,9 +3114,11 @@ spec:
                             properties:
                               key:
                                 description: Key is the key within the Secret.
+                                minLength: 1
                                 type: string
                               name:
                                 description: Name is the name of the Kubernetes Secret.
+                                minLength: 1
                                 type: string
                             required:
                             - key
@@ -3086,6 +3127,7 @@ spec:
                           description: |-
                             SecretRefs contains named secret references for provider-specific connection fields.
                             Each entry is resolved to an env var LLSD_<PROVIDER_ID>_<KEY>.
+                          minProperties: 1
                           type: object
                         settings:
                           description: |-
@@ -3095,6 +3137,10 @@ spec:
                       required:
                       - provider
                       type: object
+                      x-kubernetes-validations:
+                      - message: id must not be empty if specified
+                        rule: '!has(self.id) || self.id != '''''
+                    minItems: 1
                     type: array
                     x-kubernetes-validations:
                     - message: each provider must have an explicit id when multiple
@@ -3113,9 +3159,11 @@ spec:
                           properties:
                             key:
                               description: Key is the key within the Secret.
+                              minLength: 1
                               type: string
                             name:
                               description: Name is the name of the Kubernetes Secret.
+                              minLength: 1
                               type: string
                           required:
                           - key
@@ -3134,6 +3182,7 @@ spec:
                           description: |-
                             Provider is the provider type (e.g., vllm, ollama, pgvector).
                             Maps to provider_type with "remote::" prefix in config.yaml.
+                          minLength: 1
                           type: string
                         secretRefs:
                           additionalProperties:
@@ -3142,9 +3191,11 @@ spec:
                             properties:
                               key:
                                 description: Key is the key within the Secret.
+                                minLength: 1
                                 type: string
                               name:
                                 description: Name is the name of the Kubernetes Secret.
+                                minLength: 1
                                 type: string
                             required:
                             - key
@@ -3153,6 +3204,7 @@ spec:
                           description: |-
                             SecretRefs contains named secret references for provider-specific connection fields.
                             Each entry is resolved to an env var LLSD_<PROVIDER_ID>_<KEY>.
+                          minProperties: 1
                           type: object
                         settings:
                           description: |-
@@ -3162,13 +3214,17 @@ spec:
                       required:
                       - provider
                       type: object
+                      x-kubernetes-validations:
+                      - message: id must not be empty if specified
+                        rule: '!has(self.id) || self.id != '''''
+                    minItems: 1
                     type: array
                     x-kubernetes-validations:
                     - message: each provider must have an explicit id when multiple
                         providers are specified
                       rule: self.size() <= 1 || self.all(p, has(p.id))
                   toolRuntime:
-                    description: ToolRuntime providers (e.g., brave-search, tavily-search).
+                    description: ToolRuntime providers (e.g., brave-search, rag-runtime).
                     items:
                       description: ProviderConfig defines configuration for a single
                         LlamaStack provider instance.
@@ -3180,9 +3236,11 @@ spec:
                           properties:
                             key:
                               description: Key is the key within the Secret.
+                              minLength: 1
                               type: string
                             name:
                               description: Name is the name of the Kubernetes Secret.
+                              minLength: 1
                               type: string
                           required:
                           - key
@@ -3201,6 +3259,7 @@ spec:
                           description: |-
                             Provider is the provider type (e.g., vllm, ollama, pgvector).
                             Maps to provider_type with "remote::" prefix in config.yaml.
+                          minLength: 1
                           type: string
                         secretRefs:
                           additionalProperties:
@@ -3209,9 +3268,11 @@ spec:
                             properties:
                               key:
                                 description: Key is the key within the Secret.
+                                minLength: 1
                                 type: string
                               name:
                                 description: Name is the name of the Kubernetes Secret.
+                                minLength: 1
                                 type: string
                             required:
                             - key
@@ -3220,6 +3281,7 @@ spec:
                           description: |-
                             SecretRefs contains named secret references for provider-specific connection fields.
                             Each entry is resolved to an env var LLSD_<PROVIDER_ID>_<KEY>.
+                          minProperties: 1
                           type: object
                         settings:
                           description: |-
@@ -3229,6 +3291,10 @@ spec:
                       required:
                       - provider
                       type: object
+                      x-kubernetes-validations:
+                      - message: id must not be empty if specified
+                        rule: '!has(self.id) || self.id != '''''
+                    minItems: 1
                     type: array
                     x-kubernetes-validations:
                     - message: each provider must have an explicit id when multiple
@@ -3247,9 +3313,11 @@ spec:
                           properties:
                             key:
                               description: Key is the key within the Secret.
+                              minLength: 1
                               type: string
                             name:
                               description: Name is the name of the Kubernetes Secret.
+                              minLength: 1
                               type: string
                           required:
                           - key
@@ -3268,6 +3336,7 @@ spec:
                           description: |-
                             Provider is the provider type (e.g., vllm, ollama, pgvector).
                             Maps to provider_type with "remote::" prefix in config.yaml.
+                          minLength: 1
                           type: string
                         secretRefs:
                           additionalProperties:
@@ -3276,9 +3345,11 @@ spec:
                             properties:
                               key:
                                 description: Key is the key within the Secret.
+                                minLength: 1
                                 type: string
                               name:
                                 description: Name is the name of the Kubernetes Secret.
+                                minLength: 1
                                 type: string
                             required:
                             - key
@@ -3287,6 +3358,7 @@ spec:
                           description: |-
                             SecretRefs contains named secret references for provider-specific connection fields.
                             Each entry is resolved to an env var LLSD_<PROVIDER_ID>_<KEY>.
+                          minProperties: 1
                           type: object
                         settings:
                           description: |-
@@ -3296,6 +3368,10 @@ spec:
                       required:
                       - provider
                       type: object
+                      x-kubernetes-validations:
+                      - message: id must not be empty if specified
+                        rule: '!has(self.id) || self.id != '''''
+                    minItems: 1
                     type: array
                     x-kubernetes-validations:
                     - message: each provider must have an explicit id when multiple
@@ -3321,6 +3397,7 @@ spec:
                           type: string
                         name:
                           description: Name is the model identifier (e.g., "llama3.2-8b").
+                          minLength: 1
                           type: string
                         provider:
                           description: |-
@@ -3333,16 +3410,30 @@ spec:
                       required:
                       - name
                       type: object
+                      x-kubernetes-validations:
+                      - message: provider must not be empty if specified
+                        rule: '!has(self.provider) || self.provider != '''''
+                      - message: modelType must not be empty if specified
+                        rule: '!has(self.modelType) || self.modelType != '''''
+                      - message: quantization must not be empty if specified
+                        rule: '!has(self.quantization) || self.quantization != '''''
+                    minItems: 1
                     type: array
                   shields:
-                    description: Shields to register with safety providers.
+                    description: Shields are safety shield names to register with
+                      the safety provider.
                     items:
+                      minLength: 1
                       type: string
+                    minItems: 1
                     type: array
                   tools:
-                    description: Tools groups to register with toolRuntime providers.
+                    description: Tools are tool group names to register with the toolRuntime
+                      provider.
                     items:
+                      minLength: 1
                       type: string
+                    minItems: 1
                     type: array
                 type: object
               storage:
@@ -3363,9 +3454,11 @@ spec:
                         properties:
                           key:
                             description: Key is the key within the Secret.
+                            minLength: 1
                             type: string
                           name:
                             description: Name is the name of the Kubernetes Secret.
+                            minLength: 1
                             type: string
                         required:
                         - key
@@ -3382,6 +3475,10 @@ spec:
                     x-kubernetes-validations:
                     - message: endpoint is required when type is redis
                       rule: self.type != 'redis' || has(self.endpoint)
+                    - message: endpoint is only valid when type is redis
+                      rule: '!has(self.endpoint) || self.type == ''redis'''
+                    - message: password is only valid when type is redis
+                      rule: '!has(self.password) || self.type == ''redis'''
                   sql:
                     description: SQL configures the relational storage backend.
                     properties:
@@ -3392,9 +3489,11 @@ spec:
                         properties:
                           key:
                             description: Key is the key within the Secret.
+                            minLength: 1
                             type: string
                           name:
                             description: Name is the name of the Kubernetes Secret.
+                            minLength: 1
                             type: string
                         required:
                         - key
@@ -3411,6 +3510,8 @@ spec:
                     x-kubernetes-validations:
                     - message: connectionString is required when type is postgres
                       rule: self.type != 'postgres' || has(self.connectionString)
+                    - message: connectionString is only valid when type is postgres
+                      rule: '!has(self.connectionString) || self.type == ''postgres'''
                 type: object
               workload:
                 description: Workload configures Kubernetes Deployment settings.
@@ -3421,36 +3522,49 @@ spec:
                       maxReplicas:
                         description: MaxReplicas is the upper bound replica count.
                         format: int32
+                        minimum: 1
                         type: integer
                       minReplicas:
                         description: MinReplicas is the lower bound replica count.
                         format: int32
+                        minimum: 1
                         type: integer
                       targetCPUUtilizationPercentage:
                         description: TargetCPUUtilizationPercentage configures CPU-based
                           scaling.
                         format: int32
+                        maximum: 100
+                        minimum: 1
                         type: integer
                       targetMemoryUtilizationPercentage:
                         description: TargetMemoryUtilizationPercentage configures
                           memory-based scaling.
                         format: int32
+                        maximum: 100
+                        minimum: 1
                         type: integer
                     required:
                     - maxReplicas
                     type: object
+                    x-kubernetes-validations:
+                    - message: maxReplicas must be greater than or equal to minReplicas
+                      rule: '!has(self.minReplicas) || self.maxReplicas >= *self.minReplicas'
                   overrides:
                     description: Overrides provides low-level Pod customization.
                     properties:
                       args:
                         description: Args overrides the container arguments.
                         items:
+                          minLength: 1
                           type: string
+                        minItems: 1
                         type: array
                       command:
                         description: Command overrides the container entrypoint.
                         items:
+                          minLength: 1
                           type: string
+                        minItems: 1
                         type: array
                       env:
                         description: Env contains additional environment variables
@@ -3610,6 +3724,7 @@ spec:
                           required:
                           - name
                           type: object
+                        minItems: 1
                         type: array
                       serviceAccountName:
                         description: ServiceAccountName allows specifying a custom
@@ -3684,6 +3799,7 @@ spec:
                           - mountPath
                           - name
                           type: object
+                        minItems: 1
                         type: array
                       volumes:
                         description: Volumes defines additional volumes for the Pod.
@@ -5585,8 +5701,13 @@ spec:
                           required:
                           - name
                           type: object
+                        minItems: 1
                         type: array
                     type: object
+                    x-kubernetes-validations:
+                    - message: serviceAccountName must not be empty if specified
+                      rule: '!has(self.serviceAccountName) || self.serviceAccountName
+                        != '''''
                   podDisruptionBudget:
                     description: PodDisruptionBudget controls voluntary disruption
                       tolerance.
@@ -5606,10 +5727,17 @@ spec:
                           must remain available.
                         x-kubernetes-int-or-string: true
                     type: object
+                    x-kubernetes-validations:
+                    - message: at least one of minAvailable or maxUnavailable must
+                        be specified
+                      rule: has(self.minAvailable) || has(self.maxUnavailable)
+                    - message: minAvailable and maxUnavailable are mutually exclusive
+                      rule: '!(has(self.minAvailable) && has(self.maxUnavailable))'
                   replicas:
                     default: 1
                     description: Replicas is the number of Pod replicas.
                     format: int32
+                    minimum: 0
                     type: integer
                   resources:
                     description: Resources configures CPU/memory requests and limits.
@@ -5686,6 +5814,9 @@ spec:
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
                     type: object
+                    x-kubernetes-validations:
+                    - message: mountPath must not be empty if specified
+                      rule: '!has(self.mountPath) || self.mountPath != '''''
                   topologySpreadConstraints:
                     description: TopologySpreadConstraints defines Pod spreading rules.
                     items:
@@ -5859,6 +5990,7 @@ spec:
                       - topologyKey
                       - whenUnsatisfiable
                       type: object
+                    minItems: 1
                     type: array
                   workers:
                     description: Workers configures the number of uvicorn worker processes.

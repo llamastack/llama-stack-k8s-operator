@@ -49,31 +49,37 @@ type DistributionSpec struct {
 type ProvidersSpec struct {
 	// Inference providers (e.g., vllm, ollama, fireworks).
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
 	Inference []ProviderConfig `json:"inference,omitempty"`
 
 	// Safety providers (e.g., llama-guard).
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
 	Safety []ProviderConfig `json:"safety,omitempty"`
 
 	// VectorIo providers (e.g., pgvector, chromadb).
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
 	VectorIo []ProviderConfig `json:"vectorIo,omitempty"`
 
-	// ToolRuntime providers (e.g., brave-search, tavily-search).
+	// ToolRuntime providers (e.g., brave-search, rag-runtime).
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
 	ToolRuntime []ProviderConfig `json:"toolRuntime,omitempty"`
 
 	// Telemetry providers (e.g., opentelemetry).
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
 	Telemetry []ProviderConfig `json:"telemetry,omitempty"`
 }
 
 // ProviderConfig defines configuration for a single LlamaStack provider instance.
+// +kubebuilder:validation:XValidation:rule="!has(self.id) || self.id != ''",message="id must not be empty if specified"
 type ProviderConfig struct {
 	// ID is the unique provider identifier. Required when multiple providers are configured
 	// for the same API type. Auto-generated from provider field for single-element lists.
@@ -83,6 +89,7 @@ type ProviderConfig struct {
 	// Provider is the provider type (e.g., vllm, ollama, pgvector).
 	// Maps to provider_type with "remote::" prefix in config.yaml.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	Provider string `json:"provider"`
 
 	// Endpoint is the provider endpoint URL. Maps to config.url in config.yaml.
@@ -97,6 +104,7 @@ type ProviderConfig struct {
 	// SecretRefs contains named secret references for provider-specific connection fields.
 	// Each entry is resolved to an env var LLSD_<PROVIDER_ID>_<KEY>.
 	// +optional
+	// +kubebuilder:validation:MinProperties=1
 	SecretRefs map[string]SecretKeyRef `json:"secretRefs,omitempty"`
 
 	// Settings contains provider-specific settings merged into config.
@@ -109,10 +117,12 @@ type ProviderConfig struct {
 type SecretKeyRef struct {
 	// Name is the name of the Kubernetes Secret.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
 	// Key is the key within the Secret.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	Key string `json:"key"`
 }
 
@@ -120,21 +130,30 @@ type SecretKeyRef struct {
 type ResourcesSpec struct {
 	// Models to register with inference providers.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	Models []ModelConfig `json:"models,omitempty"`
 
-	// Tools groups to register with toolRuntime providers.
+	// Tools are tool group names to register with the toolRuntime provider.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MinLength=1
 	Tools []string `json:"tools,omitempty"`
 
-	// Shields to register with safety providers.
+	// Shields are safety shield names to register with the safety provider.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MinLength=1
 	Shields []string `json:"shields,omitempty"`
 }
 
 // ModelConfig defines a model registration with optional provider assignment and metadata.
+// +kubebuilder:validation:XValidation:rule="!has(self.provider) || self.provider != ''",message="provider must not be empty if specified"
+// +kubebuilder:validation:XValidation:rule="!has(self.modelType) || self.modelType != ''",message="modelType must not be empty if specified"
+// +kubebuilder:validation:XValidation:rule="!has(self.quantization) || self.quantization != ''",message="quantization must not be empty if specified"
 type ModelConfig struct {
 	// Name is the model identifier (e.g., "llama3.2-8b").
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
 	// Provider is the provider ID to register this model with.
@@ -168,6 +187,8 @@ type StorageSpec struct {
 
 // KVStorageSpec configures the key-value storage backend.
 // +kubebuilder:validation:XValidation:rule="self.type != 'redis' || has(self.endpoint)",message="endpoint is required when type is redis"
+// +kubebuilder:validation:XValidation:rule="!has(self.endpoint) || self.type == 'redis'",message="endpoint is only valid when type is redis"
+// +kubebuilder:validation:XValidation:rule="!has(self.password) || self.type == 'redis'",message="password is only valid when type is redis"
 type KVStorageSpec struct {
 	// Type is the storage backend type.
 	// +optional
@@ -186,6 +207,7 @@ type KVStorageSpec struct {
 
 // SQLStorageSpec configures the relational storage backend.
 // +kubebuilder:validation:XValidation:rule="self.type != 'postgres' || has(self.connectionString)",message="connectionString is required when type is postgres"
+// +kubebuilder:validation:XValidation:rule="!has(self.connectionString) || self.type == 'postgres'",message="connectionString is only valid when type is postgres"
 type SQLStorageSpec struct {
 	// Type is the storage backend type.
 	// +optional
@@ -203,6 +225,8 @@ type SQLStorageSpec struct {
 type NetworkingSpec struct {
 	// Port is the server listen port.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
 	// +kubebuilder:default:=8321
 	Port int32 `json:"port,omitempty"`
 
@@ -221,6 +245,8 @@ type NetworkingSpec struct {
 
 // TLSSpec configures TLS for the LlamaStack server.
 // +kubebuilder:validation:XValidation:rule="!self.enabled || has(self.secretName)",message="secretName is required when TLS is enabled"
+// +kubebuilder:validation:XValidation:rule="!has(self.secretName) || self.enabled",message="secretName is only valid when TLS is enabled"
+// +kubebuilder:validation:XValidation:rule="!has(self.caBundle) || self.enabled",message="caBundle is only valid when TLS is enabled"
 type TLSSpec struct {
 	// Enabled activates TLS on the server.
 	// +optional
@@ -236,9 +262,11 @@ type TLSSpec struct {
 }
 
 // CABundleConfig defines the CA bundle configuration for custom certificates.
+// +kubebuilder:validation:XValidation:rule="!has(self.configMapNamespace) || self.configMapNamespace != ''",message="configMapNamespace must not be empty if specified"
 type CABundleConfig struct {
 	// ConfigMapName is the name of the ConfigMap containing CA bundle certificates.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	ConfigMapName string `json:"configMapName"`
 
 	// ConfigMapNamespace is the namespace of the ConfigMap. Defaults to the CR namespace.
@@ -248,18 +276,22 @@ type CABundleConfig struct {
 	// ConfigMapKeys specifies keys within the ConfigMap containing CA bundle data.
 	// All certificates from these keys will be concatenated. Defaults to ["ca-bundle.crt"].
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=50
+	// +kubebuilder:validation:items:MinLength=1
 	ConfigMapKeys []string `json:"configMapKeys,omitempty"`
 }
 
 // ExposeConfig controls external service exposure via Ingress/Route.
+// +kubebuilder:validation:XValidation:rule="!has(self.hostname) || self.hostname != ''",message="hostname must not be empty if specified"
 type ExposeConfig struct {
 	// Enabled activates external access via Ingress/Route.
+	// nil = not specified (no Ingress), false = explicitly disabled, true = create Ingress.
 	// +optional
 	Enabled *bool `json:"enabled,omitempty"`
 
 	// Hostname sets a custom hostname for the Ingress/Route.
-	// If not specified, an auto-generated hostname is used.
+	// When omitted, an auto-generated hostname is used.
 	// +optional
 	Hostname string `json:"hostname,omitempty"`
 }
@@ -269,10 +301,14 @@ type AllowedFromSpec struct {
 	// Namespaces is a list of namespace names allowed to access the service.
 	// Use "*" to allow all namespaces.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MinLength=1
 	Namespaces []string `json:"namespaces,omitempty"`
 
 	// Labels is a list of namespace label keys for access control (OR semantics).
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MinLength=1
 	Labels []string `json:"labels,omitempty"`
 }
 
@@ -280,6 +316,7 @@ type AllowedFromSpec struct {
 type WorkloadSpec struct {
 	// Replicas is the number of Pod replicas.
 	// +optional
+	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default:=1
 	Replicas *int32 `json:"replicas,omitempty"`
 
@@ -306,6 +343,7 @@ type WorkloadSpec struct {
 
 	// TopologySpreadConstraints defines Pod spreading rules.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
 
 	// Overrides provides low-level Pod customization.
@@ -314,6 +352,7 @@ type WorkloadSpec struct {
 }
 
 // PVCStorageSpec configures persistent volume storage.
+// +kubebuilder:validation:XValidation:rule="!has(self.mountPath) || self.mountPath != ''",message="mountPath must not be empty if specified"
 type PVCStorageSpec struct {
 	// Size is the size of the persistent volume claim.
 	// +optional
@@ -326,25 +365,34 @@ type PVCStorageSpec struct {
 }
 
 // AutoscalingSpec configures HorizontalPodAutoscaler targets.
+// +kubebuilder:validation:XValidation:rule="!has(self.minReplicas) || self.maxReplicas >= *self.minReplicas",message="maxReplicas must be greater than or equal to minReplicas"
 type AutoscalingSpec struct {
 	// MinReplicas is the lower bound replica count.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	MinReplicas *int32 `json:"minReplicas,omitempty"`
 
 	// MaxReplicas is the upper bound replica count.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
 	MaxReplicas int32 `json:"maxReplicas"`
 
 	// TargetCPUUtilizationPercentage configures CPU-based scaling.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
 	TargetCPUUtilizationPercentage *int32 `json:"targetCPUUtilizationPercentage,omitempty"`
 
 	// TargetMemoryUtilizationPercentage configures memory-based scaling.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
 	TargetMemoryUtilizationPercentage *int32 `json:"targetMemoryUtilizationPercentage,omitempty"`
 }
 
 // PodDisruptionBudgetSpec defines voluntary disruption controls.
+// +kubebuilder:validation:XValidation:rule="has(self.minAvailable) || has(self.maxUnavailable)",message="at least one of minAvailable or maxUnavailable must be specified"
+// +kubebuilder:validation:XValidation:rule="!(has(self.minAvailable) && has(self.maxUnavailable))",message="minAvailable and maxUnavailable are mutually exclusive"
 type PodDisruptionBudgetSpec struct {
 	// MinAvailable is the minimum number of pods that must remain available.
 	// +optional
@@ -356,6 +404,7 @@ type PodDisruptionBudgetSpec struct {
 }
 
 // WorkloadOverrides provides low-level Pod customization.
+// +kubebuilder:validation:XValidation:rule="!has(self.serviceAccountName) || self.serviceAccountName != ''",message="serviceAccountName must not be empty if specified"
 type WorkloadOverrides struct {
 	// ServiceAccountName allows specifying a custom ServiceAccount.
 	// +optional
@@ -367,22 +416,29 @@ type WorkloadOverrides struct {
 
 	// Env contains additional environment variables for the container.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
 	// Command overrides the container entrypoint.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MinLength=1
 	Command []string `json:"command,omitempty"`
 
 	// Args overrides the container arguments.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MinLength=1
 	Args []string `json:"args,omitempty"`
 
 	// Volumes defines additional volumes for the Pod.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	Volumes []corev1.Volume `json:"volumes,omitempty"`
 
 	// VolumeMounts defines additional volume mounts for the container.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 }
 
@@ -392,6 +448,7 @@ type OverrideConfigSpec struct {
 	// ConfigMapName is the name of the ConfigMap containing config.yaml.
 	// The ConfigMap must reside in the same namespace as the CR.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	ConfigMapName string `json:"configMapName"`
 }
 
@@ -399,6 +456,7 @@ type OverrideConfigSpec struct {
 type ExternalProvidersSpec struct {
 	// Inference lists external inference providers to inject.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	Inference []ExternalProviderRef `json:"inference,omitempty"`
 }
 
@@ -406,10 +464,12 @@ type ExternalProvidersSpec struct {
 type ExternalProviderRef struct {
 	// ProviderID is the unique provider identifier.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	ProviderID string `json:"providerId"`
 
 	// Image is the container image containing the provider implementation.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	Image string `json:"image"`
 }
 
