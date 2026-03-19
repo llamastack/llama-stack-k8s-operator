@@ -72,7 +72,7 @@ func newTestResource(t *testing.T, apiVersion, kind, name, namespace string, con
 	}
 
 	switch kind {
-	case "Deployment":
+	case deploymentKind:
 		baseDeploymentContent := map[string]any{
 			"selector": map[string]any{
 				"matchLabels": map[string]any{"app": name},

@@ -321,7 +321,20 @@ func getFieldMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plu
 	storageSize := getStorageSize(ownerInstance)
 	instanceLabelPath := "/app.kubernetes.io~1instance"
 
-	return buildFieldMappings(instanceName, instanceNamespace, serviceAccountName, servicePort, storageSize, instanceLabelPath, ownerInstance.Spec.Replicas)
+	mappings := buildFieldMappings(instanceName, instanceNamespace, serviceAccountName, servicePort, storageSize, instanceLabelPath, ownerInstance.Spec.Replicas)
+
+	// When persistent storage is configured, use Recreate strategy to avoid
+	// RWO PVC multi-attach deadlock during rolling updates
+	if ownerInstance.Spec.Server.Storage != nil {
+		mappings = append(mappings, plugins.FieldMapping{
+			SourceValue:       "Recreate",
+			TargetField:       "/spec/strategy/type",
+			TargetKind:        "Deployment",
+			CreateIfNotExists: true,
+		})
+	}
+
+	return mappings
 }
 
 // buildFieldMappings constructs the field mappings array.

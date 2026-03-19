@@ -985,3 +985,48 @@ func resourceToUnstructured(t *testing.T, res *kresource.Resource) (*unstructure
 func ptr[T any](v T) *T {
 	return &v
 }
+
+func TestGetFieldMappings_RecreateStrategyWithStorage(t *testing.T) {
+	t.Run("includes Recreate strategy when storage is configured", func(t *testing.T) {
+		owner := &llamav1alpha1.LlamaStackDistribution{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+			Spec: llamav1alpha1.LlamaStackDistributionSpec{
+				Replicas: 1,
+				Server: llamav1alpha1.ServerSpec{
+					Storage: &llamav1alpha1.StorageSpec{},
+				},
+			},
+		}
+
+		mappings := getFieldMappings(owner)
+
+		var found bool
+		for _, m := range mappings {
+			if m.TargetField == "/spec/strategy/type" && m.TargetKind == "Deployment" {
+				assert.Equal(t, "Recreate", m.SourceValue)
+				assert.True(t, m.CreateIfNotExists)
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "should include Recreate strategy mapping when storage is configured")
+	})
+
+	t.Run("does not include strategy when storage is nil", func(t *testing.T) {
+		owner := &llamav1alpha1.LlamaStackDistribution{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+			Spec: llamav1alpha1.LlamaStackDistributionSpec{
+				Replicas: 1,
+				Server:   llamav1alpha1.ServerSpec{},
+			},
+		}
+
+		mappings := getFieldMappings(owner)
+
+		for _, m := range mappings {
+			if m.TargetField == "/spec/strategy/type" {
+				t.Fatal("should not include strategy mapping when storage is nil")
+			}
+		}
+	})
+}
