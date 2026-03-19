@@ -631,6 +631,81 @@ func TestRemoveDeploymentReplicas(t *testing.T) {
 	require.False(t, hasReplicas, "replicas should be removed from all deployments when autoscaling is enabled")
 }
 
+// TestSetDeploymentRecreateStrategy verifies that when storage is configured,
+// the Deployment strategy is set to Recreate to avoid RWO PVC deadlocks.
+func TestSetDeploymentRecreateStrategy(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sets Recreate strategy when storage is configured", func(t *testing.T) {
+		t.Parallel()
+
+		instance := &llamav1alpha1.LlamaStackDistribution{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "example",
+				Namespace: "llama",
+			},
+			Spec: llamav1alpha1.LlamaStackDistributionSpec{
+				Server: llamav1alpha1.ServerSpec{
+					Storage: &llamav1alpha1.StorageSpec{},
+				},
+			},
+		}
+
+		resMap := resmap.New()
+		require.NoError(t, resMap.Append(newTestResource(t, "apps/v1", "Deployment", "deployment", "llama", map[string]any{
+			"replicas": int32(1),
+		})))
+
+		require.NoError(t, applyPlugins(&resMap, instance))
+
+		for _, res := range resMap.Resources() {
+			if res.GetKind() != "Deployment" {
+				continue
+			}
+			spec, err := res.Map()
+			require.NoError(t, err)
+			specMap, ok := spec["spec"].(map[string]any)
+			require.True(t, ok)
+			strategy, ok := specMap["strategy"].(map[string]any)
+			require.True(t, ok, "deployment should have a strategy field")
+			require.Equal(t, "Recreate", strategy["type"], "strategy type should be Recreate when storage is configured")
+		}
+	})
+
+	t.Run("does not set Recreate strategy when no storage is configured", func(t *testing.T) {
+		t.Parallel()
+
+		instance := &llamav1alpha1.LlamaStackDistribution{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "example",
+				Namespace: "llama",
+			},
+			Spec: llamav1alpha1.LlamaStackDistributionSpec{
+				Server: llamav1alpha1.ServerSpec{},
+			},
+		}
+
+		resMap := resmap.New()
+		require.NoError(t, resMap.Append(newTestResource(t, "apps/v1", "Deployment", "deployment", "llama", map[string]any{
+			"replicas": int32(1),
+		})))
+
+		require.NoError(t, applyPlugins(&resMap, instance))
+
+		for _, res := range resMap.Resources() {
+			if res.GetKind() != "Deployment" {
+				continue
+			}
+			spec, err := res.Map()
+			require.NoError(t, err)
+			specMap, ok := spec["spec"].(map[string]any)
+			require.True(t, ok)
+			_, hasStrategy := specMap["strategy"]
+			require.False(t, hasStrategy, "deployment should not have a strategy field when no storage is configured")
+		}
+	})
+}
+
 // TestHasLegacyCABundleVolumes tests the detection of legacy CA bundle volumes.
 func TestHasLegacyCABundleVolumes(t *testing.T) {
 	ctx := t.Context()

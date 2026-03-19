@@ -249,6 +249,17 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 		}
 	}
 
+	// When storage is configured, the PVC uses ReadWriteOnce access mode which
+	// only allows a single pod to mount the volume. With the default RollingUpdate
+	// strategy, the new pod cannot start because the old pod still holds the volume,
+	// and the old pod won't terminate until the new pod is ready — causing a deadlock.
+	// Using Recreate ensures the old pod is terminated first, freeing the volume.
+	if hasStorageConfigured(ownerInstance) {
+		if err := setDeploymentRecreateStrategy(*resMap); err != nil {
+			return fmt.Errorf("failed to set Recreate strategy: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -417,6 +428,38 @@ func getServicePort(instance *llamav1alpha1.LlamaStackDistribution) any {
 		return instance.Spec.Server.ContainerSpec.Port
 	}
 	// Returning nil signals the field transformer to use the default value.
+	return nil
+}
+
+func hasStorageConfigured(instance *llamav1alpha1.LlamaStackDistribution) bool {
+	return instance.Spec.Server.Storage != nil
+}
+
+// setDeploymentRecreateStrategy sets the deployment strategy to Recreate for all Deployments.
+func setDeploymentRecreateStrategy(resMap resmap.ResMap) error {
+	for _, res := range resMap.Resources() {
+		if res.GetKind() != deploymentKind {
+			continue
+		}
+
+		data, err := parseResourceYAML(res)
+		if err != nil {
+			return err
+		}
+
+		spec, ok := data["spec"].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		spec["strategy"] = map[string]any{
+			"type": "Recreate",
+		}
+
+		if err := updateResourceFromData(res, data); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
