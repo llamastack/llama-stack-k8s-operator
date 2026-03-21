@@ -3082,9 +3082,8 @@ spec:
                     - message: each provider must have an explicit id when multiple
                         providers are specified
                       rule: self.size() <= 1 || self.all(p, has(p.id))
-                    - message: provider ids must be unique
-                      rule: self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p,
-                        has(p.id)).map(p, p.id).toSet().size()
+                    - message: duplicate provider ids
+                      rule: self.filter(p,has(p.id)).map(p,p.id).size()==self.filter(p,has(p.id)).map(p,p.id).toSet().size()
                   safety:
                     description: Safety providers (e.g., llama-guard).
                     items:
@@ -3162,9 +3161,8 @@ spec:
                     - message: each provider must have an explicit id when multiple
                         providers are specified
                       rule: self.size() <= 1 || self.all(p, has(p.id))
-                    - message: provider ids must be unique
-                      rule: self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p,
-                        has(p.id)).map(p, p.id).toSet().size()
+                    - message: duplicate provider ids
+                      rule: self.filter(p,has(p.id)).map(p,p.id).size()==self.filter(p,has(p.id)).map(p,p.id).toSet().size()
                   telemetry:
                     description: Telemetry providers (e.g., opentelemetry).
                     items:
@@ -3242,9 +3240,8 @@ spec:
                     - message: each provider must have an explicit id when multiple
                         providers are specified
                       rule: self.size() <= 1 || self.all(p, has(p.id))
-                    - message: provider ids must be unique
-                      rule: self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p,
-                        has(p.id)).map(p, p.id).toSet().size()
+                    - message: duplicate provider ids
+                      rule: self.filter(p,has(p.id)).map(p,p.id).size()==self.filter(p,has(p.id)).map(p,p.id).toSet().size()
                   toolRuntime:
                     description: ToolRuntime providers (e.g., brave-search, rag-runtime).
                     items:
@@ -3322,9 +3319,8 @@ spec:
                     - message: each provider must have an explicit id when multiple
                         providers are specified
                       rule: self.size() <= 1 || self.all(p, has(p.id))
-                    - message: provider ids must be unique
-                      rule: self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p,
-                        has(p.id)).map(p, p.id).toSet().size()
+                    - message: duplicate provider ids
+                      rule: self.filter(p,has(p.id)).map(p,p.id).size()==self.filter(p,has(p.id)).map(p,p.id).toSet().size()
                   vectorIo:
                     description: VectorIo providers (e.g., pgvector, chromadb).
                     items:
@@ -3402,9 +3398,8 @@ spec:
                     - message: each provider must have an explicit id when multiple
                         providers are specified
                       rule: self.size() <= 1 || self.all(p, has(p.id))
-                    - message: provider ids must be unique
-                      rule: self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p,
-                        has(p.id)).map(p, p.id).toSet().size()
+                    - message: duplicate provider ids
+                      rule: self.filter(p,has(p.id)).map(p,p.id).size()==self.filter(p,has(p.id)).map(p,p.id).toSet().size()
                 type: object
               resources:
                 description: |-
