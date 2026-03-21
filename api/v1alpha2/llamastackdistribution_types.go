@@ -51,35 +51,35 @@ type ProvidersSpec struct {
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
-	// +kubebuilder:validation:XValidation:rule="self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p, has(p.id)).map(p, p.id).toSet().size()",message="provider ids must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.filter(p,has(p.id)).map(p,p.id).size()==self.filter(p,has(p.id)).map(p,p.id).toSet().size()",message="duplicate provider ids"
 	Inference []ProviderConfig `json:"inference,omitempty"`
 
 	// Safety providers (e.g., llama-guard).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
-	// +kubebuilder:validation:XValidation:rule="self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p, has(p.id)).map(p, p.id).toSet().size()",message="provider ids must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.filter(p,has(p.id)).map(p,p.id).size()==self.filter(p,has(p.id)).map(p,p.id).toSet().size()",message="duplicate provider ids"
 	Safety []ProviderConfig `json:"safety,omitempty"`
 
 	// VectorIo providers (e.g., pgvector, chromadb).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
-	// +kubebuilder:validation:XValidation:rule="self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p, has(p.id)).map(p, p.id).toSet().size()",message="provider ids must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.filter(p,has(p.id)).map(p,p.id).size()==self.filter(p,has(p.id)).map(p,p.id).toSet().size()",message="duplicate provider ids"
 	VectorIo []ProviderConfig `json:"vectorIo,omitempty"`
 
 	// ToolRuntime providers (e.g., brave-search, rag-runtime).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
-	// +kubebuilder:validation:XValidation:rule="self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p, has(p.id)).map(p, p.id).toSet().size()",message="provider ids must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.filter(p,has(p.id)).map(p,p.id).size()==self.filter(p,has(p.id)).map(p,p.id).toSet().size()",message="duplicate provider ids"
 	ToolRuntime []ProviderConfig `json:"toolRuntime,omitempty"`
 
 	// Telemetry providers (e.g., opentelemetry).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
-	// +kubebuilder:validation:XValidation:rule="self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p, has(p.id)).map(p, p.id).toSet().size()",message="provider ids must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.filter(p,has(p.id)).map(p,p.id).size()==self.filter(p,has(p.id)).map(p,p.id).toSet().size()",message="duplicate provider ids"
 	Telemetry []ProviderConfig `json:"telemetry,omitempty"`
 }
 
