@@ -94,7 +94,8 @@ func expandModel(
 	if model.Provider != "" {
 		// Explicit provider assignment (FR-041)
 		providerID = model.Provider
-		providerType = "remote::" + providerID
+		// Look up the actual provider to get the correct provider_type
+		providerType = lookupProviderType(providerID, userProviders, baseConfig)
 	} else {
 		// Default to first inference provider (FR-040)
 		var err error
@@ -171,11 +172,7 @@ func findUserProvider(apiType string, providers *v1alpha2.ProvidersSpec) (string
 	}
 
 	p := list[0]
-	id := p.ID
-	if id == "" {
-		id = p.Provider
-	}
-	return id, "remote::" + p.Provider, true
+	return ResolveProviderID(p), "remote::" + p.Provider, true
 }
 
 func findBaseConfigProvider(apiType string, baseConfig map[string]interface{}) (string, string, bool) {
@@ -200,4 +197,61 @@ func findBaseConfigProvider(apiType string, baseConfig map[string]interface{}) (
 		return "", "", false
 	}
 	return pid, pt, true
+}
+
+// lookupProviderType resolves the provider_type for a given provider ID by searching
+// user-configured providers and then the base config. Falls back to "remote::<id>"
+// if the provider is not found.
+func lookupProviderType(providerID string, userProviders *v1alpha2.ProvidersSpec, baseConfig map[string]interface{}) string {
+	if pt := lookupUserProviderType(providerID, userProviders); pt != "" {
+		return pt
+	}
+	if pt := lookupBaseConfigProviderType(providerID, baseConfig); pt != "" {
+		return pt
+	}
+	return "remote::" + providerID
+}
+
+func lookupUserProviderType(providerID string, providers *v1alpha2.ProvidersSpec) string {
+	if providers == nil {
+		return ""
+	}
+	for _, ap := range AllAPIProviders(providers) {
+		for _, p := range ap.Providers {
+			if ResolveProviderID(p) == providerID {
+				return "remote::" + p.Provider
+			}
+		}
+	}
+	return ""
+}
+
+func lookupBaseConfigProviderType(providerID string, baseConfig map[string]interface{}) string {
+	if baseConfig == nil {
+		return ""
+	}
+	providersMap, ok := baseConfig["providers"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	for _, apiProviders := range providersMap {
+		providerList, ok := apiProviders.([]interface{})
+		if !ok {
+			continue
+		}
+		for _, p := range providerList {
+			pm, ok := p.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			pid, _ := pm["provider_id"].(string)
+			if pid == providerID {
+				pt, _ := pm["provider_type"].(string)
+				if pt != "" {
+					return pt
+				}
+			}
+		}
+	}
+	return ""
 }

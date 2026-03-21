@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -195,6 +196,45 @@ func TestGenerateConfig_EmptySpec(t *testing.T) {
 	assert.NotEmpty(t, result.ConfigYAML)
 	assert.Positive(t, result.ProviderCount, "base config providers should be counted")
 	assert.Equal(t, 0, result.ResourceCount)
+}
+
+func TestGenerateConfig_DeduplicatesResources(t *testing.T) {
+	// Base config with a model already registered
+	baseYAML := []byte(`version: 2
+apis:
+- inference
+providers:
+  inference:
+  - provider_id: remote::vllm
+    provider_type: remote::vllm
+    config:
+      url: http://vllm:8000
+registered_resources:
+- resource_type: model
+  provider:
+    provider_id: remote::vllm
+    provider_type: remote::vllm
+  params:
+    model_id: llama3.2-8b
+`)
+
+	spec := &v1alpha2.LlamaStackDistributionSpec{
+		Resources: &v1alpha2.ResourcesSpec{
+			Models: []v1alpha2.ModelConfig{
+				{Name: "llama3.2-8b"},
+				{Name: "llama3.2-70b"},
+			},
+		},
+	}
+
+	result, err := GenerateConfig(spec, baseYAML)
+	require.NoError(t, err)
+
+	// llama3.2-8b should appear only once (deduped), llama3.2-70b should be added
+	assert.Equal(t, 1, strings.Count(result.ConfigYAML, "llama3.2-8b"),
+		"duplicate model should not be added again")
+	assert.Contains(t, result.ConfigYAML, "llama3.2-70b",
+		"new model should be added")
 }
 
 func TestGenerateConfig_OverlayPreservesBaseProviders(t *testing.T) {

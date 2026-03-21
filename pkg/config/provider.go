@@ -17,6 +17,10 @@ type configProvider struct {
 
 // ExpandProviders converts CRD ProviderConfig entries into config.yaml provider entries.
 // It handles auto-ID generation, remote:: prefix, endpoint mapping, and settings merge.
+//
+// Note: The CRD only supports configuring remote:: providers. Inline providers
+// (inline::) from the base config are preserved during merge but cannot be
+// added or configured through the CRD's providers spec.
 func ExpandProviders(providers []v1alpha2.ProviderConfig) ([]configProvider, error) {
 	result := make([]configProvider, 0, len(providers))
 
@@ -41,6 +45,7 @@ func expandSingleProvider(p v1alpha2.ProviderConfig, isSingle bool) (configProvi
 		id = p.Provider
 	}
 
+	// CRD-configured providers are always remote (inline:: comes from base config only)
 	providerType := "remote::" + p.Provider
 
 	cfg := make(map[string]interface{})
@@ -82,18 +87,6 @@ func expandSingleProvider(p v1alpha2.ProviderConfig, isSingle bool) (configProvi
 	}, nil
 }
 
-// CountProviders counts total providers across all API types in the spec.
-func CountProviders(providers *v1alpha2.ProvidersSpec) int {
-	if providers == nil {
-		return 0
-	}
-	return len(providers.Inference) +
-		len(providers.Safety) +
-		len(providers.VectorIo) +
-		len(providers.ToolRuntime) +
-		len(providers.Telemetry)
-}
-
 // AllProviderConfigs returns all provider configs across all API types with their API type labels.
 type apiProviders struct {
 	APIType   string
@@ -123,6 +116,15 @@ func AllAPIProviders(providers *v1alpha2.ProvidersSpec) []apiProviders {
 		result = append(result, apiProviders{APIType: "telemetry", Providers: providers.Telemetry})
 	}
 	return result
+}
+
+// ResolveProviderID returns the effective provider ID for a ProviderConfig.
+// Uses the explicit ID if set, otherwise falls back to the Provider field.
+func ResolveProviderID(p v1alpha2.ProviderConfig) string {
+	if p.ID != "" {
+		return p.ID
+	}
+	return p.Provider
 }
 
 func sortedKeys[V any](m map[string]V) []string {

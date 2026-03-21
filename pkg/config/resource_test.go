@@ -48,6 +48,7 @@ func TestExpandResources_ModelWithExplicitProvider(t *testing.T) {
 	require.Len(t, result, 1)
 
 	assert.Equal(t, "vllm-primary", result[0].Provider.ProviderID)
+	assert.Equal(t, "remote::vllm", result[0].Provider.ProviderType, "provider_type should use the provider name, not the custom ID")
 }
 
 func TestExpandResources_ModelWithMetadata(t *testing.T) {

@@ -206,13 +206,69 @@ func TestApplyDisabled(t *testing.T) {
 	assert.NotContains(t, providers, "safety")
 }
 
+func TestApplyDisabled_CleansUpRegisteredResources(t *testing.T) {
+	config := map[string]interface{}{
+		"apis": []interface{}{"inference", "safety"},
+		"providers": map[string]interface{}{
+			"inference": []interface{}{
+				map[string]interface{}{"provider_id": "remote::vllm", "provider_type": "remote::vllm"},
+			},
+			"safety": []interface{}{
+				map[string]interface{}{"provider_id": "inline::llama-guard", "provider_type": "inline::llama-guard"},
+			},
+		},
+		"registered_resources": []interface{}{
+			map[string]interface{}{
+				"resource_type": "model",
+				"provider":      map[string]interface{}{"provider_id": "remote::vllm"},
+				"params":        map[string]interface{}{"model_id": "llama3.2-8b"},
+			},
+			map[string]interface{}{
+				"resource_type": "shield",
+				"provider":      map[string]interface{}{"provider_id": "inline::llama-guard"},
+				"params":        map[string]interface{}{"shield_id": "llama-guard"},
+			},
+		},
+	}
+
+	spec := &v1alpha2.LlamaStackDistributionSpec{
+		Disabled: []string{"safety"},
+	}
+
+	merged, err := MergeConfig(config, spec)
+	require.NoError(t, err)
+
+	// Shield registration should be removed along with the safety provider
+	rr := requireSliceValue(t, merged, "registered_resources")
+	require.Len(t, rr, 1, "shield registration should be removed when safety is disabled")
+	first := requireMapAt(t, rr, 0)
+	assert.Equal(t, "model", first["resource_type"])
+}
+
 func TestMergeConfig_DoesNotMutateBase(t *testing.T) {
 	base := baseConfigWithProviders()
 	origAPIs := requireSliceValue(t, base, "apis")
 	origLen := len(origAPIs)
 
+	// Capture original provider state
+	origProviders := requireMapValue(t, base, "providers")
+	origInfProviders := requireSliceValue(t, origProviders, "inference")
+	origInfLen := len(origInfProviders)
+	origFirstProvider := requireMapAt(t, origInfProviders, 0)
+	origFirstCfg := requireMapValue(t, origFirstProvider, "config")
+	origURL := origFirstCfg["url"]
+
 	spec := &v1alpha2.LlamaStackDistributionSpec{
 		Disabled: []string{"safety"},
+		Providers: &v1alpha2.ProvidersSpec{
+			Inference: []v1alpha2.ProviderConfig{
+				{
+					ID:       "remote::vllm",
+					Provider: "vllm",
+					Endpoint: "http://new-vllm:9999",
+				},
+			},
+		},
 	}
 
 	_, err := MergeConfig(base, spec)
@@ -220,4 +276,13 @@ func TestMergeConfig_DoesNotMutateBase(t *testing.T) {
 
 	// Base config apis should be unchanged
 	assert.Len(t, requireSliceValue(t, base, "apis"), origLen)
+
+	// Base config providers should be unchanged
+	baseProviders := requireMapValue(t, base, "providers")
+	assert.Contains(t, baseProviders, "safety", "safety provider should still exist in base")
+	baseInfProviders := requireSliceValue(t, baseProviders, "inference")
+	assert.Len(t, baseInfProviders, origInfLen, "inference provider count should be unchanged")
+	firstProvider := requireMapAt(t, baseInfProviders, 0)
+	firstCfg := requireMapValue(t, firstProvider, "config")
+	assert.Equal(t, origURL, firstCfg["url"], "base provider config should not be mutated")
 }

@@ -1,6 +1,9 @@
 package config
 
 import (
+	"encoding/json"
+	"fmt"
+
 	v1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 )
 
@@ -14,8 +17,11 @@ func MergeConfig(
 	baseConfig map[string]interface{},
 	spec *v1alpha2.LlamaStackDistributionSpec,
 ) (map[string]interface{}, error) {
-	// Start with a copy of the base config
-	merged := shallowCopyMap(baseConfig)
+	// Start with a deep copy of the base config to avoid mutating the original
+	merged, err := deepCopyMap(baseConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deep copy base config: %w", err)
+	}
 
 	// Overlay providers by provider_id
 	if spec.Providers != nil {
@@ -143,18 +149,83 @@ func applyDisabled(config map[string]interface{}, disabled []string) {
 		config["apis"] = filtered
 	}
 
-	// Remove from providers map
-	if providersMap, ok := config["providers"].(map[string]interface{}); ok {
-		for _, d := range disabled {
-			delete(providersMap, d)
-		}
+	// Collect provider IDs being removed, then delete from providers map
+	removedProviderIDs := collectAndRemoveDisabledProviders(config, disabled)
+
+	// Remove registered_resources entries that reference removed providers
+	if len(removedProviderIDs) > 0 {
+		removeOrphanedResources(config, removedProviderIDs)
 	}
 }
 
-func shallowCopyMap(m map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{}, len(m))
-	for k, v := range m {
-		result[k] = v
+// collectAndRemoveDisabledProviders removes disabled API types from the providers map
+// and returns the set of provider IDs that were removed.
+func collectAndRemoveDisabledProviders(config map[string]interface{}, disabled []string) map[string]bool {
+	removedIDs := make(map[string]bool)
+	providersMap, ok := config["providers"].(map[string]interface{})
+	if !ok {
+		return removedIDs
 	}
-	return result
+
+	for _, d := range disabled {
+		apiProviders, ok := providersMap[d].([]interface{})
+		if !ok {
+			delete(providersMap, d)
+			continue
+		}
+		for _, p := range apiProviders {
+			if pm, ok := p.(map[string]interface{}); ok {
+				if pid, _ := pm["provider_id"].(string); pid != "" {
+					removedIDs[pid] = true
+				}
+			}
+		}
+		delete(providersMap, d)
+	}
+
+	return removedIDs
+}
+
+// removeOrphanedResources filters out registered_resources entries whose
+// provider_id is in the removedIDs set.
+func removeOrphanedResources(config map[string]interface{}, removedIDs map[string]bool) {
+	rr, ok := config["registered_resources"].([]interface{})
+	if !ok {
+		return
+	}
+
+	filtered := make([]interface{}, 0, len(rr))
+	for _, r := range rr {
+		if !isOrphanedResource(r, removedIDs) {
+			filtered = append(filtered, r)
+		}
+	}
+	config["registered_resources"] = filtered
+}
+
+func isOrphanedResource(r interface{}, removedIDs map[string]bool) bool {
+	rm, ok := r.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	provider, ok := rm["provider"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	pid, _ := provider["provider_id"].(string)
+	return removedIDs[pid]
+}
+
+// deepCopyMap creates a fully independent copy of a map by round-tripping through JSON.
+// This ensures nested maps and slices are not shared with the original.
+func deepCopyMap(m map[string]interface{}) (map[string]interface{}, error) {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }

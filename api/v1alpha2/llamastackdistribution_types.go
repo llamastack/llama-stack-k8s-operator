@@ -51,30 +51,35 @@ type ProvidersSpec struct {
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
+	// +kubebuilder:validation:XValidation:rule="self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p, has(p.id)).map(p, p.id).toSet().size()",message="provider ids must be unique"
 	Inference []ProviderConfig `json:"inference,omitempty"`
 
 	// Safety providers (e.g., llama-guard).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
+	// +kubebuilder:validation:XValidation:rule="self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p, has(p.id)).map(p, p.id).toSet().size()",message="provider ids must be unique"
 	Safety []ProviderConfig `json:"safety,omitempty"`
 
 	// VectorIo providers (e.g., pgvector, chromadb).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
+	// +kubebuilder:validation:XValidation:rule="self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p, has(p.id)).map(p, p.id).toSet().size()",message="provider ids must be unique"
 	VectorIo []ProviderConfig `json:"vectorIo,omitempty"`
 
 	// ToolRuntime providers (e.g., brave-search, rag-runtime).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
+	// +kubebuilder:validation:XValidation:rule="self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p, has(p.id)).map(p, p.id).toSet().size()",message="provider ids must be unique"
 	ToolRuntime []ProviderConfig `json:"toolRuntime,omitempty"`
 
 	// Telemetry providers (e.g., opentelemetry).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
+	// +kubebuilder:validation:XValidation:rule="self.filter(p, has(p.id)).map(p, p.id).size() == self.filter(p, has(p.id)).map(p, p.id).toSet().size()",message="provider ids must be unique"
 	Telemetry []ProviderConfig `json:"telemetry,omitempty"`
 }
 
@@ -611,6 +616,7 @@ type LlamaStackDistributionSpec struct {
 	// Disabled lists API names to remove from the generated config.
 	// Mutually exclusive with overrideConfig.
 	// +optional
+	// +kubebuilder:validation:XValidation:rule="self.all(x, x in ['agents','datasetio','eval','inference','safety','scoring','telemetry','tool_runtime','vector_io'])",message="disabled must contain valid API names (agents, datasetio, eval, inference, safety, scoring, telemetry, tool_runtime, vector_io)"
 	Disabled []string `json:"disabled,omitempty"`
 
 	// Networking configures network access for the service.

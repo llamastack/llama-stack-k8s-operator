@@ -17,7 +17,7 @@ func CollectSecretRefs(spec *v1alpha2.LlamaStackDistributionSpec) []corev1.EnvVa
 	if spec.Providers != nil {
 		for _, ap := range AllAPIProviders(spec.Providers) {
 			for _, p := range ap.Providers {
-				providerID := resolveProviderID(p, len(ap.Providers) == 1)
+				providerID := ResolveProviderID(p)
 				envVars = append(envVars, collectProviderSecrets(providerID, p)...)
 			}
 		}
@@ -95,15 +95,6 @@ func collectStorageSecrets(storage *v1alpha2.StorageSpec) []corev1.EnvVar {
 	return envVars
 }
 
-func resolveProviderID(p v1alpha2.ProviderConfig, isSingle bool) string {
-	if p.ID != "" {
-		return p.ID
-	}
-	if isSingle {
-		return p.Provider
-	}
-	return p.Provider
-}
 
 // envVarName constructs the environment variable name: LLSD_<PROVIDER_ID>_<FIELD>.
 func envVarName(providerID, field string) string {

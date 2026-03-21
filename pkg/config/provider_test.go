@@ -164,38 +164,3 @@ func TestExpandProviders_HyphenatedID(t *testing.T) {
 	assert.Equal(t, "${env.LLSD_VLLM_PRIMARY_API_KEY}", result[0].Config["api_key"])
 }
 
-func TestCountProviders(t *testing.T) {
-	tests := []struct {
-		name      string
-		providers *v1alpha2.ProvidersSpec
-		want      int
-	}{
-		{
-			name:      "nil providers",
-			providers: nil,
-			want:      0,
-		},
-		{
-			name: "single inference",
-			providers: &v1alpha2.ProvidersSpec{
-				Inference: []v1alpha2.ProviderConfig{{Provider: "vllm"}},
-			},
-			want: 1,
-		},
-		{
-			name: "multiple types",
-			providers: &v1alpha2.ProvidersSpec{
-				Inference:   []v1alpha2.ProviderConfig{{Provider: "vllm"}, {Provider: "ollama"}},
-				Safety:      []v1alpha2.ProviderConfig{{Provider: "llama-guard"}},
-				ToolRuntime: []v1alpha2.ProviderConfig{{Provider: "brave-search"}},
-			},
-			want: 4,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, CountProviders(tt.providers))
-		})
-	}
-}

@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"sort"
 
 	v1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
@@ -112,7 +111,22 @@ func appendResources(config map[string]interface{}, resources []registeredResour
 		existing = rr
 	}
 
+	// Build a set of existing resource keys for deduplication
+	existingKeys := make(map[string]bool)
+	for _, r := range existing {
+		if rm, ok := r.(map[string]interface{}); ok {
+			key := resourceKey(rm)
+			if key != "" {
+				existingKeys[key] = true
+			}
+		}
+	}
+
 	for _, r := range resources {
+		key := r.ResourceType + "/" + resourceIDFromParams(r.Params)
+		if existingKeys[key] {
+			continue
+		}
 		existing = append(existing, map[string]interface{}{
 			"resource_type": r.ResourceType,
 			"provider": map[string]interface{}{
@@ -126,6 +140,30 @@ func appendResources(config map[string]interface{}, resources []registeredResour
 	return existing
 }
 
+// resourceKey extracts a deduplication key from an existing registered_resources entry.
+func resourceKey(rm map[string]interface{}) string {
+	rt, _ := rm["resource_type"].(string)
+	if rt == "" {
+		return ""
+	}
+	params, _ := rm["params"].(map[string]interface{})
+	if params == nil {
+		return ""
+	}
+	return rt + "/" + resourceIDFromParams(params)
+}
+
+// resourceIDFromParams extracts the identifying field from resource params.
+func resourceIDFromParams(params map[string]interface{}) string {
+	// Each resource type has its own ID field
+	for _, key := range []string{"model_id", "shield_id", "tool_group_id"} {
+		if id, ok := params[key].(string); ok {
+			return id
+		}
+	}
+	return ""
+}
+
 func countMergedProviders(config map[string]interface{}) int {
 	providersMap, ok := config["providers"].(map[string]interface{})
 	if !ok {
@@ -133,15 +171,8 @@ func countMergedProviders(config map[string]interface{}) int {
 	}
 
 	count := 0
-	// Sort keys for determinism
-	keys := make([]string, 0, len(providersMap))
-	for k := range providersMap {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
-		if providers, ok := providersMap[k].([]interface{}); ok {
+	for _, v := range providersMap {
+		if providers, ok := v.([]interface{}); ok {
 			count += len(providers)
 		}
 	}
