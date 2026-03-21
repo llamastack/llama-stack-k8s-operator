@@ -1,0 +1,43 @@
+version: 2
+apis:
+  - agents
+  - inference
+  - safety
+  - telemetry
+  - tool_runtime
+  - vector_io
+providers:
+  inference:
+    - provider_id: inline::meta-reference
+      provider_type: inline::meta-reference
+      config:
+        model: meta-llama/Llama-3.2-8B-Instruct
+  safety:
+    - provider_id: inline::llama-guard
+      provider_type: inline::llama-guard
+      config: {}
+  agents:
+    - provider_id: inline::meta-reference
+      provider_type: inline::meta-reference
+      config:
+        persistence_store:
+          type: sqlite
+          db_path: /data/distributions/meta-reference-gpu/agents_store.db
+  vector_io:
+    - provider_id: inline::faiss
+      provider_type: inline::faiss
+      config:
+        kvstore:
+          type: sqlite
+          db_path: /data/distributions/meta-reference-gpu/faiss_store.db
+  telemetry:
+    - provider_id: inline::meta-reference
+      provider_type: inline::meta-reference
+      config: {}
+  tool_runtime:
+    - provider_id: inline::rag-runtime
+      provider_type: inline::rag-runtime
+      config: {}
+metadata_store:
+  type: sqlite
+  db_path: /data/distributions/meta-reference-gpu/registry.db

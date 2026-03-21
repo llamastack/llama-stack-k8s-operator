@@ -40,9 +40,9 @@ This eliminates: no kubebuilder validation, impossible CEL rules, ~500 lines of 
 
 The original PR #253 scanned the `settings` map for any `{name, key}` structure and treated it as a Secret reference. This caused false positives. The new design adds an explicit `secretRefs: map[string]SecretKeyRef` field on ProviderConfig. The `settings` map is passed through without any secret resolution. Check `contracts/config-generation.yaml` "Secret Resolution" section for examples.
 
-**Decision 3: Provider merge = full API-type replacement** (contracts/config-generation.yaml merge_rules)
+**Decision 3: Provider merge = overlay by provider ID** (contracts/config-generation.yaml merge_rules)
 
-When a user specifies `providers.inference`, ALL base config inference providers are replaced. Base providers with unmatched IDs are dropped. The contract has before/after examples. Verify this matches your expectation. The alternative (merge-by-ID, preserving unmatched base providers) was the original PR #253 behavior but contradicted the contract.
+User providers are overlaid onto base config by provider ID. Matching IDs are replaced, unmatched user IDs are appended, and unmatched base IDs are preserved. This avoids silently dropping default providers that distributions ship (e.g., `inline::sentence-transformers`). Updated from `replace_by_api_type` based on PR #253 review feedback from @VaishnaviHire.
 
 ### Step 4: Spot-Check CEL Validation Rules (5 min)
 
