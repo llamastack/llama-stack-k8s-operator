@@ -163,4 +163,3 @@ func TestExpandProviders_HyphenatedID(t *testing.T) {
 
 	assert.Equal(t, "${env.LLSD_VLLM_PRIMARY_API_KEY}", result[0].Config["api_key"])
 }
-
