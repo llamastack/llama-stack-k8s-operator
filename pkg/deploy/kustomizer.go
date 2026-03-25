@@ -12,7 +12,9 @@ import (
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/compare"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy/plugins"
+	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -188,11 +190,14 @@ func patchResource(ctx context.Context, cli client.Client, desired, existing *un
 			return fmt.Errorf("failed to validate resource mutations while patching: %w", err)
 		}
 	case deploymentKind:
-		// Check for legacy CA bundle volumes and use full replacement to avoid SSA conflicts
-		if hasLegacyCABundleVolumes(ctx, existing) {
-			logger.Info("Detected legacy CA bundle volumes, using full replacement instead of SSA",
+		// Some volume changes cannot be handled by SSA because the volumes were originally
+		// created via cli.Create (no SSA field manager tracking), so SSA cannot remove
+		// unowned fields. Fall back to full replacement in these cases.
+		if reason := deploymentNeedsFullReplacement(ctx, desired, existing); reason != "" {
+			logger.Info("Using full replacement instead of SSA for Deployment",
 				"deployment", existing.GetName(),
-				"namespace", existing.GetNamespace())
+				"namespace", existing.GetNamespace(),
+				"reason", reason)
 			desired.SetResourceVersion(existing.GetResourceVersion())
 			return cli.Update(ctx, desired)
 		}
@@ -684,6 +689,16 @@ func FilterExcludeKinds(resMap *resmap.ResMap, kindsToExclude []string) (*resmap
 	return &filteredResMap, nil
 }
 
+// hasVolume reports whether a volume with the given name exists in the slice.
+func hasVolume(volumes []corev1.Volume, name string) bool {
+	for _, vol := range volumes {
+		if vol.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // hasLegacyCABundleVolumes detects if a deployment has legacy CA bundle volumes
 // from the old operator that used emptyDir + ConfigMap pattern.
 func hasLegacyCABundleVolumes(ctx context.Context, deployment *unstructured.Unstructured) bool {
@@ -722,6 +737,42 @@ func hasLegacyCABundleVolumes(ctx context.Context, deployment *unstructured.Unst
 	}
 
 	return false
+}
+
+// hasStaleUserConfigVolume returns true when the existing Deployment has a "user-config"
+// volume that is absent from the desired Deployment spec. This happens when
+// spec.server.userConfig is removed from the LLSD resource: the volume persists because
+// it was applied via cli.Create (no SSA field manager tracking), so a subsequent SSA patch
+// cannot remove it. Using cli.Update instead performs a full spec replacement.
+func hasStaleUserConfigVolume(desired, existing *appsv1.Deployment) bool {
+	return hasVolume(existing.Spec.Template.Spec.Volumes, "user-config") &&
+		!hasVolume(desired.Spec.Template.Spec.Volumes, "user-config")
+}
+
+// deploymentNeedsFullReplacement returns a non-empty reason string when the Deployment
+// must be updated via cli.Update (full replacement) instead of SSA. This is necessary
+// when volumes exist in the live Deployment that SSA cannot remove because they were
+// created by a different field manager (e.g. the initial cli.Create).
+func deploymentNeedsFullReplacement(ctx context.Context, desired, existing *unstructured.Unstructured) string {
+	logger := log.FromContext(ctx)
+
+	if hasLegacyCABundleVolumes(ctx, existing) {
+		return "legacy CA bundle volumes detected"
+	}
+
+	var existingDep, desiredDep appsv1.Deployment
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(existing.Object, &existingDep); err != nil {
+		logger.Error(err, "failed to convert existing Deployment, skipping stale-volume check")
+		return ""
+	}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(desired.Object, &desiredDep); err != nil {
+		logger.Error(err, "failed to convert desired Deployment, skipping stale-volume check")
+		return ""
+	}
+	if hasStaleUserConfigVolume(&desiredDep, &existingDep) {
+		return "stale user-config volume detected"
+	}
+	return ""
 }
 
 // CheckClusterRoleExists checks if a RoleBinding should be skipped due to missing SCC ClusterRole.
