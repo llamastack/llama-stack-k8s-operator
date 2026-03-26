@@ -957,9 +957,9 @@ func TestBuildPodDisruptionBudgetSpec(t *testing.T) {
 
 		spec := buildPodDisruptionBudgetSpec(instance)
 		require.NotNil(t, spec)
-		require.NotNil(t, spec.MinAvailable)
-		assert.Equal(t, 1, spec.MinAvailable.IntValue())
-		assert.Nil(t, spec.MaxUnavailable)
+		require.NotNil(t, spec.MaxUnavailable)
+		assert.Equal(t, 1, spec.MaxUnavailable.IntValue())
+		assert.Nil(t, spec.MinAvailable)
 	})
 
 	t.Run("respects custom overrides", func(t *testing.T) {

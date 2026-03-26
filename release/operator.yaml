@@ -3261,7 +3261,7 @@ metadata:
   name: llama-stack-k8s-operator-controller-manager-pdb
   namespace: llama-stack-k8s-operator-system
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: llama-stack-k8s-operator

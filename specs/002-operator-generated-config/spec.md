@@ -462,7 +462,7 @@ spec:
       size: "10Gi"
       mountPath: "/.llama"
     podDisruptionBudget:
-      minAvailable: 1
+      maxUnavailable: 1
     topologySpreadConstraints: []
     overrides:
       serviceAccountName: "custom-sa"

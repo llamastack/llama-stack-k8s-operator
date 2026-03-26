@@ -226,7 +226,7 @@ spec:
       size: "20Gi"
       mountPath: "/.llama"
     podDisruptionBudget:
-      minAvailable: 1
+      maxUnavailable: 1
 ```
 
 ## Example 7: Full ConfigMap Override

@@ -662,8 +662,10 @@ func buildPodDisruptionBudgetSpec(instance *llamav1alpha1.LlamaStackDistribution
 		spec.MinAvailable = copyIntOrString(instance.Spec.Server.PodDisruptionBudget.MinAvailable)
 		spec.MaxUnavailable = copyIntOrString(instance.Spec.Server.PodDisruptionBudget.MaxUnavailable)
 	} else {
-		minAvailable := intstr.FromInt(1)
-		spec.MinAvailable = &minAvailable
+		// Fix for RHAIENG-3783: Use maxUnavailable instead of minAvailable
+		// to avoid allowedDisruptions=0 with single-replica deployments
+		maxUnavailable := intstr.FromInt(1)
+		spec.MaxUnavailable = &maxUnavailable
 	}
 
 	return spec
