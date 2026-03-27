@@ -154,7 +154,7 @@ All technical decisions have been researched and documented in [research.md](res
 | Validation layers | CEL + webhook + controller | Low |
 | ConfigMap pattern | Immutable with content-hash suffix, retain last 2 | Low |
 | Deployment updates | Single atomic `client.Update()` | Low |
-| Secret references | Explicit `apiKey` + `secretRefs` fields (no heuristic matching) | Low |
+| Secret references | Explicit `secretRefs` field (no heuristic matching) | Low |
 
 ## Phase 1: Design
 
@@ -181,8 +181,6 @@ type ProviderConfig struct {
     Provider string `json:"provider"`
     // +optional
     Endpoint string `json:"endpoint,omitempty"`
-    // +optional
-    APIKey *SecretKeyRef `json:"apiKey,omitempty"`
     // +optional
     SecretRefs map[string]SecretKeyRef `json:"secretRefs,omitempty"`
     // +optional

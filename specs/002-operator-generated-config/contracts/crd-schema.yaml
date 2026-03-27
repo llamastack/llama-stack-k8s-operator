@@ -26,8 +26,7 @@ spec:
   # - id: string (required when list has >1 element; auto-generated for single-element lists)
   # - provider: string (required, maps to provider_type with remote:: prefix)
   # - endpoint: string (optional, maps to config.url)
-  # - apiKey: SecretKeyRef (optional, resolved to env var)
-  # - secretRefs: map[string]SecretKeyRef (optional, named secret references resolved to env vars)
+  # - secretRefs: map[string]SecretKeyRef (optional, named secret references resolved to env vars; use api_key key for API keys)
   # - settings: map[string]any (optional, escape hatch merged into config, NO secret resolution)
 
   # --- Resources (optional, mutually exclusive with overrideConfig) ---
@@ -66,15 +65,12 @@ spec:
   # --- Networking (optional) ---
   networking:
     port: int32           # Default: 8321
-    tls:
-      enabled: bool
-      secretName: string  # K8s TLS Secret reference
+    tls:                    # Presence implies TLS config is active
       caBundle:
         configMapName: string
         configMapNamespace: string  # Optional, defaults to CR namespace
         configMapKeys: [string]     # Optional, defaults to ca-bundle.crt
-    expose:
-      enabled: bool       # Enable external access (default: false)
+    expose:                 # Presence implies external access is enabled
       hostname: string    # Custom hostname for Ingress/Route (optional)
     allowedFrom:
       namespaces: [string]
@@ -135,6 +131,6 @@ spec:
 #    e.g., !(has(self.providers.inference) && self.providers.inference.size() > 0 && self.disabled.exists(d, d == 'inference'))
 #
 # Conditional field requirements:
-# 9.  !has(self.networking.tls) || !self.networking.tls.enabled || has(self.networking.tls.secretName)
+# 9.  (removed — TLSSpec no longer has enabled/secretName; presence of tls implies active config)
 # 10. !has(self.storage.kv) || self.storage.kv.type != 'redis' || has(self.storage.kv.endpoint)
 # 11. !has(self.storage.sql) || self.storage.sql.type != 'postgres' || has(self.storage.sql.connectionString)

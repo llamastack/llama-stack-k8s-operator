@@ -52,7 +52,6 @@ type ProviderConfig struct {
     ID         string                       `json:"id,omitempty"`
     Provider   string                       `json:"provider"`
     Endpoint   string                       `json:"endpoint,omitempty"`
-    APIKey     *SecretKeyRef                `json:"apiKey,omitempty"`
     SecretRefs map[string]SecretKeyRef      `json:"secretRefs,omitempty"`
     Settings   apiextensionsv1.JSON         `json:"settings,omitempty"`
 }
@@ -126,7 +125,7 @@ configs/
 **Normalization rules**:
 - Hyphens (`-`) become underscores (`_`)
 - All uppercase
-- Example: provider ID `vllm-primary`, field `apiKey` produces `LLSD_VLLM_PRIMARY_API_KEY`
+- Example: provider ID `vllm-primary`, field `api_key` produces `LLSD_VLLM_PRIMARY_API_KEY`
 
 ---
 

@@ -32,7 +32,7 @@ The original PR #253 used `apiextensionsv1.JSON` for three polymorphic fields. A
 
 - **Providers** (`ProviderConfigOrList`): Now `[]ProviderConfig`. Users always write list syntax (FR-004).
 - **Models** (`[]apiextensionsv1.JSON`): Now `[]ModelConfig` with only `name` required (FR-007). Users write `- name: "llama3.2-8b"` instead of `- "llama3.2-8b"`.
-- **Expose** (`*apiextensionsv1.JSON`): Now `ExposeConfig` struct with `enabled` bool + `hostname` string (FR-011). Users write `expose: {enabled: true}` instead of `expose: true`.
+- **Expose** (`*apiextensionsv1.JSON`): Now `ExposeConfig` struct with optional `hostname` string (FR-011). Presence of the object implies enabled. Users write `expose: {}` or `expose: {hostname: "..."}` instead of `expose: true`.
 
 This eliminates: no kubebuilder validation, impossible CEL rules, ~500 lines of parsing code, false-positive secret detection bugs. Verify the tradeoffs are acceptable.
 
@@ -50,7 +50,7 @@ Read `contracts/crd-schema.yaml` CEL rules section (bottom of file). There are 1
 
 - **Rule 6** (provider ID required when list > 1): Can CEL express `self.providers.inference.size() <= 1 || self.providers.inference.all(p, has(p.id))`? This is the rule that was impossible with JSON types.
 - **Rule 8** (disabled + provider conflict): Should this be an error or a warning? We chose error. If you prefer warning, flag it.
-- **Rules 9-11** (conditional fields): TLS needs secretName when enabled, Redis needs endpoint, Postgres needs connectionString. These were missing in the original spec.
+- **Rules 9-11** (conditional fields): Redis needs endpoint, Postgres needs connectionString. TLS rule removed (presence of `tls` implies active config; `secretName` and `enabled` fields removed). These were missing in the original spec.
 
 ### Step 5: Scan Edge Cases (4 min)
 
@@ -79,11 +79,11 @@ This spec addresses all critical issues raised in the PR #253 review:
 |--------------|------------|---------------|
 | Polymorphic JSON types lose kubebuilder validation | Replaced with typed `[]ProviderConfig` slices | FR-004, research.md R1 |
 | Polymorphic models (`[]apiextensionsv1.JSON`) | Replaced with typed `[]ModelConfig` (only `name` required) | FR-007, data-model.md ModelConfig |
-| Polymorphic expose (`*apiextensionsv1.JSON`) | Replaced with typed `ExposeConfig` struct (`enabled` bool + `hostname` string) | FR-011, data-model.md ExposeConfig |
+| Polymorphic expose (`*apiextensionsv1.JSON`) | Replaced with typed `ExposeConfig` struct (optional `hostname`; presence = enabled) | FR-011, data-model.md ExposeConfig |
 | CEL rules impossible on `apiextensionsv1.JSON` | CEL now works because providers are typed | FR-071, FR-072 |
 | `extractDirectSecretRef` false positives | Explicit `secretRefs` field, no heuristic matching | FR-005 |
 | `sortedMapKeys` doesn't sort | Determinism addressed in NFR-001, merge.go | NFR-001 |
-| Missing CEL for TLS/storage conditionals | Added FR-079, FR-079a-c | Validation section |
+| Missing CEL for TLS/storage conditionals | Added FR-079a-c for storage; FR-079 removed (TLS simplified) | Validation section |
 | Disabled + provider should be error not warning | Changed to validation error | OQ-002, edge case |
 | Status conditions defined but unwired | Tasks T036, T055, T090 wire all 4 conditions | tasks.md |
 | Missing test coverage for FR-097, FR-096, FR-100 | Dedicated tasks T053-T058 | tasks.md Phase 7 |
