@@ -23,8 +23,10 @@ import (
 	"os"
 
 	llamaxk8siov1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	llamaxk8siov1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 	"github.com/llamastack/llama-stack-k8s-operator/controllers"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
+	llsconfig "github.com/llamastack/llama-stack-k8s-operator/pkg/config"
 	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -55,10 +57,13 @@ func init() { //nolint:gochecknoinits
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(llamaxk8siov1alpha1.AddToScheme(scheme))
+	utilruntime.Must(llamaxk8siov1alpha2.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
-func setupReconciler(ctx context.Context, cli client.Client, mgr ctrl.Manager, clusterInfo *cluster.ClusterInfo) error {
+func setupReconciler(
+	ctx context.Context, cli client.Client, mgr ctrl.Manager, clusterInfo *cluster.ClusterInfo,
+) error {
 	reconciler, err := controllers.NewLlamaStackDistributionReconciler(ctx, cli, scheme, clusterInfo)
 	if err != nil {
 		return fmt.Errorf("failed to create reconciler: %w", err)
@@ -67,6 +72,34 @@ func setupReconciler(ctx context.Context, cli client.Client, mgr ctrl.Manager, c
 		return fmt.Errorf("failed to create controller: %w", err)
 	}
 	return nil
+}
+
+func initClusterResources(
+	ctx context.Context,
+	s *runtime.Scheme,
+	distData []byte,
+) (client.Client, *cluster.ClusterInfo, []string, error) {
+	cfg, err := config.GetConfig()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to get config: %w", err)
+	}
+
+	setupClient, err := client.New(cfg, client.Options{Scheme: s})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create client: %w", err)
+	}
+
+	clusterInfo, err := cluster.NewClusterInfo(ctx, setupClient, distData)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to initialize cluster config: %w", err)
+	}
+
+	distNames, err := llsconfig.EmbeddedDistributionNames()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load distribution names: %w", err)
+	}
+
+	return setupClient, clusterInfo, distNames, nil
 }
 
 func setupHealthChecks(mgr ctrl.Manager) error {
@@ -126,45 +159,35 @@ func main() {
 		os.Exit(1)
 	}
 
-	cfg, err := config.GetConfig()
+	setupClient, clusterInfo, embeddedDistNames, err := initClusterResources(ctx, scheme, embeddedDistributions)
 	if err != nil {
-		setupLog.Error(err, "failed to get config for setup")
+		setupLog.Error(err, "failed to initialize cluster resources")
 		os.Exit(1)
 	}
 
-	setupClient, err := client.New(cfg, client.Options{
-		Scheme: scheme,
-	})
-	if err != nil {
-		setupLog.Error(err, "failed to set up clients")
+	if setupErr := cluster.PerformUpgradeCleanup(ctx, setupClient); setupErr != nil {
+		setupLog.Error(setupErr, "failed to perform upgrade cleanup")
 		os.Exit(1)
 	}
 
-	clusterInfo, err := cluster.NewClusterInfo(ctx, setupClient, embeddedDistributions)
-	if err != nil {
-		setupLog.Error(err, "failed to initialize cluster config")
+	if setupErr := setupReconciler(ctx, setupClient, mgr, clusterInfo); setupErr != nil {
+		setupLog.Error(setupErr, "failed to set up reconciler")
 		os.Exit(1)
 	}
 
-	// Perform one-time upgrade cleanup operations
-	if err := cluster.PerformUpgradeCleanup(ctx, setupClient); err != nil {
-		setupLog.Error(err, "failed to perform upgrade cleanup")
+	if setupErr := llamaxk8siov1alpha2.SetupWebhookWithManager(mgr, embeddedDistNames); setupErr != nil {
+		setupLog.Error(setupErr, "failed to set up webhooks")
 		os.Exit(1)
 	}
 
-	if err := setupReconciler(ctx, setupClient, mgr, clusterInfo); err != nil {
-		setupLog.Error(err, "failed to set up reconciler")
-		os.Exit(1)
-	}
-
-	if err := setupHealthChecks(mgr); err != nil {
-		setupLog.Error(err, "failed to set up health checks")
+	if setupErr := setupHealthChecks(mgr); setupErr != nil {
+		setupLog.Error(setupErr, "failed to set up health checks")
 		os.Exit(1)
 	}
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctx); err != nil {
-		setupLog.Error(err, "failed to run manager")
+	if startErr := mgr.Start(ctx); startErr != nil {
+		setupLog.Error(startErr, "failed to run manager")
 		os.Exit(1)
 	}
 }
