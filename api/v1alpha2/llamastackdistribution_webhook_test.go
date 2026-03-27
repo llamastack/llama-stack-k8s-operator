@@ -314,4 +314,3 @@ func TestValidateWrongObjectType(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expected *LlamaStackDistribution")
 }
-

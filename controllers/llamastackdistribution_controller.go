@@ -751,11 +751,11 @@ func (r *LlamaStackDistributionReconciler) handleOperatorConfigUpdate(configMap 
 	}
 
 	// Update feature flags
-	enableNetworkPolicy, err := parseFeatureFlags(configMap.Data)
+	parsed, err := parseFeatureFlags(configMap.Data)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "Failed to parse feature flags")
 	} else {
-		r.EnableNetworkPolicy = enableNetworkPolicy
+		r.EnableNetworkPolicy = parsed.EnableNetworkPolicy
 	}
 
 	r.ImageMappingOverrides = ParseImageMappingOverrides(context.Background(), configMap.Data)
@@ -1812,19 +1812,30 @@ func createDefaultConfigMap(configMapName types.NamespacedName) (*corev1.ConfigM
 	}, nil
 }
 
+// parsedFeatureFlags holds the parsed values of all feature flags.
+type parsedFeatureFlags struct {
+	EnableNetworkPolicy bool
+}
+
 // parseFeatureFlags extracts and parses feature flags from ConfigMap data.
-func parseFeatureFlags(configMapData map[string]string) (bool, error) {
+func parseFeatureFlags(configMapData map[string]string) (parsedFeatureFlags, error) {
+	defaults := parsedFeatureFlags{
+		EnableNetworkPolicy: featureflags.NetworkPolicyDefaultValue,
+	}
+
 	featureFlagsYAML, exists := configMapData[featureflags.FeatureFlagsKey]
 	if !exists {
-		return featureflags.NetworkPolicyDefaultValue, nil
+		return defaults, nil
 	}
 
 	var flags featureflags.FeatureFlags
 	if err := yaml.Unmarshal([]byte(featureFlagsYAML), &flags); err != nil {
-		return featureflags.NetworkPolicyDefaultValue, fmt.Errorf("failed to parse feature flags: %w", err)
+		return defaults, fmt.Errorf("failed to parse feature flags: %w", err)
 	}
 
-	return flags.EnableNetworkPolicy.Enabled, nil
+	return parsedFeatureFlags{
+		EnableNetworkPolicy: flags.EnableNetworkPolicy.Enabled,
+	}, nil
 }
 
 // NewLlamaStackDistributionReconciler creates a new reconciler with default image mappings.
@@ -1843,7 +1854,7 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 	}
 
 	// Parse feature flags from ConfigMap
-	enableNetworkPolicy, err := parseFeatureFlags(configMap.Data)
+	parsed, err := parseFeatureFlags(configMap.Data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse feature flags: %w", err)
 	}
@@ -1854,7 +1865,7 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 	return &LlamaStackDistributionReconciler{
 		Client:                client,
 		Scheme:                scheme,
-		EnableNetworkPolicy:   enableNetworkPolicy,
+		EnableNetworkPolicy:   parsed.EnableNetworkPolicy,
 		ImageMappingOverrides: imageMappingOverrides,
 		ClusterInfo:           clusterInfo,
 		httpClient:            &http.Client{Timeout: 5 * time.Second},

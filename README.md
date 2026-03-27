@@ -382,6 +382,7 @@ To take advantage of the new declarative configuration features, see the **[v1al
 - Go version **go1.24**
 - operator-sdk **v1.39.2** (v4 layout) or newer
 - kubectl configured to access your cluster
+- [cert-manager](https://cert-manager.io/docs/installation/) (required for full deployment with v1alpha2 support; not needed for v1alpha1-only mode)
 - A running inference server:
   - For local development, you can use the provided script: `/hack/deploy-quickstart.sh`
 
@@ -469,19 +470,40 @@ To take advantage of the new declarative configuration features, see the **[v1al
 
 ### Deployment
 
-**Deploying operator locally**
+The operator supports two deployment modes:
 
-- Deploy the created image in your cluster using following command:
+| Mode | Overlay | What you get | Requirements |
+|------|---------|--------------|--------------|
+| **Full (default)** | `config/default` | v1alpha1 + v1alpha2 APIs, validating webhook, conversion webhook | cert-manager |
+| **v1alpha1-only** | `config/v1alpha1-only` | v1alpha1 API only, no webhooks | none |
 
-  ```commandline
-  make deploy IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
-  ```
+**Full deployment (default)** - requires [cert-manager](https://cert-manager.io/docs/installation/) for webhook TLS:
 
-- To remove resources created during installation use:
+```commandline
+make deploy IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
+```
 
-  ```commandline
-  make undeploy
-  ```
+**v1alpha1-only deployment** - no cert-manager dependency:
+
+```commandline
+make deploy-v1alpha1 IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
+```
+
+Or equivalently:
+
+```commandline
+make deploy KUSTOMIZE_OVERLAY=config/v1alpha1-only IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
+```
+
+> **Note:** The v1alpha1-only mode deploys a single-version CRD without webhooks. v1alpha2 CRs cannot be created in this mode. To switch to full mode later, deploy with `config/default` (cert-manager must be installed first).
+
+To remove resources created during installation:
+
+```commandline
+make undeploy
+# or for v1alpha1-only:
+make undeploy-v1alpha1
+```
 
 ## Running E2E Tests
 

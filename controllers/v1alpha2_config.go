@@ -27,6 +27,7 @@ import (
 	llsconfig "github.com/llamastack/llama-stack-k8s-operator/pkg/config"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -524,6 +525,10 @@ func (r *LlamaStackDistributionReconciler) handleV1Alpha2NativeConfig(
 
 	v2Instance := &v1alpha2.LlamaStackDistribution{}
 	if err := r.Get(ctx, key, v2Instance); err != nil {
+		if meta.IsNoMatchError(err) {
+			logger.V(1).Info("v1alpha2 API not available, skipping native config")
+			return nil, nil
+		}
 		return nil, fmt.Errorf("failed to fetch v1alpha2 instance: %w", err)
 	}
 
@@ -587,6 +592,9 @@ func (r *LlamaStackDistributionReconciler) persistV1Alpha2Status(
 ) error {
 	v2Instance := &v1alpha2.LlamaStackDistribution{}
 	if err := r.Get(ctx, key, v2Instance); err != nil {
+		if meta.IsNoMatchError(err) {
+			return nil
+		}
 		return fmt.Errorf("failed to fetch v1alpha2 instance for status update: %w", err)
 	}
 

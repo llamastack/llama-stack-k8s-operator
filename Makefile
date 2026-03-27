@@ -236,7 +236,10 @@ image-build-arm: ## Build ARM64 image with the manager
 docker-buildx: image-buildx ## Deprecated: use image-buildx instead
 
 # Kustomize overlay to use for deploy/undeploy/build-installer.
-# Use config/openshift for OpenShift clusters (service-ca instead of cert-manager).
+# Overlays:
+#   config/default        — full install with v1alpha2, webhooks, cert-manager (default)
+#   config/openshift      — OpenShift clusters (service-ca instead of cert-manager)
+#   config/v1alpha1-only  — v1alpha1 only, no webhooks, no cert-manager dependency
 KUSTOMIZE_OVERLAY ?= config/default
 
 # Installer directory is updated to `release` from operator-sdk default `dist` directory.
@@ -271,6 +274,14 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 .PHONY: undeploy
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build $(KUSTOMIZE_OVERLAY) | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+
+.PHONY: deploy-v1alpha1
+deploy-v1alpha1: ## Deploy with v1alpha1-only CRD (no webhooks, no cert-manager).
+	$(MAKE) deploy KUSTOMIZE_OVERLAY=config/v1alpha1-only
+
+.PHONY: undeploy-v1alpha1
+undeploy-v1alpha1: ## Undeploy v1alpha1-only deployment.
+	$(MAKE) undeploy KUSTOMIZE_OVERLAY=config/v1alpha1-only
 
 ##@ Dependencies
 
