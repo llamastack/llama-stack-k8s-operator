@@ -8,8 +8,11 @@ rules:
   - ""
   resources:
   - configmaps
+  - serviceaccounts
+  - services
   verbs:
   - create
+  - delete
   - get
   - list
   - patch
@@ -27,15 +30,10 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - serviceaccounts
-  - services
+  - secrets
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - apps

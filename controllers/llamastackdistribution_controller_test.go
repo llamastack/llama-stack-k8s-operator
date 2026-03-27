@@ -10,6 +10,7 @@ import (
 	"time"
 
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	llamav1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 	controllers "github.com/llamastack/llama-stack-k8s-operator/controllers"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/stretchr/testify/require"
@@ -23,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
@@ -981,4 +983,428 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 		deployment, func() bool {
 			return deployment.Spec.Template.Spec.Containers[0].Image == "quay.io/custom/llama-stack:starter"
 		}, "Deployment should be updated with new image")
+}
+
+func TestV1Alpha2SecretRefValidation(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-v1alpha2-secret-ref")
+	operatorNamespace := createTestNamespace(t, "test-v1alpha2-secret-op")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	// Create operator config ConfigMap (required by NewLlamaStackDistributionReconciler)
+	opConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+
+	// Create a v1alpha2 CR with a provider that references a non-existent secret
+	v2Instance := &llamav1alpha2.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret-ref",
+			Namespace: namespace.Name,
+		},
+		Spec: llamav1alpha2.LlamaStackDistributionSpec{
+			Distribution: llamav1alpha2.DistributionSpec{
+				Name: "starter",
+			},
+			Providers: &llamav1alpha2.ProvidersSpec{
+				Inference: []llamav1alpha2.ProviderConfig{
+					{
+						Provider: "ollama",
+						Endpoint: "http://ollama:11434/v1",
+						SecretRefs: map[string]llamav1alpha2.SecretKeyRef{
+							"api_key": {Name: "nonexistent-secret", Key: "api-key"},
+						},
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), v2Instance))
+
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"starter": testImage},
+	}
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+		t.Context(), k8sClient, scheme.Scheme, clusterInfo,
+	)
+	require.NoError(t, err)
+
+	// Reconciliation should fail because the secret doesn't exist
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: v2Instance.Name, Namespace: namespace.Name},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nonexistent-secret",
+		"error should mention the missing secret name")
+}
+
+func TestV1Alpha2ConfigMapRefValidation(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-v1alpha2-cm-ref")
+	operatorNamespace := createTestNamespace(t, "test-v1alpha2-cm-op")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	opConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+
+	// Create a v1alpha2 CR with providers (so it takes the generated path)
+	// and a caBundle referencing a non-existent ConfigMap.
+	v2Instance := &llamav1alpha2.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-cm-ref",
+			Namespace: namespace.Name,
+		},
+		Spec: llamav1alpha2.LlamaStackDistributionSpec{
+			Distribution: llamav1alpha2.DistributionSpec{
+				Name: "starter",
+			},
+			Providers: &llamav1alpha2.ProvidersSpec{
+				Inference: []llamav1alpha2.ProviderConfig{
+					{Provider: "ollama", Endpoint: "http://ollama:11434/v1"},
+				},
+			},
+			Networking: &llamav1alpha2.NetworkingSpec{
+				TLS: &llamav1alpha2.TLSSpec{
+					CABundle: &llamav1alpha2.CABundleConfig{
+						ConfigMapName: "nonexistent-ca-bundle",
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), v2Instance))
+
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"starter": testImage},
+	}
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+		t.Context(), k8sClient, scheme.Scheme, clusterInfo,
+	)
+	require.NoError(t, err)
+
+	// Reconciliation should fail because the CA bundle ConfigMap doesn't exist
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: v2Instance.Name, Namespace: namespace.Name},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nonexistent-ca-bundle",
+		"error should mention the missing CA bundle ConfigMap name")
+}
+
+func TestV1Alpha2SkipRestartOnUnchangedConfig(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-v1alpha2-skip-restart")
+	operatorNamespace := createTestNamespace(t, "test-v1alpha2-skip-op")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	opConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+
+	v2Instance := &llamav1alpha2.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-skip-restart",
+			Namespace: namespace.Name,
+		},
+		Spec: llamav1alpha2.LlamaStackDistributionSpec{
+			Distribution: llamav1alpha2.DistributionSpec{Name: "starter"},
+			Providers: &llamav1alpha2.ProvidersSpec{
+				Inference: []llamav1alpha2.ProviderConfig{
+					{Provider: "ollama", Endpoint: "http://ollama:11434/v1"},
+				},
+			},
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), v2Instance))
+
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"starter": testImage},
+	}
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(t.Context(), k8sClient, scheme.Scheme, clusterInfo)
+	require.NoError(t, err)
+
+	// First reconcile — should create the generated ConfigMap
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: v2Instance.Name, Namespace: namespace.Name},
+	})
+	require.NoError(t, err)
+
+	// List generated ConfigMaps after first reconcile
+	cmList1 := &corev1.ConfigMapList{}
+	require.NoError(t, k8sClient.List(t.Context(), cmList1,
+		&client.ListOptions{Namespace: namespace.Name},
+	))
+	var generatedCMs1 []string
+	for i := range cmList1.Items {
+		if cmList1.Items[i].Labels["app.kubernetes.io/component"] == generatedConfigLabel {
+			generatedCMs1 = append(generatedCMs1, cmList1.Items[i].Name)
+		}
+	}
+	require.Len(t, generatedCMs1, 1, "first reconcile should create exactly one generated ConfigMap")
+
+	// Second reconcile with identical spec — should NOT create a new ConfigMap (FR-096)
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: v2Instance.Name, Namespace: namespace.Name},
+	})
+	require.NoError(t, err)
+
+	cmList2 := &corev1.ConfigMapList{}
+	require.NoError(t, k8sClient.List(t.Context(), cmList2,
+		&client.ListOptions{Namespace: namespace.Name},
+	))
+	var generatedCMs2 []string
+	for i := range cmList2.Items {
+		if cmList2.Items[i].Labels["app.kubernetes.io/component"] == generatedConfigLabel {
+			generatedCMs2 = append(generatedCMs2, cmList2.Items[i].Name)
+		}
+	}
+	require.Len(t, generatedCMs2, 1, "second reconcile with unchanged spec must reuse existing ConfigMap (FR-096)")
+	require.Equal(t, generatedCMs1[0], generatedCMs2[0],
+		"ConfigMap name must be identical when content hasn't changed")
+}
+
+func TestV1Alpha2AtomicImageAndConfigUpdate(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-v1alpha2-atomic")
+	operatorNamespace := createTestNamespace(t, "test-v1alpha2-atomic-op")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	opConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+
+	v2Instance := &llamav1alpha2.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-atomic",
+			Namespace: namespace.Name,
+		},
+		Spec: llamav1alpha2.LlamaStackDistributionSpec{
+			Distribution: llamav1alpha2.DistributionSpec{Name: "starter"},
+			Providers: &llamav1alpha2.ProvidersSpec{
+				Inference: []llamav1alpha2.ProviderConfig{
+					{Provider: "ollama", Endpoint: "http://ollama:11434/v1"},
+				},
+			},
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), v2Instance))
+
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"starter": testImage},
+	}
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(t.Context(), k8sClient, scheme.Scheme, clusterInfo)
+	require.NoError(t, err)
+
+	// Reconcile to create Deployment
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: v2Instance.Name, Namespace: namespace.Name},
+	})
+	require.NoError(t, err)
+
+	// Verify Deployment exists and has correct image and config volume (FR-100)
+	deploy := &appsv1.Deployment{}
+	err = k8sClient.Get(t.Context(), types.NamespacedName{
+		Name:      v2Instance.Name,
+		Namespace: namespace.Name,
+	}, deploy)
+	require.NoError(t, err, "Deployment should exist after reconciliation")
+
+	// Verify the container image matches the resolved image
+	require.Len(t, deploy.Spec.Template.Spec.Containers, 1)
+	require.Equal(t, testImage, deploy.Spec.Template.Spec.Containers[0].Image,
+		"Deployment container image must match resolved image (FR-100)")
+
+	// Verify that a config volume is mounted (either from generated ConfigMap or userConfig)
+	var hasConfigVolume bool
+	for _, vol := range deploy.Spec.Template.Spec.Volumes {
+		if vol.ConfigMap != nil {
+			hasConfigVolume = true
+			break
+		}
+	}
+	require.True(t, hasConfigVolume,
+		"Deployment must have a ConfigMap volume for config (FR-100: atomic image+config)")
+}
+
+func TestV1Alpha2SecretEnvVarsInjected(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-v1alpha2-secret-env")
+	operatorNamespace := createTestNamespace(t, "test-v1alpha2-secret-env-op")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	opConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+
+	// Create the Secret that the provider secretRefs will reference.
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vllm-creds",
+			Namespace: namespace.Name,
+		},
+		Data: map[string][]byte{
+			"token": []byte("test-api-key-value"),
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), secret))
+
+	v2Instance := &llamav1alpha2.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret-env",
+			Namespace: namespace.Name,
+		},
+		Spec: llamav1alpha2.LlamaStackDistributionSpec{
+			Distribution: llamav1alpha2.DistributionSpec{Name: "starter"},
+			Providers: &llamav1alpha2.ProvidersSpec{
+				Inference: []llamav1alpha2.ProviderConfig{
+					{
+						Provider: "vllm",
+						Endpoint: "http://vllm:8000",
+						SecretRefs: map[string]llamav1alpha2.SecretKeyRef{
+							"api_key": {Name: "vllm-creds", Key: "token"},
+						},
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), v2Instance))
+
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"starter": testImage},
+	}
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(t.Context(), k8sClient, scheme.Scheme, clusterInfo)
+	require.NoError(t, err)
+
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: v2Instance.Name, Namespace: namespace.Name},
+	})
+	require.NoError(t, err)
+
+	// Verify the Deployment exists and has the secret-backed env var (FR-022, FR-032).
+	deploy := &appsv1.Deployment{}
+	err = k8sClient.Get(t.Context(), types.NamespacedName{
+		Name:      v2Instance.Name,
+		Namespace: namespace.Name,
+	}, deploy)
+	require.NoError(t, err, "Deployment should exist after reconciliation")
+	require.Len(t, deploy.Spec.Template.Spec.Containers, 1)
+
+	container := deploy.Spec.Template.Spec.Containers[0]
+	var secretEnv *corev1.EnvVar
+	for i := range container.Env {
+		if container.Env[i].Name == "LLSD_VLLM_API_KEY" {
+			secretEnv = &container.Env[i]
+			break
+		}
+	}
+
+	require.NotNil(t, secretEnv,
+		"Deployment container must have LLSD_VLLM_API_KEY env var from secretRefs (FR-032)")
+	require.NotNil(t, secretEnv.ValueFrom,
+		"Secret env var must use ValueFrom (not a literal value)")
+	require.NotNil(t, secretEnv.ValueFrom.SecretKeyRef,
+		"Secret env var must reference a SecretKeyRef")
+	require.Equal(t, "vllm-creds", secretEnv.ValueFrom.SecretKeyRef.Name,
+		"SecretKeyRef must point to the correct Secret name")
+	require.Equal(t, "token", secretEnv.ValueFrom.SecretKeyRef.Key,
+		"SecretKeyRef must point to the correct key")
+
+	// Also verify the generated config.yaml contains the placeholder.
+	cmList := &corev1.ConfigMapList{}
+	require.NoError(t, k8sClient.List(t.Context(), cmList, &client.ListOptions{Namespace: namespace.Name}))
+	var generatedCM *corev1.ConfigMap
+	for i := range cmList.Items {
+		if cmList.Items[i].Labels["app.kubernetes.io/component"] == generatedConfigLabel {
+			generatedCM = &cmList.Items[i]
+			break
+		}
+	}
+	require.NotNil(t, generatedCM, "Generated ConfigMap should exist")
+	configYAML := generatedCM.Data["config.yaml"]
+	require.Contains(t, configYAML, "${env.LLSD_VLLM_API_KEY}",
+		"Generated config.yaml must contain env var placeholder for secret (FR-032)")
+}
+
+func TestV1Alpha2ProviderRefValidation(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-v1alpha2-prov-ref")
+	operatorNamespace := createTestNamespace(t, "test-v1alpha2-prov-op")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	opConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+
+	// Create a v1alpha2 CR where a model references a provider ID that doesn't exist
+	v2Instance := &llamav1alpha2.LlamaStackDistribution{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-prov-ref",
+			Namespace: namespace.Name,
+		},
+		Spec: llamav1alpha2.LlamaStackDistributionSpec{
+			Distribution: llamav1alpha2.DistributionSpec{
+				Name: "starter",
+			},
+			Providers: &llamav1alpha2.ProvidersSpec{
+				Inference: []llamav1alpha2.ProviderConfig{
+					{Provider: "ollama", Endpoint: "http://ollama:11434/v1"},
+				},
+			},
+			Resources: &llamav1alpha2.ResourcesSpec{
+				Models: []llamav1alpha2.ModelConfig{
+					{Name: "llama3.2:1b", Provider: "nonexistent-provider"},
+				},
+			},
+		},
+	}
+
+	// The validating webhook catches invalid provider references at admission
+	// time, so Create itself should be rejected.
+	err := k8sClient.Create(t.Context(), v2Instance)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nonexistent-provider",
+		"webhook should reject the CR with an invalid provider reference")
 }

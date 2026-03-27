@@ -38,6 +38,7 @@ const (
 	testOperatorNamespace = "default"
 	testStorageVolumeName = "lls-storage"
 	testInstanceName      = "test-instance"
+	generatedConfigLabel  = "generated-config"
 )
 
 // DistributionBuilder - Builder pattern for test instances of operator custom resource.

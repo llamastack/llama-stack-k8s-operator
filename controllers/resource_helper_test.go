@@ -70,8 +70,6 @@ func TestBuildContainerSpec(t *testing.T) {
 				}},
 				Env: []corev1.EnvVar{
 					{Name: "HF_HOME", Value: "/.llama"},
-					{Name: "LLS_WORKERS", Value: "1"},
-					{Name: "LLS_PORT", Value: "8321"},
 					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
 				},
 			},
@@ -118,8 +116,6 @@ func TestBuildContainerSpec(t *testing.T) {
 				},
 				Env: []corev1.EnvVar{
 					{Name: "HF_HOME", Value: "/custom/path"},
-					{Name: "LLS_WORKERS", Value: "1"},
-					{Name: "LLS_PORT", Value: "9000"},
 					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
 					{Name: "TEST_ENV", Value: "test-value"},
 				},
@@ -162,8 +158,6 @@ func TestBuildContainerSpec(t *testing.T) {
 				}},
 				Env: []corev1.EnvVar{
 					{Name: "HF_HOME", Value: "/.llama"},
-					{Name: "LLS_WORKERS", Value: "1"},
-					{Name: "LLS_PORT", Value: "8321"},
 					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
 				},
 			},
@@ -195,8 +189,6 @@ func TestBuildContainerSpec(t *testing.T) {
 				StartupProbe: newDefaultStartupProbe(llamav1alpha1.DefaultServerPort),
 				Env: []corev1.EnvVar{
 					{Name: "HF_HOME", Value: "/.llama"},
-					{Name: "LLS_WORKERS", Value: "4"},
-					{Name: "LLS_PORT", Value: "8321"},
 					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
 				},
 				VolumeMounts: []corev1.VolumeMount{{
@@ -233,13 +225,10 @@ func TestBuildContainerSpec(t *testing.T) {
 				},
 				Ports:        []corev1.ContainerPort{{ContainerPort: llamav1alpha1.DefaultServerPort}},
 				StartupProbe: newDefaultStartupProbe(llamav1alpha1.DefaultServerPort),
-				Command:      []string{"/bin/sh", "-c", startupScript},
-				Args:         []string{},
 				Env: []corev1.EnvVar{
 					{Name: "HF_HOME", Value: llamav1alpha1.DefaultMountPath},
-					{Name: "LLS_WORKERS", Value: "1"},
-					{Name: "LLS_PORT", Value: "8321"},
 					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
+					{Name: "RUN_CONFIG_PATH", Value: "/etc/llama-stack/config.yaml"},
 				},
 				VolumeMounts: []corev1.VolumeMount{
 					{

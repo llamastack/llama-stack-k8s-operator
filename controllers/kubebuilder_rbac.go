@@ -25,8 +25,11 @@ package controllers
 
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create
 
-// ConfigMap permissions - controller reads user configmaps and manages operator config configmaps
-//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
+// Secret permissions - controller validates secretKeyRef references exist before config generation
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+
+// ConfigMap permissions - controller reads user configmaps, manages operator and generated config configmaps
+//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 // NetworkPolicy permissions - controller creates and manages network policies
 //+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
