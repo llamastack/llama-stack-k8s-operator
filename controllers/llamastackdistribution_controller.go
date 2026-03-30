@@ -36,6 +36,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-containerregistry/pkg/name"
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	v1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/featureflags"
@@ -197,15 +198,44 @@ func (r *LlamaStackDistributionReconciler) reconcileInstance(
 	v1a2Result, v1a2Err := r.handleV1Alpha2NativeConfig(ctx, key, instance)
 	if v1a2Err != nil {
 		logger.Error(v1a2Err, "failed to handle v1alpha2 native config")
+		// FR-097: On config generation failure, skip reconcileResources to
+		// preserve the current running Deployment unchanged. Persist
+		// ConfigGenerated=False so the failure is visible in .status.conditions.
+		return r.handleV1Alpha2ConfigFailure(ctx, key, v1a2Err)
 	}
 
-	// Reconcile all resources, storing the error for later.
 	reconcileErr := r.reconcileResources(ctx, instance)
-	if reconcileErr == nil && v1a2Err != nil {
-		reconcileErr = v1a2Err
-	}
 
 	return r.finalizeReconciliation(ctx, key, instance, v1a2Result, reconcileErr)
+}
+
+// handleV1Alpha2ConfigFailure persists ConfigGenerated=False on the v1alpha2 status
+// when config generation fails, without touching the Deployment. This satisfies
+// FR-097: the running Deployment stays intact and the failure is visible in status.
+func (r *LlamaStackDistributionReconciler) handleV1Alpha2ConfigFailure(
+	ctx context.Context,
+	key types.NamespacedName,
+	configErr error,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	v2Instance := &v1alpha2.LlamaStackDistribution{}
+	if err := r.Get(ctx, key, v2Instance); err != nil {
+		logger.Error(err, "failed to fetch v1alpha2 instance for failure status")
+		return ctrl.Result{}, configErr
+	}
+
+	SetV1Alpha2Condition(&v2Instance.Status, ConditionTypeConfigGenerated,
+		metav1.ConditionFalse, ReasonConfigGenFailed, configErr.Error(),
+		v2Instance.Generation)
+
+	v2Instance.Status.Phase = v1alpha2.PhaseFailed
+
+	if err := r.Status().Update(ctx, v2Instance); err != nil {
+		logger.Error(err, "failed to update v1alpha2 failure status")
+	}
+
+	return ctrl.Result{}, configErr
 }
 
 // finalizeReconciliation handles status updates and determines the reconciliation result.
@@ -232,6 +262,10 @@ func (r *LlamaStackDistributionReconciler) finalizeReconciliation(
 		}
 		if err := r.persistV1Alpha2Status(ctx, key, instance, v1a2Result); err != nil {
 			logger.Error(err, "failed to update v1alpha2 status")
+			if reconcileErr != nil {
+				return ctrl.Result{}, reconcileErr
+			}
+			return ctrl.Result{}, err
 		}
 	} else {
 		if statusUpdateErr := r.updateStatus(ctx, instance, reconcileErr); statusUpdateErr != nil {
@@ -1150,7 +1184,6 @@ func (r *LlamaStackDistributionReconciler) getVersionInfo(ctx context.Context, i
 	return response.Version, nil
 }
 
-// updateStatus refreshes the LlamaStack status.
 // computeStatus computes all status fields on the in-memory v1alpha1 instance
 // without persisting to the API server. This allows the caller to choose
 // whether to persist via v1alpha1 or v1alpha2 API.

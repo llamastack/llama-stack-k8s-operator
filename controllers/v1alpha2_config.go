@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -301,7 +302,7 @@ func (r *LlamaStackDistributionReconciler) validateV1Alpha2References(
 }
 
 // ValidateV1Alpha2SecretRefs validates that all secretKeyRef references in a v1alpha2 spec
-// point to existing Secrets.
+// point to existing Secrets. Aggregates all errors to provide a complete picture.
 func (r *LlamaStackDistributionReconciler) ValidateV1Alpha2SecretRefs(
 	ctx context.Context,
 	spec *v1alpha2.LlamaStackDistributionSpec,
@@ -312,6 +313,7 @@ func (r *LlamaStackDistributionReconciler) ValidateV1Alpha2SecretRefs(
 		return fmt.Errorf("failed to collect secret references: %w", err)
 	}
 
+	var errs []error
 	for _, envVar := range resolution.EnvVars {
 		if envVar.ValueFrom == nil || envVar.ValueFrom.SecretKeyRef == nil {
 			continue
@@ -326,17 +328,19 @@ func (r *LlamaStackDistributionReconciler) ValidateV1Alpha2SecretRefs(
 			Namespace: namespace,
 		}, secret); err != nil {
 			if k8serrors.IsNotFound(err) {
-				return fmt.Errorf("failed to find Secret %q in namespace %q (referenced by env var %s)", secretName, namespace, envVar.Name)
+				errs = append(errs, fmt.Errorf("failed to find secret %q in namespace %q (referenced by env var %s)", secretName, namespace, envVar.Name))
+			} else {
+				errs = append(errs, fmt.Errorf("failed to get Secret %q: %w", secretName, err))
 			}
-			return fmt.Errorf("failed to get Secret %q: %w", secretName, err)
+			continue
 		}
 
 		if _, ok := secret.Data[secretKey]; !ok {
-			return fmt.Errorf("failed to find key %q in Secret %q in namespace %q", secretKey, secretName, namespace)
+			errs = append(errs, fmt.Errorf("failed to find key %q in Secret %q in namespace %q", secretKey, secretName, namespace))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // ValidateV1Alpha2ConfigMapRefs validates ConfigMap references in overrideConfig and caBundle.
@@ -377,25 +381,28 @@ func (r *LlamaStackDistributionReconciler) ValidateV1Alpha2ConfigMapRefs(
 }
 
 // ValidateProviderReferences validates that model provider references are valid provider IDs.
+// Aggregates all errors to surface every invalid reference at once.
 func ValidateProviderReferences(spec *v1alpha2.LlamaStackDistributionSpec) error {
 	if spec.Resources == nil || spec.Providers == nil {
 		return nil
 	}
 
 	providerIDs := collectProviderIDs(spec.Providers)
+	available := strings.Join(sortedKeys(providerIDs), ", ")
 
+	var errs []error
 	for i, mc := range spec.Resources.Models {
 		if mc.Provider != "" {
 			if _, ok := providerIDs[mc.Provider]; !ok {
-				return fmt.Errorf(
+				errs = append(errs, fmt.Errorf(
 					"resources.models[%d].provider: provider ID %q not found; available providers: %s",
-					i, mc.Provider, strings.Join(sortedKeys(providerIDs), ", "),
-				)
+					i, mc.Provider, available,
+				))
 			}
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func collectProviderIDs(spec *v1alpha2.ProvidersSpec) map[string]bool {
@@ -476,6 +483,7 @@ func SetV1Alpha2Condition(
 	condType string,
 	condStatus metav1.ConditionStatus,
 	reason, message string,
+	observedGeneration int64,
 ) {
 	if status.Conditions == nil {
 		status.Conditions = make([]metav1.Condition, 0)
@@ -487,6 +495,7 @@ func SetV1Alpha2Condition(
 		Reason:             reason,
 		Message:            message,
 		LastTransitionTime: metav1.Now(),
+		ObservedGeneration: observedGeneration,
 	}
 
 	for i := range status.Conditions {
@@ -496,6 +505,7 @@ func SetV1Alpha2Condition(
 			} else {
 				status.Conditions[i].Reason = reason
 				status.Conditions[i].Message = message
+				status.Conditions[i].ObservedGeneration = observedGeneration
 			}
 			return
 		}
@@ -616,7 +626,8 @@ func (r *LlamaStackDistributionReconciler) persistV1Alpha2Status(
 	// Set v1alpha2-specific fields.
 	r.updateV1Alpha2SpecificStatus(v2Instance, result.Generated, result.ResolvedImg, result.ConfigMap, result.ConfigSource)
 	SetV1Alpha2Condition(&v2Instance.Status, ConditionTypeConfigGenerated,
-		metav1.ConditionTrue, ReasonConfigGenSucceeded, "Configuration generated successfully")
+		metav1.ConditionTrue, ReasonConfigGenSucceeded, "Configuration generated successfully",
+		v2Instance.Generation)
 
 	if err := r.Status().Update(ctx, v2Instance); err != nil {
 		return fmt.Errorf("failed to update v1alpha2 status: %w", err)

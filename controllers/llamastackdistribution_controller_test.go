@@ -988,21 +988,8 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 func TestV1Alpha2SecretRefValidation(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
-	namespace := createTestNamespace(t, "test-v1alpha2-secret-ref")
-	operatorNamespace := createTestNamespace(t, "test-v1alpha2-secret-op")
-	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+	namespace, operatorNamespace := setupV1Alpha2TestEnv(t, "test-v1alpha2-secret-ref")
 
-	// Create operator config ConfigMap (required by NewLlamaStackDistributionReconciler)
-	opConfig := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "llama-stack-operator-config",
-			Namespace: operatorNamespace.Name,
-		},
-		Data: map[string]string{},
-	}
-	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
-
-	// Create a v1alpha2 CR with a provider that references a non-existent secret
 	v2Instance := &llamav1alpha2.LlamaStackDistribution{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-secret-ref",
@@ -1027,17 +1014,9 @@ func TestV1Alpha2SecretRefValidation(t *testing.T) {
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), v2Instance))
 
-	clusterInfo := &cluster.ClusterInfo{
-		OperatorNamespace:  operatorNamespace.Name,
-		DistributionImages: map[string]string{"starter": testImage},
-	}
-	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
-		t.Context(), k8sClient, scheme.Scheme, clusterInfo,
-	)
-	require.NoError(t, err)
+	reconciler := newV1Alpha2Reconciler(t, operatorNamespace.Name)
 
-	// Reconciliation should fail because the secret doesn't exist
-	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+	_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: v2Instance.Name, Namespace: namespace.Name},
 	})
 	require.Error(t, err)
@@ -1048,18 +1027,7 @@ func TestV1Alpha2SecretRefValidation(t *testing.T) {
 func TestV1Alpha2ConfigMapRefValidation(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
-	namespace := createTestNamespace(t, "test-v1alpha2-cm-ref")
-	operatorNamespace := createTestNamespace(t, "test-v1alpha2-cm-op")
-	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
-
-	opConfig := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "llama-stack-operator-config",
-			Namespace: operatorNamespace.Name,
-		},
-		Data: map[string]string{},
-	}
-	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+	namespace, operatorNamespace := setupV1Alpha2TestEnv(t, "test-v1alpha2-cm-ref")
 
 	// Create a v1alpha2 CR with providers (so it takes the generated path)
 	// and a caBundle referencing a non-existent ConfigMap.
@@ -1088,17 +1056,9 @@ func TestV1Alpha2ConfigMapRefValidation(t *testing.T) {
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), v2Instance))
 
-	clusterInfo := &cluster.ClusterInfo{
-		OperatorNamespace:  operatorNamespace.Name,
-		DistributionImages: map[string]string{"starter": testImage},
-	}
-	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
-		t.Context(), k8sClient, scheme.Scheme, clusterInfo,
-	)
-	require.NoError(t, err)
+	reconciler := newV1Alpha2Reconciler(t, operatorNamespace.Name)
 
-	// Reconciliation should fail because the CA bundle ConfigMap doesn't exist
-	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+	_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: v2Instance.Name, Namespace: namespace.Name},
 	})
 	require.Error(t, err)
@@ -1109,18 +1069,7 @@ func TestV1Alpha2ConfigMapRefValidation(t *testing.T) {
 func TestV1Alpha2SkipRestartOnUnchangedConfig(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
-	namespace := createTestNamespace(t, "test-v1alpha2-skip-restart")
-	operatorNamespace := createTestNamespace(t, "test-v1alpha2-skip-op")
-	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
-
-	opConfig := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "llama-stack-operator-config",
-			Namespace: operatorNamespace.Name,
-		},
-		Data: map[string]string{},
-	}
-	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+	namespace, operatorNamespace := setupV1Alpha2TestEnv(t, "test-v1alpha2-skip-restart")
 
 	v2Instance := &llamav1alpha2.LlamaStackDistribution{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1138,12 +1087,8 @@ func TestV1Alpha2SkipRestartOnUnchangedConfig(t *testing.T) {
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), v2Instance))
 
-	clusterInfo := &cluster.ClusterInfo{
-		OperatorNamespace:  operatorNamespace.Name,
-		DistributionImages: map[string]string{"starter": testImage},
-	}
-	reconciler, err := controllers.NewLlamaStackDistributionReconciler(t.Context(), k8sClient, scheme.Scheme, clusterInfo)
-	require.NoError(t, err)
+	reconciler := newV1Alpha2Reconciler(t, operatorNamespace.Name)
+	var err error
 
 	// First reconcile — should create the generated ConfigMap
 	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
@@ -1188,18 +1133,7 @@ func TestV1Alpha2SkipRestartOnUnchangedConfig(t *testing.T) {
 func TestV1Alpha2AtomicImageAndConfigUpdate(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
-	namespace := createTestNamespace(t, "test-v1alpha2-atomic")
-	operatorNamespace := createTestNamespace(t, "test-v1alpha2-atomic-op")
-	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
-
-	opConfig := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "llama-stack-operator-config",
-			Namespace: operatorNamespace.Name,
-		},
-		Data: map[string]string{},
-	}
-	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+	namespace, operatorNamespace := setupV1Alpha2TestEnv(t, "test-v1alpha2-atomic")
 
 	v2Instance := &llamav1alpha2.LlamaStackDistribution{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1217,12 +1151,8 @@ func TestV1Alpha2AtomicImageAndConfigUpdate(t *testing.T) {
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), v2Instance))
 
-	clusterInfo := &cluster.ClusterInfo{
-		OperatorNamespace:  operatorNamespace.Name,
-		DistributionImages: map[string]string{"starter": testImage},
-	}
-	reconciler, err := controllers.NewLlamaStackDistributionReconciler(t.Context(), k8sClient, scheme.Scheme, clusterInfo)
-	require.NoError(t, err)
+	reconciler := newV1Alpha2Reconciler(t, operatorNamespace.Name)
+	var err error
 
 	// Reconcile to create Deployment
 	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
@@ -1258,18 +1188,7 @@ func TestV1Alpha2AtomicImageAndConfigUpdate(t *testing.T) {
 func TestV1Alpha2SecretEnvVarsInjected(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
-	namespace := createTestNamespace(t, "test-v1alpha2-secret-env")
-	operatorNamespace := createTestNamespace(t, "test-v1alpha2-secret-env-op")
-	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
-
-	opConfig := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "llama-stack-operator-config",
-			Namespace: operatorNamespace.Name,
-		},
-		Data: map[string]string{},
-	}
-	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+	namespace, operatorNamespace := setupV1Alpha2TestEnv(t, "test-v1alpha2-secret-env")
 
 	// Create the Secret that the provider secretRefs will reference.
 	secret := &corev1.Secret{
@@ -1305,14 +1224,9 @@ func TestV1Alpha2SecretEnvVarsInjected(t *testing.T) {
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), v2Instance))
 
-	clusterInfo := &cluster.ClusterInfo{
-		OperatorNamespace:  operatorNamespace.Name,
-		DistributionImages: map[string]string{"starter": testImage},
-	}
-	reconciler, err := controllers.NewLlamaStackDistributionReconciler(t.Context(), k8sClient, scheme.Scheme, clusterInfo)
-	require.NoError(t, err)
+	reconciler := newV1Alpha2Reconciler(t, operatorNamespace.Name)
 
-	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+	_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: v2Instance.Name, Namespace: namespace.Name},
 	})
 	require.NoError(t, err)
@@ -1365,18 +1279,7 @@ func TestV1Alpha2SecretEnvVarsInjected(t *testing.T) {
 func TestV1Alpha2ProviderRefValidation(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
-	namespace := createTestNamespace(t, "test-v1alpha2-prov-ref")
-	operatorNamespace := createTestNamespace(t, "test-v1alpha2-prov-op")
-	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
-
-	opConfig := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "llama-stack-operator-config",
-			Namespace: operatorNamespace.Name,
-		},
-		Data: map[string]string{},
-	}
-	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+	namespace, _ := setupV1Alpha2TestEnv(t, "test-v1alpha2-prov-ref")
 
 	// Create a v1alpha2 CR where a model references a provider ID that doesn't exist
 	v2Instance := &llamav1alpha2.LlamaStackDistribution{
