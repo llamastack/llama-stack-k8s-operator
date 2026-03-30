@@ -581,13 +581,6 @@ func (in *ProvidersSpec) DeepCopyInto(out *ProvidersSpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.Safety != nil {
-		in, out := &in.Safety, &out.Safety
-		*out = make([]ProviderConfig, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
 	if in.VectorIo != nil {
 		in, out := &in.VectorIo, &out.VectorIo
 		*out = make([]ProviderConfig, len(*in))
@@ -648,11 +641,6 @@ func (in *ResourcesSpec) DeepCopyInto(out *ResourcesSpec) {
 	}
 	if in.Tools != nil {
 		in, out := &in.Tools, &out.Tools
-		*out = make([]string, len(*in))
-		copy(*out, *in)
-	}
-	if in.Shields != nil {
-		in, out := &in.Shields, &out.Shields
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}

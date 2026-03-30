@@ -70,14 +70,10 @@ func applySQLStorage(clone *BaseConfig, sql *v1alpha2.SQLStorageSpec, substituti
 	sqlMap := ExpandSQLStorage(sql, substitutions)
 	sqlStores := []*map[string]interface{}{
 		&clone.InferenceStore,
-		&clone.SafetyStore,
 		&clone.VectorIOStore,
 		&clone.ToolRuntimeStore,
 		&clone.TelemetryStore,
 		&clone.PostTrainingStore,
-		&clone.ScoringStore,
-		&clone.EvalStore,
-		&clone.DatasetIOStore,
 	}
 	for _, store := range sqlStores {
 		if *store != nil {
@@ -95,18 +91,13 @@ func cloneBaseConfig(base *BaseConfig) *BaseConfig {
 		APIs:              append([]string{}, base.APIs...),
 		Providers:         deepCopyProviders(base.Providers),
 		RegisteredModels:  copySliceOfMaps(base.RegisteredModels),
-		Shields:           copySliceOfMaps(base.Shields),
 		ToolGroups:        copySliceOfMaps(base.ToolGroups),
 		MetadataStore:     copyMap(base.MetadataStore),
 		InferenceStore:    copyMap(base.InferenceStore),
-		SafetyStore:       copyMap(base.SafetyStore),
 		VectorIOStore:     copyMap(base.VectorIOStore),
 		ToolRuntimeStore:  copyMap(base.ToolRuntimeStore),
 		TelemetryStore:    copyMap(base.TelemetryStore),
 		PostTrainingStore: copyMap(base.PostTrainingStore),
-		ScoringStore:      copyMap(base.ScoringStore),
-		EvalStore:         copyMap(base.EvalStore),
-		DatasetIOStore:    copyMap(base.DatasetIOStore),
 		Server:            copyMap(base.Server),
 		ExternalProviders: copyMap(base.ExternalProviders),
 		Extra:             copyMap(base.Extra),

@@ -24,37 +24,31 @@ import (
 )
 
 // ExpandResources converts the CR ResourcesSpec into config.yaml registered resource
-// entries (models, tool_groups, shields). Returns the entries and total count.
+// entries (models, tool_groups). Returns the entries and total count.
 func ExpandResources(
 	spec *v1alpha2.ResourcesSpec,
 	userProviders map[string][]ProviderEntry,
 	base *BaseConfig,
-) ([]map[string]interface{}, []map[string]interface{}, []map[string]interface{}, int, error) {
+) ([]map[string]interface{}, []map[string]interface{}, int, error) {
 	if spec == nil {
-		return nil, nil, nil, 0, nil
+		return nil, nil, 0, nil
 	}
 
 	totalCount := 0
 
 	models, err := expandModels(spec.Models, userProviders, base)
 	if err != nil {
-		return nil, nil, nil, 0, fmt.Errorf("failed to expand resources.models: %w", err)
+		return nil, nil, 0, fmt.Errorf("failed to expand resources.models: %w", err)
 	}
 	totalCount += len(models)
 
 	tools, err := expandTools(spec.Tools, userProviders, base)
 	if err != nil {
-		return nil, nil, nil, 0, fmt.Errorf("failed to expand resources.tools: %w", err)
+		return nil, nil, 0, fmt.Errorf("failed to expand resources.tools: %w", err)
 	}
 	totalCount += len(tools)
 
-	shields, err := expandShields(spec.Shields, userProviders, base)
-	if err != nil {
-		return nil, nil, nil, 0, fmt.Errorf("failed to expand resources.shields: %w", err)
-	}
-	totalCount += len(shields)
-
-	return models, tools, shields, totalCount, nil
+	return models, tools, totalCount, nil
 }
 
 func expandModels(
@@ -140,30 +134,6 @@ func expandTools(
 		entries = append(entries, map[string]interface{}{
 			"toolgroup_id": tool,
 			"provider_id":  provider,
-		})
-	}
-	return entries, nil
-}
-
-func expandShields(
-	shields []string,
-	userProviders map[string][]ProviderEntry,
-	base *BaseConfig,
-) ([]map[string]interface{}, error) {
-	if len(shields) == 0 {
-		return nil, nil
-	}
-
-	provider := getDefaultProviderForAPI("safety", userProviders, base)
-	if provider == "" {
-		return nil, errors.New("failed to expand shields: requires at least one safety provider to be configured")
-	}
-
-	var entries []map[string]interface{}
-	for _, shield := range shields {
-		entries = append(entries, map[string]interface{}{
-			"shield_id":   shield,
-			"provider_id": provider,
 		})
 	}
 	return entries, nil

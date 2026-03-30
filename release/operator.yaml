@@ -2858,11 +2858,7 @@ spec:
                 items:
                   enum:
                   - agents
-                  - datasetio
-                  - eval
                   - inference
-                  - safety
-                  - scoring
                   - telemetry
                   - tool_runtime
                   - vector_io
@@ -2997,72 +2993,6 @@ spec:
                   inference:
                     description: Inference configures inference providers (e.g., vLLM,
                       TGI).
-                    items:
-                      description: ProviderConfig defines the configuration for a
-                        single LlamaStack provider instance.
-                      properties:
-                        endpoint:
-                          description: Endpoint is the provider endpoint URL. Maps
-                            to config.url in config.yaml.
-                          type: string
-                        id:
-                          description: |-
-                            ID is a unique provider identifier. Required when multiple providers are
-                            configured for the same API type. Auto-generated from provider when omitted
-                            for single-provider configurations.
-                          type: string
-                        provider:
-                          description: |-
-                            Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").
-                            Maps to provider_type with "remote::" prefix in config.yaml.
-                          minLength: 1
-                          type: string
-                        secretRefs:
-                          additionalProperties:
-                            description: SecretKeyRef references a specific key in
-                              a Kubernetes Secret.
-                            properties:
-                              key:
-                                description: Key is the key within the Secret.
-                                minLength: 1
-                                type: string
-                              name:
-                                description: Name is the name of the Kubernetes Secret.
-                                minLength: 1
-                                type: string
-                            required:
-                            - key
-                            - name
-                            type: object
-                          description: |-
-                            SecretRefs is a map of named secret references for provider-specific
-                            connection fields (e.g., host, password). Each key becomes the env var
-                            field suffix and maps to config.<key> with env var substitution:
-                            ${env.LLSD_<PROVIDER_ID>_<KEY>}. Use this instead of embedding
-                            secretKeyRef inside settings.
-                          minProperties: 1
-                          type: object
-                        settings:
-                          description: |-
-                            Settings contains provider-specific settings merged into the provider's
-                            config section in config.yaml. Acts as an escape hatch for fields not
-                            directly exposed in the CRD schema. Passed through as-is without any
-                            secret resolution. Use secretRefs for secret values.
-                          x-kubernetes-preserve-unknown-fields: true
-                      required:
-                      - provider
-                      type: object
-                      x-kubernetes-validations:
-                      - message: id must not be empty if specified
-                        rule: '!has(self.id) || self.id.size() > 0'
-                    minItems: 1
-                    type: array
-                    x-kubernetes-validations:
-                    - message: each provider must have an explicit id when multiple
-                        providers are specified
-                      rule: self.size() <= 1 || self.all(p, has(p.id))
-                  safety:
-                    description: Safety configures safety providers (e.g., llama-guard).
                     items:
                       description: ProviderConfig defines the configuration for a
                         single LlamaStack provider instance.
@@ -3329,7 +3259,7 @@ spec:
                 type: object
               resources:
                 description: |-
-                  Resources declares models, tools, and shields to register.
+                  Resources declares models and tools to register.
                   Mutually exclusive with overrideConfig.
                 properties:
                   models:
@@ -3367,14 +3297,6 @@ spec:
                       - message: quantization must not be empty if specified
                         rule: '!has(self.quantization) || self.quantization.size()
                           > 0'
-                    minItems: 1
-                    type: array
-                  shields:
-                    description: Shields are safety shield names to register with
-                      the safety provider.
-                    items:
-                      minLength: 1
-                      type: string
                     minItems: 1
                     type: array
                   tools:
@@ -5956,10 +5878,6 @@ spec:
             - message: inference cannot be both in providers and disabled
               rule: '!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d,
                 d == ''inference'') || !has(self.providers.inference) || self.providers.inference.size()
-                == 0'
-            - message: safety cannot be both in providers and disabled
-              rule: '!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d,
-                d == ''safety'') || !has(self.providers.safety) || self.providers.safety.size()
                 == 0'
             - message: vector_io cannot be both in providers and disabled
               rule: '!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d,

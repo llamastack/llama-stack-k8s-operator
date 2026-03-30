@@ -82,19 +82,17 @@ func TestComputeContentHash(t *testing.T) {
 func TestApplyDisabledAPIs(t *testing.T) {
 	base := &BaseConfig{
 		Version: 2,
-		APIs:    []string{"inference", "safety", "agents", "telemetry"},
+		APIs:    []string{"inference", "agents", "telemetry"},
 		Providers: map[string]interface{}{
 			"inference": []interface{}{map[string]interface{}{"provider_id": "vllm"}},
-			"safety":    []interface{}{map[string]interface{}{"provider_id": "guard"}},
 			"agents":    []interface{}{map[string]interface{}{"provider_id": "agent"}},
 		},
 	}
 
-	ApplyDisabledAPIs(base, []string{"safety", "agents"})
+	ApplyDisabledAPIs(base, []string{"agents"})
 
 	assert.Equal(t, []string{"inference", "telemetry"}, base.APIs)
 	assert.Contains(t, base.Providers, "inference")
-	assert.NotContains(t, base.Providers, "safety")
 	assert.NotContains(t, base.Providers, "agents")
 }
 
@@ -121,19 +119,16 @@ func TestApplyDisabledAPIsSnakeCaseEnum(t *testing.T) {
 func TestApplyDisabledAPIsCleanupResources(t *testing.T) {
 	base := &BaseConfig{
 		Version: 2,
-		APIs:    []string{"inference", "safety", "tool_runtime"},
+		APIs:    []string{"inference", "tool_runtime"},
 		Providers: map[string]interface{}{
 			"inference":    []interface{}{map[string]interface{}{"provider_id": "vllm"}},
-			"safety":       []interface{}{map[string]interface{}{"provider_id": "guard"}},
 			"tool_runtime": []interface{}{map[string]interface{}{"provider_id": "rag"}},
 		},
-		Shields:    []map[string]interface{}{{"shield_id": "llama-guard-v3", "provider_id": "guard"}},
 		ToolGroups: []map[string]interface{}{{"toolgroup_id": "websearch", "provider_id": "rag"}},
 	}
 
-	ApplyDisabledAPIs(base, []string{"safety", "tool_runtime"})
+	ApplyDisabledAPIs(base, []string{"tool_runtime"})
 
-	assert.Nil(t, base.Shields, "disabling safety must remove shield registrations")
 	assert.Nil(t, base.ToolGroups, "disabling tool_runtime must remove tool group registrations")
 }
 
@@ -303,7 +298,7 @@ func TestExpandResources(t *testing.T) {
 		"inference": {{ProviderID: "vllm", ProviderType: "remote::vllm"}},
 	}
 
-	expandedModels, _, _, count, err := ExpandResources(spec, userProviders, base)
+	expandedModels, _, count, err := ExpandResources(spec, userProviders, base)
 	require.NoError(t, err)
 	assert.Equal(t, 2, count)
 	assert.Len(t, expandedModels, 2)
@@ -493,13 +488,13 @@ func TestMergeExternalProviders(t *testing.T) {
 	}
 
 	external := map[string]interface{}{
-		"safety": []interface{}{
-			map[string]interface{}{"provider_id": "custom-safety"},
+		"telemetry": []interface{}{
+			map[string]interface{}{"provider_id": "custom-otel"},
 		},
 	}
 
 	result, warnings := MergeExternalProviders(base, external)
-	assert.Contains(t, result.Providers, "safety")
+	assert.Contains(t, result.Providers, "telemetry")
 	assert.Empty(t, warnings, "no conflicts expected")
 }
 
@@ -667,9 +662,9 @@ func TestApplyNetworkingOverrides(t *testing.T) {
 		{
 			name: "disabled APIs are removed",
 			spec: v1alpha2.LlamaStackDistributionSpec{
-				Disabled: []string{"safety", "agents"},
+				Disabled: []string{"agents"},
 			},
-			baseAPIs: []string{"inference", "safety", "agents", "telemetry"},
+			baseAPIs: []string{"inference", "agents", "telemetry"},
 			wantAPIs: []string{"inference", "telemetry"},
 			wantPort: nil,
 		},
@@ -695,8 +690,8 @@ func TestApplyNetworkingOverrides(t *testing.T) {
 		{
 			name:     "no-op when nothing is specified",
 			spec:     v1alpha2.LlamaStackDistributionSpec{},
-			baseAPIs: []string{"inference", "safety"},
-			wantAPIs: []string{"inference", "safety"},
+			baseAPIs: []string{"inference", "telemetry"},
+			wantAPIs: []string{"inference", "telemetry"},
 			wantPort: nil,
 		},
 		{
@@ -717,7 +712,6 @@ func TestApplyNetworkingOverrides(t *testing.T) {
 				APIs:    append([]string{}, tt.baseAPIs...),
 				Providers: map[string]interface{}{
 					"inference": []interface{}{},
-					"safety":    []interface{}{},
 					"agents":    []interface{}{},
 					"telemetry": []interface{}{},
 				},
@@ -804,24 +798,6 @@ func TestExpandToolsErrorsWithNoProvider(t *testing.T) {
 	_, err := expandTools([]string{"builtin::websearch"}, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "toolRuntime provider")
-}
-
-func TestExpandShieldsRegistration(t *testing.T) {
-	userProviders := map[string][]ProviderEntry{
-		"safety": {{ProviderID: "llama-guard", ProviderType: "remote::llama-guard"}},
-	}
-
-	shields, err := expandShields([]string{"llama-guard-v3"}, userProviders, nil)
-	require.NoError(t, err)
-	require.Len(t, shields, 1)
-	assert.Equal(t, "llama-guard-v3", shields[0]["shield_id"])
-	assert.Equal(t, "llama-guard", shields[0]["provider_id"])
-}
-
-func TestExpandShieldsErrorsWithNoProvider(t *testing.T) {
-	_, err := expandShields([]string{"llama-guard-v3"}, nil, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "safety provider")
 }
 
 func TestSecretRefsEnvVarNaming(t *testing.T) {

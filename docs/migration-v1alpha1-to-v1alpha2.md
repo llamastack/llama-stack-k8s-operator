@@ -138,8 +138,8 @@ spec:
 
 | v1alpha2 Field | Description |
 |---|---|
-| `spec.providers` | Declarative provider configuration by API type (inference, safety, vectorIo, etc.) |
-| `spec.resources` | Models, tools, and shields to register with providers |
+| `spec.providers` | Declarative provider configuration by API type (inference, vectorIo, toolRuntime, telemetry) |
+| `spec.resources` | Models and tools to register with providers |
 | `spec.storage` | State storage backends (KV: sqlite/redis, SQL: sqlite/postgres) |
 | `spec.disabled` | List of API names to disable |
 | `spec.externalProviders` | Integration with deploy-time provider injection |

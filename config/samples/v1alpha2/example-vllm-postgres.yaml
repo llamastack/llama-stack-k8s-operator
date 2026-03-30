@@ -42,8 +42,6 @@ spec:
       connectionString:
         name: pg-credentials
         key: dsn
-  disabled:
-    - safety
   workload:
     replicas: 2
     resources:

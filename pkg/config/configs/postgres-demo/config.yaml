@@ -6,7 +6,6 @@ distro_name: postgres-demo
 apis:
 - agents
 - inference
-- safety
 - tool_runtime
 - vector_io
 providers:
@@ -28,11 +27,6 @@ providers:
       persistence:
         namespace: vector_io::chroma_remote
         backend: kv_default
-  safety:
-  - provider_id: llama-guard
-    provider_type: inline::llama-guard
-    config:
-      excluded_categories: []
   agents:
   - provider_id: meta-reference
     provider_type: inline::meta-reference
@@ -104,12 +98,7 @@ registered_resources:
     model_id: nomic-embed-text-v1.5
     provider_id: sentence-transformers
     model_type: embedding
-  shields:
-  - shield_id: meta-llama/Llama-Guard-3-8B
   vector_dbs: []
-  datasets: []
-  scoring_fns: []
-  benchmarks: []
   tool_groups:
   - toolgroup_id: builtin::websearch
     provider_id: tavily-search

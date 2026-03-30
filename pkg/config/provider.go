@@ -26,13 +26,11 @@ import (
 )
 
 // apiTypeNames maps ProvidersSpec field names to config.yaml provider section keys.
-// Only 5 API types are exposed as CRD provider fields. Other API types
-// (agents, datasetio, eval, scoring) are intentionally excluded from the
-// CRD schema — they can only be configured via base config defaults or
-// overrideConfig.
+// Only 4 API types are exposed as CRD provider fields. Other API types
+// (agents) are intentionally excluded from the CRD schema — they can
+// only be configured via base config defaults or overrideConfig.
 var apiTypeNames = map[string]string{
 	"inference":   "inference",
-	"safety":      "safety",
 	"vectorIo":    "vector_io",
 	"toolRuntime": "tool_runtime",
 	"telemetry":   "telemetry",
@@ -53,7 +51,6 @@ func ExpandProviders(spec *v1alpha2.ProvidersSpec, substitutions map[string]stri
 		configs   []v1alpha2.ProviderConfig
 	}{
 		{"inference", spec.Inference},
-		{"safety", spec.Safety},
 		{"vectorIo", spec.VectorIo},
 		{"toolRuntime", spec.ToolRuntime},
 		{"telemetry", spec.Telemetry},

@@ -77,7 +77,6 @@ func ResolveSecrets(spec *v1alpha2.LlamaStackDistributionSpec) (*SecretResolutio
 func resolveProviderSecrets(resolution *SecretResolution, providers *v1alpha2.ProvidersSpec) {
 	providerSlices := [][]v1alpha2.ProviderConfig{
 		providers.Inference,
-		providers.Safety,
 		providers.VectorIo,
 		providers.ToolRuntime,
 		providers.Telemetry,

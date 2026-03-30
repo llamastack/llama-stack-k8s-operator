@@ -410,7 +410,6 @@ func collectProviderIDs(spec *v1alpha2.ProvidersSpec) map[string]bool {
 
 	for _, slice := range [][]v1alpha2.ProviderConfig{
 		spec.Inference,
-		spec.Safety,
 		spec.VectorIo,
 		spec.ToolRuntime,
 		spec.Telemetry,

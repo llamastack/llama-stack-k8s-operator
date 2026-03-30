@@ -498,9 +498,9 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `distribution` _[DistributionSpec](#distributionspec)_ | Distribution identifies the LlamaStack distribution to deploy. |  | Required: \{\} <br /> |
 | `providers` _[ProvidersSpec](#providersspec)_ | Providers configures LlamaStack providers by API type.<br />Mutually exclusive with overrideConfig. |  |  |
-| `resources` _[ResourcesSpec](#resourcesspec)_ | Resources declares models, tools, and shields to register.<br />Mutually exclusive with overrideConfig. |  |  |
+| `resources` _[ResourcesSpec](#resourcesspec)_ | Resources declares models and tools to register.<br />Mutually exclusive with overrideConfig. |  |  |
 | `storage` _[StateStorageSpec](#statestoragespec)_ | Storage configures state storage backends (KV and SQL).<br />Mutually exclusive with overrideConfig. |  |  |
-| `disabled` _string array_ | Disabled lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MinItems: 1 <br />items:Enum: [agents datasetio eval inference safety scoring telemetry tool_runtime vector_io] <br /> |
+| `disabled` _string array_ | Disabled lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MinItems: 1 <br />items:Enum: [agents inference telemetry tool_runtime vector_io] <br /> |
 | `networking` _[NetworkingSpec](#networkingspec)_ | Networking consolidates network configuration. |  |  |
 | `workload` _[WorkloadSpec](#workloadspec)_ | Workload consolidates Kubernetes deployment settings. |  |  |
 | `externalProviders` _[ExternalProvidersSpec](#externalprovidersspec)_ | ExternalProviders configures external provider injection (from spec 001). |  |  |
@@ -642,7 +642,6 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `inference` _[ProviderConfig](#providerconfig) array_ | Inference configures inference providers (e.g., vLLM, TGI). |  | MinItems: 1 <br /> |
-| `safety` _[ProviderConfig](#providerconfig) array_ | Safety configures safety providers (e.g., llama-guard). |  | MinItems: 1 <br /> |
 | `vectorIo` _[ProviderConfig](#providerconfig) array_ | VectorIo configures vector I/O providers (e.g., pgvector, chromadb). |  | MinItems: 1 <br /> |
 | `toolRuntime` _[ProviderConfig](#providerconfig) array_ | ToolRuntime configures tool runtime providers. |  | MinItems: 1 <br /> |
 | `telemetry` _[ProviderConfig](#providerconfig) array_ | Telemetry configures telemetry providers (e.g., opentelemetry). |  | MinItems: 1 <br /> |
@@ -662,7 +661,7 @@ _Appears in:_
 
 #### ResourcesSpec
 
-ResourcesSpec defines declarative registration of models, tools, and shields.
+ResourcesSpec defines declarative registration of models and tools.
 
 _Appears in:_
 - [LlamaStackDistributionSpec](#llamastackdistributionspec)
@@ -671,7 +670,6 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `models` _[ModelConfig](#modelconfig) array_ | Models to register with inference providers. |  | MinItems: 1 <br /> |
 | `tools` _string array_ | Tools are tool group names to register with the toolRuntime provider. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
-| `shields` _string array_ | Shields are safety shield names to register with the safety provider. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
 
 #### SQLStorageSpec
 

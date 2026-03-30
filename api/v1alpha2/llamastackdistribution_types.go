@@ -106,11 +106,6 @@ type ProvidersSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
 	Inference []ProviderConfig `json:"inference,omitempty"`
-	// Safety configures safety providers (e.g., llama-guard).
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
-	Safety []ProviderConfig `json:"safety,omitempty"`
 	// VectorIo configures vector I/O providers (e.g., pgvector, chromadb).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
@@ -152,7 +147,7 @@ type ModelConfig struct {
 	Quantization string `json:"quantization,omitempty"`
 }
 
-// ResourcesSpec defines declarative registration of models, tools, and shields.
+// ResourcesSpec defines declarative registration of models and tools.
 type ResourcesSpec struct {
 	// Models to register with inference providers.
 	// +optional
@@ -163,11 +158,6 @@ type ResourcesSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:items:MinLength=1
 	Tools []string `json:"tools,omitempty"`
-	// Shields are safety shield names to register with the safety provider.
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:items:MinLength=1
-	Shields []string `json:"shields,omitempty"`
 }
 
 // KVStorageSpec configures the key-value storage backend.
@@ -423,15 +413,10 @@ type ExternalProvidersSpec struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.storage)",message="overrideConfig and storage are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.disabled)",message="overrideConfig and disabled are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d, d == 'inference') || !has(self.providers.inference) || self.providers.inference.size() == 0",message="inference cannot be both in providers and disabled"
-// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d, d == 'safety') || !has(self.providers.safety) || self.providers.safety.size() == 0",message="safety cannot be both in providers and disabled"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d, d == 'vector_io') || !has(self.providers.vectorIo) || self.providers.vectorIo.size() == 0",message="vector_io cannot be both in providers and disabled"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d, d == 'tool_runtime') || !has(self.providers.toolRuntime) || self.providers.toolRuntime.size() == 0",message="tool_runtime cannot be both in providers and disabled"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d, d == 'telemetry') || !has(self.providers.telemetry) || self.providers.telemetry.size() == 0",message="telemetry cannot be both in providers and disabled"
 //
-//nolint:lll // kubebuilder markers cannot be split across lines.
-//nolint:lll // kubebuilder markers cannot be split across lines.
-//nolint:lll // kubebuilder markers cannot be split across lines.
-//nolint:lll // kubebuilder markers cannot be split across lines.
 //nolint:lll // kubebuilder markers cannot be split across lines.
 type LlamaStackDistributionSpec struct {
 	// Distribution identifies the LlamaStack distribution to deploy.
@@ -441,7 +426,7 @@ type LlamaStackDistributionSpec struct {
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	Providers *ProvidersSpec `json:"providers,omitempty"`
-	// Resources declares models, tools, and shields to register.
+	// Resources declares models and tools to register.
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	Resources *ResourcesSpec `json:"resources,omitempty"`
@@ -453,7 +438,7 @@ type LlamaStackDistributionSpec struct {
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:items:Enum=agents;datasetio;eval;inference;safety;scoring;telemetry;tool_runtime;vector_io
+	// +kubebuilder:validation:items:Enum=agents;inference;telemetry;tool_runtime;vector_io
 	Disabled []string `json:"disabled,omitempty"`
 	// Networking consolidates network configuration.
 	// +optional

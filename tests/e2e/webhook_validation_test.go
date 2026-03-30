@@ -56,8 +56,8 @@ func testRejectDuplicateProviderIDs(t *testing.T) {
 				Inference: []v1alpha2.ProviderConfig{
 					{ID: "my-inference", Provider: "ollama", Endpoint: "http://ollama:11434"},
 				},
-				Safety: []v1alpha2.ProviderConfig{
-					{ID: "my-inference", Provider: "llama-guard"},
+				Telemetry: []v1alpha2.ProviderConfig{
+					{ID: "my-inference", Provider: "otel"},
 				},
 			},
 		},

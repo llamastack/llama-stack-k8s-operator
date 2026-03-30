@@ -80,7 +80,7 @@ func TestValidateDistributionNameEmptyRegistry(t *testing.T) {
 func TestProviderIDUniquenessNoDuplicates(t *testing.T) {
 	spec := &ProvidersSpec{
 		Inference: []ProviderConfig{{Provider: "vllm"}},
-		Safety:    []ProviderConfig{{Provider: "llama-guard"}},
+		Telemetry: []ProviderConfig{{Provider: "otel"}},
 	}
 	errs := validateProviderIDUniqueness(spec)
 	assert.Empty(t, errs)
@@ -89,7 +89,7 @@ func TestProviderIDUniquenessNoDuplicates(t *testing.T) {
 func TestProviderIDUniquenessExplicitIDs(t *testing.T) {
 	spec := &ProvidersSpec{
 		Inference: []ProviderConfig{{ID: "my-provider", Provider: "vllm"}},
-		Safety:    []ProviderConfig{{ID: "my-provider", Provider: "llama-guard"}},
+		Telemetry: []ProviderConfig{{ID: "my-provider", Provider: "otel"}},
 	}
 	errs := validateProviderIDUniqueness(spec)
 	require.Len(t, errs, 1)
@@ -114,12 +114,12 @@ func TestProviderIDUniquenessEmptySlices(t *testing.T) {
 
 func TestProviderIDUniquenessMultipleCollisions(t *testing.T) {
 	spec := &ProvidersSpec{
-		Inference: []ProviderConfig{{ID: "dup", Provider: "vllm"}},
-		Safety:    []ProviderConfig{{ID: "dup", Provider: "guard"}},
-		Telemetry: []ProviderConfig{{ID: "dup", Provider: "otel"}},
+		Inference:   []ProviderConfig{{ID: "dup", Provider: "vllm"}},
+		VectorIo:    []ProviderConfig{{ID: "dup", Provider: "pgvector"}},
+		Telemetry:   []ProviderConfig{{ID: "dup", Provider: "otel"}},
 	}
 	errs := validateProviderIDUniqueness(spec)
-	assert.Len(t, errs, 2, "should report conflict for safety and telemetry")
+	assert.Len(t, errs, 2, "should report conflict for vectorIo and telemetry")
 }
 
 // --- Provider reference validation ---
@@ -188,16 +188,14 @@ func TestCollectAllProviderIDs(t *testing.T) {
 			{ID: "my-vllm", Provider: "vllm"},
 			{Provider: "remote::ollama"},
 		},
-		Safety:   []ProviderConfig{{Provider: "llama-guard"}},
 		VectorIo: []ProviderConfig{{ID: "pgvec", Provider: "pgvector"}},
 	}
 
 	ids := collectAllProviderIDs(spec)
 	assert.True(t, ids["my-vllm"])
 	assert.True(t, ids["ollama"], "remote::ollama derives to ollama")
-	assert.True(t, ids["llama-guard"])
 	assert.True(t, ids["pgvec"])
-	assert.Len(t, ids, 4)
+	assert.Len(t, ids, 3)
 }
 
 // --- Full validate (integration-style) ---
@@ -236,7 +234,7 @@ func TestValidateCreateRejectsDuplicateProviderIDs(t *testing.T) {
 		Distribution: DistributionSpec{Name: "starter"},
 		Providers: &ProvidersSpec{
 			Inference: []ProviderConfig{{ID: "dup", Provider: "vllm"}},
-			Safety:    []ProviderConfig{{ID: "dup", Provider: "guard"}},
+			Telemetry: []ProviderConfig{{ID: "dup", Provider: "otel"}},
 		},
 	})
 

@@ -504,8 +504,8 @@ func TestRoundTripV1Alpha2Providers(t *testing.T) {
 				Inference: []v1alpha2.ProviderConfig{
 					{ID: "vllm-1", Provider: "vllm", Endpoint: "http://vllm:8000", Settings: &settings},
 				},
-				Safety: []v1alpha2.ProviderConfig{
-					{Provider: "llama-guard"},
+				Telemetry: []v1alpha2.ProviderConfig{
+					{Provider: "otel"},
 				},
 			},
 		},
@@ -525,8 +525,8 @@ func TestRoundTripV1Alpha2Providers(t *testing.T) {
 	assert.Equal(t, "http://vllm:8000", roundtripped.Spec.Providers.Inference[0].Endpoint)
 	require.NotNil(t, roundtripped.Spec.Providers.Inference[0].Settings)
 	assert.JSONEq(t, `{"temperature":0.7}`, string(roundtripped.Spec.Providers.Inference[0].Settings.Raw))
-	require.Len(t, roundtripped.Spec.Providers.Safety, 1)
-	assert.Equal(t, "llama-guard", roundtripped.Spec.Providers.Safety[0].Provider)
+	require.Len(t, roundtripped.Spec.Providers.Telemetry, 1)
+	assert.Equal(t, "otel", roundtripped.Spec.Providers.Telemetry[0].Provider)
 }
 
 func TestRoundTripV1Alpha2Resources(t *testing.T) {
@@ -539,8 +539,7 @@ func TestRoundTripV1Alpha2Resources(t *testing.T) {
 				Models: []v1alpha2.ModelConfig{
 					{Name: "llama3", Provider: "vllm", ContextLength: &ctxLen, ModelType: "llm"},
 				},
-				Tools:   []string{"code_interpreter"},
-				Shields: []string{"llama-guard"},
+				Tools: []string{"code_interpreter"},
 			},
 		},
 	}
@@ -559,7 +558,6 @@ func TestRoundTripV1Alpha2Resources(t *testing.T) {
 	assert.Equal(t, 8192, *roundtripped.Spec.Resources.Models[0].ContextLength)
 	assert.Equal(t, "llm", roundtripped.Spec.Resources.Models[0].ModelType)
 	assert.Equal(t, []string{"code_interpreter"}, roundtripped.Spec.Resources.Tools)
-	assert.Equal(t, []string{"llama-guard"}, roundtripped.Spec.Resources.Shields)
 }
 
 func TestRoundTripV1Alpha2Storage(t *testing.T) {
@@ -605,7 +603,7 @@ func TestRoundTripV1Alpha2Disabled(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
 		Spec: v1alpha2.LlamaStackDistributionSpec{
 			Distribution: v1alpha2.DistributionSpec{Name: "starter"},
-			Disabled:     []string{"safety", "telemetry"},
+			Disabled:     []string{"agents", "telemetry"},
 		},
 	}
 
@@ -615,7 +613,7 @@ func TestRoundTripV1Alpha2Disabled(t *testing.T) {
 	roundtripped := &v1alpha2.LlamaStackDistribution{}
 	require.NoError(t, v1.ConvertTo(roundtripped))
 
-	assert.Equal(t, []string{"safety", "telemetry"}, roundtripped.Spec.Disabled)
+	assert.Equal(t, []string{"agents", "telemetry"}, roundtripped.Spec.Disabled)
 }
 
 func TestRoundTripV1Alpha2ExternalProviders(t *testing.T) {
@@ -724,7 +722,7 @@ func TestRoundTripV1Alpha2FullCR(t *testing.T) {
 			Storage: &v1alpha2.StateStorageSpec{
 				SQL: &v1alpha2.SQLStorageSpec{Type: "sqlite"},
 			},
-			Disabled: []string{"safety"},
+			Disabled: []string{"agents"},
 			Networking: &v1alpha2.NetworkingSpec{
 				Port:   9000,
 				Expose: &v1alpha2.ExposeConfig{Hostname: "llama.example.com"},
@@ -764,7 +762,7 @@ func TestRoundTripV1Alpha2FullCR(t *testing.T) {
 	require.NotNil(t, roundtripped.Spec.Storage)
 	assert.Equal(t, "sqlite", roundtripped.Spec.Storage.SQL.Type)
 
-	assert.Equal(t, []string{"safety"}, roundtripped.Spec.Disabled)
+	assert.Equal(t, []string{"agents"}, roundtripped.Spec.Disabled)
 
 	require.NotNil(t, roundtripped.Spec.Networking.Expose)
 	assert.Equal(t, "llama.example.com", roundtripped.Spec.Networking.Expose.Hostname)

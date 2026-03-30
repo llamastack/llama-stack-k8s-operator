@@ -6,14 +6,10 @@ distro_name: starter-gpu
 apis:
 - agents
 - batches
-- datasetio
-- eval
 - file_processors
 - files
 - inference
 - post_training
-- safety
-- scoring
 - tool_runtime
 - vector_io
 providers:
@@ -175,13 +171,6 @@ providers:
   file_processors:
   - provider_id: pypdf
     provider_type: inline::pypdf
-  safety:
-  - provider_id: llama-guard
-    provider_type: inline::llama-guard
-    config:
-      excluded_categories: []
-  - provider_id: code-scanner
-    provider_type: inline::code-scanner
   agents:
   - provider_id: meta-reference
     provider_type: inline::meta-reference
@@ -203,35 +192,6 @@ providers:
       distributed_backend: null
       device: cpu
       dpo_output_dir: ~/.llama/distributions/starter-gpu/dpo_output
-  eval:
-  - provider_id: meta-reference
-    provider_type: inline::meta-reference
-    config:
-      kvstore:
-        namespace: eval
-        backend: kv_default
-  datasetio:
-  - provider_id: huggingface
-    provider_type: remote::huggingface
-    config:
-      kvstore:
-        namespace: datasetio::huggingface
-        backend: kv_default
-  - provider_id: localfs
-    provider_type: inline::localfs
-    config:
-      kvstore:
-        namespace: datasetio::localfs
-        backend: kv_default
-  scoring:
-  - provider_id: basic
-    provider_type: inline::basic
-  - provider_id: llm-as-judge
-    provider_type: inline::llm-as-judge
-  - provider_id: braintrust
-    provider_type: inline::braintrust
-    config:
-      openai_api_key: ${env.OPENAI_API_KEY:=}
   tool_runtime:
   - provider_id: brave-search
     provider_type: remote::brave-search
@@ -282,17 +242,7 @@ storage:
       backend: kv_default
 registered_resources:
   models: []
-  shields:
-  - shield_id: llama-guard
-    provider_id: ${env.SAFETY_MODEL:+llama-guard}
-    provider_shield_id: ${env.SAFETY_MODEL:=}
-  - shield_id: code-scanner
-    provider_id: ${env.CODE_SCANNER_MODEL:+code-scanner}
-    provider_shield_id: ${env.CODE_SCANNER_MODEL:=}
   vector_dbs: []
-  datasets: []
-  scoring_fns: []
-  benchmarks: []
   tool_groups:
   - toolgroup_id: builtin::websearch
     provider_id: tavily-search
@@ -355,6 +305,4 @@ vector_stores:
     default_timeout_seconds: 120
     default_max_concurrency: 3
     max_document_tokens: 100000
-safety:
-  default_shield_id: llama-guard
 connectors: []

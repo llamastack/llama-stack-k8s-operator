@@ -113,7 +113,7 @@ func expandSpecOverBase(spec *v1alpha2.LlamaStackDistributionSpec, base *BaseCon
 // applyResources expands CR resources and merges them into the config.
 // Uses merge-by-ID so base config resources not overridden by the CR are preserved.
 func applyResources(spec *v1alpha2.LlamaStackDistributionSpec, config *BaseConfig, userProviders map[string][]ProviderEntry, base *BaseConfig) (int, error) {
-	models, tools, shields, resourceCount, err := ExpandResources(spec.Resources, userProviders, base)
+	models, tools, resourceCount, err := ExpandResources(spec.Resources, userProviders, base)
 	if err != nil {
 		return 0, fmt.Errorf("failed to expand resources: %w", err)
 	}
@@ -122,9 +122,6 @@ func applyResources(spec *v1alpha2.LlamaStackDistributionSpec, config *BaseConfi
 	}
 	if tools != nil {
 		config.ToolGroups = mergeResourceMaps(config.ToolGroups, tools, "toolgroup_id")
-	}
-	if shields != nil {
-		config.Shields = mergeResourceMaps(config.Shields, shields, "shield_id")
 	}
 	return resourceCount, nil
 }
@@ -288,9 +285,6 @@ func collectDisabledProviderIDs(config *BaseConfig, disabledSet map[string]bool)
 // cleanupDisabledResources nils out top-level resource slices whose API type
 // has been disabled and filters models whose provider_id is disabled.
 func cleanupDisabledResources(config *BaseConfig, disabledSet map[string]bool, disabledProviderIDs map[string]bool) {
-	if disabledSet["safety"] {
-		config.Shields = nil
-	}
 	if disabledSet["tool_runtime"] {
 		config.ToolGroups = nil
 	}
@@ -323,9 +317,6 @@ func cleanupExtraRegisteredResources(config *BaseConfig, disabledSet map[string]
 		return
 	}
 
-	if disabledSet["safety"] {
-		delete(rr, "shields")
-	}
 	if disabledSet["tool_runtime"] {
 		delete(rr, "tool_groups")
 	}
@@ -385,19 +376,15 @@ func buildOrderedConfig(config *BaseConfig) map[string]interface{} {
 
 	addStoreIfNonNil(out, "metadata_store", config.MetadataStore)
 	addStoreIfNonNil(out, "inference_store", config.InferenceStore)
-	addStoreIfNonNil(out, "safety_store", config.SafetyStore)
 	addStoreIfNonNil(out, "vector_io_store", config.VectorIOStore)
 	addStoreIfNonNil(out, "tool_runtime_store", config.ToolRuntimeStore)
 	addStoreIfNonNil(out, "telemetry_store", config.TelemetryStore)
 	addStoreIfNonNil(out, "post_training_store", config.PostTrainingStore)
-	addStoreIfNonNil(out, "scoring_store", config.ScoringStore)
-	addStoreIfNonNil(out, "eval_store", config.EvalStore)
-	addStoreIfNonNil(out, "datasetio_store", config.DatasetIOStore)
 	addStoreIfNonNil(out, "server", config.Server)
 
 	// Emit all Extra fields that were captured via the inline YAML tag
 	// (e.g. distro_name, image_name, storage, registered_resources,
-	// vector_stores, safety, connectors). Skip keys already set above.
+	// vector_stores, connectors). Skip keys already set above.
 	for k, v := range config.Extra {
 		if _, exists := out[k]; !exists {
 			out[k] = v
@@ -411,11 +398,11 @@ func buildOrderedConfig(config *BaseConfig) map[string]interface{} {
 	return out
 }
 
-// writeResourcesToOutput merges RegisteredModels, Shields, and ToolGroups from
+// writeResourcesToOutput merges RegisteredModels and ToolGroups from
 // the config struct into out["registered_resources"]. A deep copy of the
 // existing registered_resources is used so config.Extra is never mutated.
 func writeResourcesToOutput(out map[string]interface{}, config *BaseConfig) {
-	if len(config.RegisteredModels) == 0 && len(config.Shields) == 0 && len(config.ToolGroups) == 0 {
+	if len(config.RegisteredModels) == 0 && len(config.ToolGroups) == 0 {
 		return
 	}
 
@@ -428,9 +415,6 @@ func writeResourcesToOutput(out map[string]interface{}, config *BaseConfig) {
 
 	if len(config.RegisteredModels) > 0 {
 		rr["models"] = mergeResourceList(rr["models"], config.RegisteredModels, "model_id")
-	}
-	if len(config.Shields) > 0 {
-		rr["shields"] = mergeResourceList(rr["shields"], config.Shields, "shield_id")
 	}
 	if len(config.ToolGroups) > 0 {
 		rr["tool_groups"] = mergeResourceList(rr["tool_groups"], config.ToolGroups, "toolgroup_id")

@@ -25,22 +25,17 @@ type BaseConfig struct {
 	APIs              []string                 `json:"apis,omitempty"                yaml:"apis,omitempty"`
 	Providers         map[string]interface{}   `json:"providers,omitempty"           yaml:"providers,omitempty"`
 	RegisteredModels  []map[string]interface{} `json:"models,omitempty"              yaml:"models,omitempty"`
-	Shields           []map[string]interface{} `json:"shields,omitempty"             yaml:"shields,omitempty"`
 	ToolGroups        []map[string]interface{} `json:"tool_groups,omitempty"         yaml:"tool_groups,omitempty"`
 	MetadataStore     map[string]interface{}   `json:"metadata_store,omitempty"      yaml:"metadata_store,omitempty"`
 	InferenceStore    map[string]interface{}   `json:"inference_store,omitempty"     yaml:"inference_store,omitempty"`
-	SafetyStore       map[string]interface{}   `json:"safety_store,omitempty"        yaml:"safety_store,omitempty"`
 	VectorIOStore     map[string]interface{}   `json:"vector_io_store,omitempty"     yaml:"vector_io_store,omitempty"`
 	ToolRuntimeStore  map[string]interface{}   `json:"tool_runtime_store,omitempty"  yaml:"tool_runtime_store,omitempty"`
 	TelemetryStore    map[string]interface{}   `json:"telemetry_store,omitempty"     yaml:"telemetry_store,omitempty"`
 	PostTrainingStore map[string]interface{}   `json:"post_training_store,omitempty" yaml:"post_training_store,omitempty"`
-	ScoringStore      map[string]interface{}   `json:"scoring_store,omitempty"       yaml:"scoring_store,omitempty"`
-	EvalStore         map[string]interface{}   `json:"eval_store,omitempty"          yaml:"eval_store,omitempty"`
-	DatasetIOStore    map[string]interface{}   `json:"datasetio_store,omitempty"     yaml:"datasetio_store,omitempty"`
 	Server            map[string]interface{}   `json:"server,omitempty"              yaml:"server,omitempty"`
 	ExternalProviders map[string]interface{}   `json:"external_providers,omitempty"  yaml:"external_providers,omitempty"`
 	// Extra captures all YAML fields not explicitly mapped above (e.g. distro_name,
-	// image_name, storage, registered_resources, vector_stores, safety, connectors).
+	// image_name, storage, registered_resources, vector_stores, connectors).
 	// The inline tag ensures these survive the parse → merge → render round-trip.
 	Extra map[string]interface{} `json:"-" yaml:",inline"`
 }
