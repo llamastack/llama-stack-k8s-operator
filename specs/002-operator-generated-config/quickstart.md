@@ -62,8 +62,8 @@ spec:
     inference:
       - provider: vllm
         endpoint: "https://vllm.example.com"
-        apiKey:
-          secretKeyRef:
+        secretRefs:
+          api_key:
             name: vllm-creds
             key: token
 ```
@@ -180,8 +180,8 @@ spec:
       - id: vllm-primary
         provider: vllm
         endpoint: "http://vllm-primary:8000"
-        apiKey:
-          secretKeyRef: {name: vllm-creds, key: token}
+        secretRefs:
+          api_key: {name: vllm-creds, key: token}
     safety:
       - provider: llama-guard
 

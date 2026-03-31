@@ -1,0 +1,49 @@
+# Networking configuration: custom port, CA bundle, NetworkPolicy, and external access.
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: llamastack-network-example
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      - provider: ollama
+        endpoint: http://ollama-server-service.ollama-dist.svc.cluster.local:11434/v1
+  resources:
+    models:
+      - name: "llama3.2:1b"
+  networking:
+    port: 8321
+    tls:
+      caBundle:
+        configMapName: custom-ca-bundle
+    allowedFrom:
+      namespaces:
+        - nsA
+        - nsB
+      labels:
+        - myproject/lls-allowed
+        - team/authorized
+  workload:
+    replicas: 1
+---
+# Expose the service externally and allow all namespaces.
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: llamastack-public
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      - provider: ollama
+        endpoint: http://ollama-server-service.ollama-dist.svc.cluster.local:11434/v1
+  networking:
+    expose: {}
+    allowedFrom:
+      namespaces:
+        - "*"
+  workload:
+    replicas: 1

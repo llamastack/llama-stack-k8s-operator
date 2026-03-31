@@ -80,7 +80,7 @@ phases:
 validation_errors:
   format: "Kubernetes API field.ErrorList"
   example:
-    field: "spec.providers.inference[0].apiKey.secretKeyRef.name"
+    field: "spec.providers.inference[0].secretRefs.api_key.name"
     type: "FieldValueNotFound"
     message: "Secret \"vllm-creds\" not found in namespace \"default\""
   guidelines:

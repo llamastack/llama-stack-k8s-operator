@@ -5,7 +5,6 @@ type FeatureFlag struct {
 }
 
 // FeatureFlags represents the configuration for feature flags in the operator.
-// Add more feature flags later.
 type FeatureFlags struct {
 	// EnableNetworkPolicy controls whether NetworkPolicy resources should be created.
 	EnableNetworkPolicy FeatureFlag `yaml:"enableNetworkPolicy"`

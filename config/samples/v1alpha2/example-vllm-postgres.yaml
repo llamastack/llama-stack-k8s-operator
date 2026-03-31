@@ -1,0 +1,50 @@
+# vLLM inference with PostgreSQL storage and pgvector for RAG.
+# Prerequisites:
+#   - A vLLM server serving llama3.2-8b (e.g. via KServe or a Deployment)
+#   - A PostgreSQL instance with pgvector extension
+#   - Secrets: vllm-creds (key: token), pg-credentials (keys: dsn, host)
+apiVersion: llamastack.io/v1alpha2
+kind: LlamaStackDistribution
+metadata:
+  name: llamastack-vllm-pg
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      - provider: vllm
+        endpoint: http://vllm-service.vllm.svc.cluster.local:8000/v1
+        secretRefs:
+          api_key:
+            name: vllm-creds
+            key: token
+    vectorIo:
+      - provider: pgvector
+        # Use secretRefs for sensitive connection fields (FR-005).
+        # Each key maps to config.<key> with env var substitution.
+        secretRefs:
+          host:
+            name: pg-credentials
+            key: host
+        # Non-sensitive settings are passed through as-is.
+        settings:
+          port: 5432
+          db: llamastack
+  resources:
+    models:
+      - name: llama3.2-8b
+  storage:
+    kv:
+      type: redis
+      endpoint: redis://redis-service.redis.svc.cluster.local:6379
+    sql:
+      type: postgres
+      connectionString:
+        name: pg-credentials
+        key: dsn
+  workload:
+    replicas: 2
+    resources:
+      requests:
+        cpu: "1"
+        memory: "2Gi"

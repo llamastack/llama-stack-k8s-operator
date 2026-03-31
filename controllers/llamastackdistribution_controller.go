@@ -36,6 +36,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-containerregistry/pkg/name"
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	v1alpha2 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/featureflags"
@@ -170,44 +171,116 @@ func getCABundleConfigMapNamespaceStandalone(llsd *llamav1alpha1.LlamaStackDistr
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.12.2/pkg/reconcile
 func (r *LlamaStackDistributionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	// Create a logger with request-specific values and store it in the context.
-	// This ensures consistent logging across the reconciliation process and its sub-functions.
-	// The logger is retrieved from the context in each sub-function that needs it, maintaining
-	// the request-specific values throughout the call chain.
-	// Always ensure the name of the CR and the namespace are included in the logger.
 	logger := log.FromContext(ctx).WithValues("namespace", req.Namespace, "name", req.Name)
 	ctx = logr.NewContext(ctx, logger)
 
-	// Fetch the LlamaStack instance
 	instance, err := r.fetchInstance(ctx, req.NamespacedName)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-
 	if instance == nil {
 		logger.V(1).Info("LlamaStackDistribution resource not found, skipping reconciliation")
 		return ctrl.Result{}, nil
 	}
 
-	// Reconcile all resources, storing the error for later.
-	reconcileErr := r.reconcileResources(ctx, instance)
+	return r.reconcileInstance(ctx, req.NamespacedName, instance)
+}
 
-	// Update the status, passing in any reconciliation error.
-	if statusUpdateErr := r.updateStatus(ctx, instance, reconcileErr); statusUpdateErr != nil {
-		// Log the status update error, but prioritize the reconciliation error for return.
-		logger.Error(statusUpdateErr, "failed to update status")
-		if reconcileErr != nil {
-			return ctrl.Result{}, reconcileErr
-		}
-		return ctrl.Result{}, statusUpdateErr
+// reconcileInstance performs the full reconciliation for a fetched LlamaStackDistribution.
+func (r *LlamaStackDistributionReconciler) reconcileInstance(
+	ctx context.Context,
+	key types.NamespacedName,
+	instance *llamav1alpha1.LlamaStackDistribution,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Handle v1alpha2 native config generation before standard reconciliation.
+	v1a2Result, v1a2Err := r.handleV1Alpha2NativeConfig(ctx, key, instance)
+	if v1a2Err != nil {
+		logger.Error(v1a2Err, "failed to handle v1alpha2 native config")
+		// FR-097: On config generation failure, skip reconcileResources to
+		// preserve the current running Deployment unchanged. Persist
+		// ConfigGenerated=False so the failure is visible in .status.conditions.
+		return r.handleV1Alpha2ConfigFailure(ctx, key, v1a2Err)
 	}
 
-	// If reconciliation failed, return the error to trigger a requeue.
+	reconcileErr := r.reconcileResources(ctx, instance)
+
+	return r.finalizeReconciliation(ctx, key, instance, v1a2Result, reconcileErr)
+}
+
+// handleV1Alpha2ConfigFailure persists ConfigGenerated=False on the v1alpha2 status
+// when config generation fails, without touching the Deployment. This satisfies
+// FR-097: the running Deployment stays intact and the failure is visible in status.
+func (r *LlamaStackDistributionReconciler) handleV1Alpha2ConfigFailure(
+	ctx context.Context,
+	key types.NamespacedName,
+	configErr error,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	v2Instance := &v1alpha2.LlamaStackDistribution{}
+	if err := r.Get(ctx, key, v2Instance); err != nil {
+		logger.Error(err, "failed to fetch v1alpha2 instance for failure status")
+		return ctrl.Result{}, configErr
+	}
+
+	SetV1Alpha2Condition(&v2Instance.Status, ConditionTypeConfigGenerated,
+		metav1.ConditionFalse, ReasonConfigGenFailed, configErr.Error(),
+		v2Instance.Generation)
+
+	v2Instance.Status.Phase = v1alpha2.PhaseFailed
+
+	if err := r.Status().Update(ctx, v2Instance); err != nil {
+		logger.Error(err, "failed to update v1alpha2 failure status")
+	}
+
+	return ctrl.Result{}, configErr
+}
+
+// finalizeReconciliation handles status updates and determines the reconciliation result.
+// For v1alpha2 CRs with generated config, it uses a single v1alpha2 status update
+// to avoid an infinite loop caused by dual v1alpha1/v1alpha2 status updates
+// (the v1alpha1 update erases v1alpha2-specific fields, then the v1alpha2 update
+// restores them, triggering another reconciliation).
+func (r *LlamaStackDistributionReconciler) finalizeReconciliation(
+	ctx context.Context,
+	key types.NamespacedName,
+	instance *llamav1alpha1.LlamaStackDistribution,
+	v1a2Result *v1alpha2ConfigResult,
+	reconcileErr error,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	if v1a2Result != nil {
+		if err := r.computeStatus(ctx, instance, reconcileErr); err != nil {
+			logger.Error(err, "failed to compute status")
+			if reconcileErr != nil {
+				return ctrl.Result{}, reconcileErr
+			}
+			return ctrl.Result{}, err
+		}
+		if err := r.persistV1Alpha2Status(ctx, key, instance, v1a2Result); err != nil {
+			logger.Error(err, "failed to update v1alpha2 status")
+			if reconcileErr != nil {
+				return ctrl.Result{}, reconcileErr
+			}
+			return ctrl.Result{}, err
+		}
+	} else {
+		if statusUpdateErr := r.updateStatus(ctx, instance, reconcileErr); statusUpdateErr != nil {
+			logger.Error(statusUpdateErr, "failed to update status")
+			if reconcileErr != nil {
+				return ctrl.Result{}, reconcileErr
+			}
+			return ctrl.Result{}, statusUpdateErr
+		}
+	}
+
 	if reconcileErr != nil {
 		return ctrl.Result{}, reconcileErr
 	}
 
-	// Check if requeue is needed based on phase
 	if instance.Status.Phase == llamav1alpha1.LlamaStackDistributionPhaseInitializing {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
@@ -712,11 +785,11 @@ func (r *LlamaStackDistributionReconciler) handleOperatorConfigUpdate(configMap 
 	}
 
 	// Update feature flags
-	EnableNetworkPolicy, err := parseFeatureFlags(configMap.Data)
+	parsed, err := parseFeatureFlags(configMap.Data)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "Failed to parse feature flags")
 	} else {
-		r.EnableNetworkPolicy = EnableNetworkPolicy
+		r.EnableNetworkPolicy = parsed.EnableNetworkPolicy
 	}
 
 	r.ImageMappingOverrides = ParseImageMappingOverrides(context.Background(), configMap.Data)
@@ -1111,8 +1184,10 @@ func (r *LlamaStackDistributionReconciler) getVersionInfo(ctx context.Context, i
 	return response.Version, nil
 }
 
-// updateStatus refreshes the LlamaStack status.
-func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, reconcileErr error) error {
+// computeStatus computes all status fields on the in-memory v1alpha1 instance
+// without persisting to the API server. This allows the caller to choose
+// whether to persist via v1alpha1 or v1alpha2 API.
+func (r *LlamaStackDistributionReconciler) computeStatus(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, reconcileErr error) error {
 	logger := log.FromContext(ctx)
 	instance.Status.Version.OperatorVersion = os.Getenv("OPERATOR_VERSION")
 	// A reconciliation error is the highest priority. It overrides all other status checks.
@@ -1158,12 +1233,19 @@ func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, ins
 		}
 	}
 
-	// Always update the status at the end of the function.
 	instance.Status.Version.LastUpdated = metav1.NewTime(metav1.Now().UTC())
+	return nil
+}
+
+// updateStatus computes and persists the v1alpha1 status. Used for v1alpha1 CRs
+// where there are no v1alpha2-specific status fields to preserve.
+func (r *LlamaStackDistributionReconciler) updateStatus(ctx context.Context, instance *llamav1alpha1.LlamaStackDistribution, reconcileErr error) error {
+	if err := r.computeStatus(ctx, instance, reconcileErr); err != nil {
+		return err
+	}
 	if err := r.Status().Update(ctx, instance); err != nil {
 		return fmt.Errorf("failed to update status: %w", err)
 	}
-
 	return nil
 }
 
@@ -1763,21 +1845,30 @@ func createDefaultConfigMap(configMapName types.NamespacedName) (*corev1.ConfigM
 	}, nil
 }
 
+// parsedFeatureFlags holds the parsed values of all feature flags.
+type parsedFeatureFlags struct {
+	EnableNetworkPolicy bool
+}
+
 // parseFeatureFlags extracts and parses feature flags from ConfigMap data.
-func parseFeatureFlags(configMapData map[string]string) (bool, error) {
-	enableNetworkPolicy := featureflags.NetworkPolicyDefaultValue
+func parseFeatureFlags(configMapData map[string]string) (parsedFeatureFlags, error) {
+	defaults := parsedFeatureFlags{
+		EnableNetworkPolicy: featureflags.NetworkPolicyDefaultValue,
+	}
 
 	featureFlagsYAML, exists := configMapData[featureflags.FeatureFlagsKey]
 	if !exists {
-		return enableNetworkPolicy, nil
+		return defaults, nil
 	}
 
 	var flags featureflags.FeatureFlags
 	if err := yaml.Unmarshal([]byte(featureFlagsYAML), &flags); err != nil {
-		return false, fmt.Errorf("failed to parse feature flags: %w", err)
+		return defaults, fmt.Errorf("failed to parse feature flags: %w", err)
 	}
 
-	return flags.EnableNetworkPolicy.Enabled, nil
+	return parsedFeatureFlags{
+		EnableNetworkPolicy: flags.EnableNetworkPolicy.Enabled,
+	}, nil
 }
 
 // NewLlamaStackDistributionReconciler creates a new reconciler with default image mappings.
@@ -1796,7 +1887,7 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 	}
 
 	// Parse feature flags from ConfigMap
-	enableNetworkPolicy, err := parseFeatureFlags(configMap.Data)
+	parsed, err := parseFeatureFlags(configMap.Data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse feature flags: %w", err)
 	}
@@ -1807,7 +1898,7 @@ func NewLlamaStackDistributionReconciler(ctx context.Context, client client.Clie
 	return &LlamaStackDistributionReconciler{
 		Client:                client,
 		Scheme:                scheme,
-		EnableNetworkPolicy:   enableNetworkPolicy,
+		EnableNetworkPolicy:   parsed.EnableNetworkPolicy,
 		ImageMappingOverrides: imageMappingOverrides,
 		ClusterInfo:           clusterInfo,
 		httpClient:            &http.Client{Timeout: 5 * time.Second},

@@ -26,7 +26,7 @@ LlamaStackDistribution (CR)
 │   ├── NetworkingSpec            # Network configuration
 │   │   ├── Port                  # int32
 │   │   ├── TLS                   # TLSSpec
-│   │   ├── Expose                # ExposeConfig (enabled + hostname)
+│   │   ├── Expose                # ExposeConfig (hostname; presence = enabled)
 │   │   └── AllowedFrom           # AllowedFromSpec
 │   ├── WorkloadSpec              # Deployment settings
 │   │   ├── Replicas              # *int32
@@ -83,15 +83,13 @@ LlamaStackDistribution (CR)
 | `id` | string | Conditional | Auto-generated from `provider` (FR-035) | Required when list has >1 element (FR-034, CEL) | Unique provider identifier |
 | `provider` | string | Yes | - | Required | Provider type (e.g., `vllm`, `llama-guard`, `pgvector`) |
 | `endpoint` | string | No | - | URL format | Provider endpoint URL |
-| `apiKey` | *SecretKeyRef | No | - | - | Secret reference for API authentication |
-| `secretRefs` | map[string]SecretKeyRef | No | - | - | Named secret references for provider-specific connection fields |
+| `secretRefs` | map[string]SecretKeyRef | No | - | - | Named secret references for provider-specific connection fields (e.g., api_key, host, password) |
 | `settings` | map[string]interface{} | No | - | Unstructured (escape hatch) | Provider-specific settings merged into config (NO secret resolution) |
 
 **Mapping to config.yaml**:
 - `provider` maps to `provider_type` with `remote::` prefix (FR-030)
 - `endpoint` maps to `config.url` (FR-031)
-- `apiKey` maps to `config.api_key` via env var `${env.LLSD_<PROVIDER_ID>_API_KEY}` (FR-032)
-- `secretRefs.<key>` maps to `config.<key>` via env var `${env.LLSD_<PROVIDER_ID>_<KEY>}` (FR-032)
+- `secretRefs.<key>` maps to `config.<key>` via env var `${env.LLSD_<PROVIDER_ID>_<KEY>}` (FR-032). For API keys, use `secretRefs.api_key` which produces env var `LLSD_<PROVIDER_ID>_API_KEY`
 - `settings.*` merged into `config.*` (FR-033), passed through without secret resolution
 
 ---
@@ -195,35 +193,33 @@ LlamaStackDistribution (CR)
 |-------|------|----------|---------|------------|-------------|
 | `port` | int32 | No | 8321 | - | Server listen port |
 | `tls` | *TLSSpec | No | - | - | TLS configuration |
-| `expose` | *ExposeConfig | No | - | Polymorphic (bool or object) | External access configuration |
+| `expose` | *ExposeConfig | No | - | Presence implies enabled | External access configuration |
 | `allowedFrom` | *AllowedFromSpec | No | - | - | Namespace-based access control |
 
 ---
 
 ### ExposeConfig
 
-**Purpose**: Controls external service exposure via Ingress/Route.
+**Purpose**: Controls external service exposure via Ingress/Route. Presence of this field (non-nil) enables external access.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `enabled` | *bool | No | false | Enable external access via Ingress/Route |
 | `hostname` | string | No | auto-generated | Custom hostname for Ingress/Route |
 
 **Behavior**:
-- `expose: {enabled: true}`: Create Ingress/Route with auto-generated hostname
-- `expose: {enabled: true, hostname: "llama.example.com"}`: Create with specified hostname
-- `expose: {}`: Treated as enabled with defaults (presence implies intent)
-- Not specified: No external access
+- `expose: {}`: Create Ingress/Route with auto-generated hostname (presence implies enabled)
+- `expose: {hostname: "llama.example.com"}`: Create with specified hostname
+- Not specified (`expose` omitted): No external access
 
 ---
 
 ### TLSSpec
 
+**Purpose**: Configures TLS for the LlamaStack server. Presence of this field indicates TLS-related configuration is active.
+
 | Field | Type | Required | Default | Validation | Description |
 |-------|------|----------|---------|------------|-------------|
-| `enabled` | bool | No | false | - | Enable TLS on server |
-| `secretName` | string | Conditional | - | Required when `enabled: true` | K8s TLS Secret name |
-| `caBundle` | *CABundleConfig | No | - | - | Custom CA certificates |
+| `caBundle` | *CABundleConfig | No | - | - | Custom CA certificates via ConfigMap |
 
 ---
 
@@ -411,7 +407,7 @@ ExternalProviders (spec 001) ──► Merged into config ──────┘
 | `PodOverrides` | `WorkloadOverrides` | Rename + expand |
 | `PodDisruptionBudgetSpec` | `WorkloadSpec.PodDisruptionBudget` | Direct move |
 | `TopologySpreadConstraints` | `WorkloadSpec.TopologySpreadConstraints` | Direct move |
-| `NetworkSpec.ExposeRoute` | `NetworkingSpec.Expose` | Bool to typed struct (enabled + hostname) |
+| `NetworkSpec.ExposeRoute` | `NetworkingSpec.Expose` | Bool to typed struct (presence = enabled, optional hostname) |
 | `NetworkSpec.AllowedFrom` | `NetworkingSpec.AllowedFrom` | Direct move |
 | *(new)* | `ProvidersSpec` | New in v1alpha2 |
 | *(new)* | `ResourcesSpec` | New in v1alpha2 |

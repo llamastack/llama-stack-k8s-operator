@@ -120,6 +120,10 @@ func testCreateDistributionForType(t *testing.T, distType string) *v1alpha1.Llam
 func testDirectDeploymentUpdates(t *testing.T, distribution *v1alpha1.LlamaStackDistribution) {
 	t.Helper()
 
+	if distribution == nil {
+		t.Skip("Skipping: distribution creation failed")
+	}
+
 	if distribution.Spec.Server.Autoscaling != nil && distribution.Spec.Server.Autoscaling.MaxReplicas > 0 {
 		t.Skip("Skipping direct deployment update healing test when autoscaling is enabled")
 	}
@@ -150,6 +154,11 @@ func testDirectDeploymentUpdates(t *testing.T, distribution *v1alpha1.LlamaStack
 
 func testCRDeploymentUpdate(t *testing.T, distribution *v1alpha1.LlamaStackDistribution) {
 	t.Helper()
+
+	if distribution == nil {
+		t.Skip("Skipping: distribution creation failed")
+	}
+
 	// Update CR
 	err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
 		Namespace: distribution.Namespace,
@@ -197,6 +206,11 @@ func testCRDeploymentUpdate(t *testing.T, distribution *v1alpha1.LlamaStackDistr
 
 func testHealthStatus(t *testing.T, distribution *v1alpha1.LlamaStackDistribution) {
 	t.Helper()
+
+	if distribution == nil {
+		t.Skip("Skipping: distribution creation failed")
+	}
+
 	// Wait for status to be updated with a longer interval to avoid rate limiting
 	err := wait.PollUntilContextTimeout(TestEnv.Ctx, 1*time.Minute, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
 		// Get the latest state of the distribution
@@ -215,6 +229,11 @@ func testHealthStatus(t *testing.T, distribution *v1alpha1.LlamaStackDistributio
 
 func testDistributionStatus(t *testing.T, llsdistributionCR *v1alpha1.LlamaStackDistribution) {
 	t.Helper()
+
+	if llsdistributionCR == nil {
+		t.Skip("Skipping: distribution creation failed")
+	}
+
 	// Wait for status to be updated with distribution info
 	err := wait.PollUntilContextTimeout(TestEnv.Ctx, 1*time.Minute, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
 		updatedDistribution := &v1alpha1.LlamaStackDistribution{}
@@ -280,6 +299,10 @@ func testDistributionStatus(t *testing.T, llsdistributionCR *v1alpha1.LlamaStack
 func testPVCConfiguration(t *testing.T, distribution *v1alpha1.LlamaStackDistribution) {
 	t.Helper()
 
+	if distribution == nil {
+		t.Skip("Skipping: distribution creation failed")
+	}
+
 	pvcName := distribution.Name + "-pvc"
 	pvc := &corev1.PersistentVolumeClaim{}
 	err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
@@ -303,6 +326,10 @@ func testPVCConfiguration(t *testing.T, distribution *v1alpha1.LlamaStackDistrib
 
 func testServiceAccountOverride(t *testing.T, distribution *v1alpha1.LlamaStackDistribution) {
 	t.Helper()
+
+	if distribution == nil {
+		t.Skip("Skipping: distribution creation failed")
+	}
 
 	// Create a custom ServiceAccount
 	sa := &corev1.ServiceAccount{
@@ -416,6 +443,10 @@ func validateProviders(t *testing.T, distribution *v1alpha1.LlamaStackDistributi
 func testImageMappingOverrides(t *testing.T, distribution *v1alpha1.LlamaStackDistribution) {
 	t.Helper()
 
+	if distribution == nil {
+		t.Skip("Skipping: distribution creation failed")
+	}
+
 	// Get the current deployment to save the original image
 	deployment := &appsv1.Deployment{}
 	require.NoError(t, TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
@@ -430,6 +461,23 @@ func testImageMappingOverrides(t *testing.T, distribution *v1alpha1.LlamaStackDi
 		Namespace: TestOpts.OperatorNS,
 		Name:      "llama-stack-operator-config",
 	}, operatorConfigMap))
+
+	// Guarantee cleanup even if any assertion below fails, so stale overrides
+	// don't leak into subsequent test suites (e.g. v1alpha2-lifecycle).
+	t.Cleanup(func() {
+		cm := &corev1.ConfigMap{}
+		if err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
+			Namespace: TestOpts.OperatorNS,
+			Name:      "llama-stack-operator-config",
+		}, cm); err != nil {
+			return
+		}
+		if _, exists := cm.Data["image-overrides"]; exists {
+			delete(cm.Data, "image-overrides")
+			_ = TestEnv.Client.Update(TestEnv.Ctx, cm)
+			time.Sleep(15 * time.Second)
+		}
+	})
 
 	// Add image override for the distribution type
 	testOverrideImage := "quay.io/test/llama-stack:override-test"

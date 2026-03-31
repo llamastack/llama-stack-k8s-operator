@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha2"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -267,6 +268,7 @@ func registerSchemes() {
 		clientgoscheme.AddToScheme,
 		apiextv1.AddToScheme,
 		v1alpha1.AddToScheme,
+		v1alpha2.AddToScheme,
 	}
 
 	for _, schemeFn := range schemes {
@@ -282,7 +284,7 @@ func GetSampleCRForDistribution(t *testing.T, distType string) *v1alpha1.LlamaSt
 	require.NoError(t, err)
 
 	// Construct the path to the sample file
-	samplePath := filepath.Join(projectRoot, "config", "samples", "_v1alpha1_llamastackdistribution.yaml")
+	samplePath := filepath.Join(projectRoot, "config", "samples", "v1alpha1", "llamastackdistribution.yaml")
 
 	// Read the sample file
 	yamlFile, err := os.ReadFile(samplePath)
@@ -301,6 +303,23 @@ func GetSampleCRForDistribution(t *testing.T, distType string) *v1alpha1.LlamaSt
 	default:
 		t.Fatalf("Unknown distribution type: %s", distType)
 	}
+
+	return distribution
+}
+
+// GetV1Alpha2SampleCR returns a v1alpha2 LlamaStackDistribution from the sample file.
+func GetV1Alpha2SampleCR(t *testing.T) *v1alpha2.LlamaStackDistribution {
+	t.Helper()
+	projectRoot, err := filepath.Abs("../..")
+	require.NoError(t, err)
+
+	samplePath := filepath.Join(projectRoot, "config", "samples", "v1alpha2", "llamastackdistribution.yaml")
+	yamlFile, err := os.ReadFile(samplePath)
+	require.NoError(t, err)
+
+	distribution := &v1alpha2.LlamaStackDistribution{}
+	err = yaml.Unmarshal(yamlFile, distribution)
+	require.NoError(t, err)
 
 	return distribution
 }

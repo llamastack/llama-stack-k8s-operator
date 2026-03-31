@@ -1,0 +1,8 @@
+# Patch ValidatingWebhookConfiguration to use OpenShift service-ca
+# for CA bundle injection instead of cert-manager.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"

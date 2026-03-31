@@ -38,6 +38,7 @@ const (
 	testOperatorNamespace = "default"
 	testStorageVolumeName = "lls-storage"
 	testInstanceName      = "test-instance"
+	generatedConfigLabel  = "generated-config"
 )
 
 // DistributionBuilder - Builder pattern for test instances of operator custom resource.
@@ -521,6 +522,39 @@ func createTestNamespace(t *testing.T, namePrefix string) *corev1.Namespace {
 		}
 	})
 	return namespace
+}
+
+// setupV1Alpha2TestEnv creates the operator namespace, operator ConfigMap, and
+// test namespace needed by v1alpha2 controller tests. Returns both namespaces.
+func setupV1Alpha2TestEnv(t *testing.T, prefix string) (ns, opNs *corev1.Namespace) {
+	t.Helper()
+	ns = createTestNamespace(t, prefix)
+	opNs = createTestNamespace(t, prefix+"-op")
+	t.Setenv("OPERATOR_NAMESPACE", opNs.Name)
+
+	opConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: opNs.Name,
+		},
+		Data: map[string]string{},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), opConfig))
+	return ns, opNs
+}
+
+// newV1Alpha2Reconciler creates a reconciler configured for v1alpha2 tests.
+func newV1Alpha2Reconciler(t *testing.T, opNamespace string) *controllers.LlamaStackDistributionReconciler {
+	t.Helper()
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  opNamespace,
+		DistributionImages: map[string]string{"starter": testImage},
+	}
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+		t.Context(), k8sClient, scheme.Scheme, clusterInfo,
+	)
+	require.NoError(t, err)
+	return reconciler
 }
 
 // loadTestCertificate generates a valid self-signed test certificate.

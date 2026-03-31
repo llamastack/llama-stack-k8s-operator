@@ -43,14 +43,14 @@
 - [ ] T017 (llama-stack-k8s-operator-834.4) [P] Implement config version detection in pkg/config/version.go
 - [ ] T018 (llama-stack-k8s-operator-834.5) Implement base config parsing and merge logic (full API-type replacement for providers, per-subsection for storage, additive for resources, subtractive for disabled) in pkg/config/merge.go
 - [ ] T019 (llama-stack-k8s-operator-834.6) [P] Implement provider expansion (auto-ID generation, remote:: prefix, endpoint mapping, settings merge) in pkg/config/provider.go
-- [ ] T020 (llama-stack-k8s-operator-834.7) [P] Implement secret reference collection from apiKey and secretRefs fields, env var name generation (LLSD_<ID>_<FIELD>) in pkg/config/secret.go
+- [ ] T020 (llama-stack-k8s-operator-834.7) [P] Implement secret reference collection from secretRefs field, env var name generation (LLSD_<ID>_<FIELD>) in pkg/config/secret.go
 - [ ] T021 (llama-stack-k8s-operator-834.8) [P] Implement resource expansion (model registration with provider assignment, tool group registration, shield registration) in pkg/config/resource.go
 - [ ] T022 (llama-stack-k8s-operator-834.9) [P] Implement storage config generation (kv and sql backend mapping) in pkg/config/storage.go
 - [ ] T023 (llama-stack-k8s-operator-834.10) Implement GenerateConfig orchestrator that calls all expansion functions and produces GeneratedConfig (configYAML, contentHash, envVars, counts) in pkg/config/generator.go
 - [ ] T024 (llama-stack-k8s-operator-834.11) [P] Write unit tests for EmbeddedConfigResolver in pkg/config/resolver_test.go
 - [ ] T025 (llama-stack-k8s-operator-834.12) [P] Write unit tests for provider expansion (single provider, multiple providers, auto-ID, settings merge, secretRefs) in pkg/config/provider_test.go
 - [ ] T026 (llama-stack-k8s-operator-834.13) [P] Write unit tests for resource expansion (model with/without provider, tools, shields, missing provider error) in pkg/config/resource_test.go
-- [ ] T027 (llama-stack-k8s-operator-834.14) [P] Write unit tests for secret collection (apiKey, secretRefs, storage secrets, env var naming normalization) in pkg/config/secret_test.go
+- [ ] T027 (llama-stack-k8s-operator-834.14) [P] Write unit tests for secret collection (secretRefs, storage secrets, env var naming normalization) in pkg/config/secret_test.go
 - [ ] T028 (llama-stack-k8s-operator-834.15) [P] Write unit tests for storage config (sqlite defaults, redis with endpoint, postgres with connectionString) in pkg/config/storage_test.go
 - [ ] T029 (llama-stack-k8s-operator-834.16) [P] Write unit tests for merge logic (provider replacement, storage merge, resource additive, disabled subtractive) in pkg/config/merge_test.go
 - [ ] T030 (llama-stack-k8s-operator-834.17) Write integration tests for GenerateConfig end-to-end with golden file comparison for determinism in pkg/config/generator_test.go

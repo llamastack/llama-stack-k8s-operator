@@ -20,9 +20,8 @@ output:
 provider_mapping:
   # CRD field → config.yaml field
   provider: provider_type     # With "remote::" prefix (e.g., vllm → remote::vllm)
-  endpoint: config.url
-  apiKey: config.api_key      # Via env var substitution: ${env.LLSD_<PROVIDER_ID>_API_KEY}
-  secretRefs.<key>: config.<key>  # Each entry resolved to env var: ${env.LLSD_<PROVIDER_ID>_<KEY>}
+  endpoint: config.base_url
+  secretRefs.<key>: config.<key>  # Each entry resolved to env var: ${env.LLSD_<PROVIDER_ID>_<KEY>} (use api_key key for API keys)
   settings.*: config.*        # Merged into provider config section (NO secret resolution)
   id: provider_id             # Direct mapping
 
@@ -34,7 +33,7 @@ env_var_naming:
     - Replace hyphens (-) with underscores (_)
   examples:
     - provider_id: "vllm-primary"
-      field: "apiKey"
+      field: "api_key"
       result: "LLSD_VLLM_PRIMARY_API_KEY"
     - provider_id: "pgvector"
       field: "host"
@@ -65,23 +64,15 @@ resource_mapping:
 # --- Merge Rules ---
 merge_rules:
   providers:
-    strategy: replace_by_api_type
-    description: >
-      When user specifies providers for an API type, ALL base config providers
-      for that API type are replaced. Base providers with unmatched IDs are NOT
-      preserved. If the user wants to keep a base provider, they must re-declare
-      it in their provider list.
-    examples:
-      - description: "Full replacement"
-        base: [{provider_id: base-inf, provider_type: "remote::vllm"}]
-        user: [{id: custom-inf, provider: ollama, endpoint: "http://ollama:11434"}]
-        result: [{provider_id: custom-inf, provider_type: "remote::ollama", config: {url: "http://ollama:11434"}}]
-        note: "base-inf is removed because user specified inference providers"
-      - description: "No user providers for API type"
-        base: [{provider_id: base-inf, provider_type: "remote::vllm"}]
-        user: []  # providers.inference not specified
-        result: [{provider_id: base-inf, provider_type: "remote::vllm"}]
-        note: "Base providers preserved when user does not specify that API type"
+    strategy: merge_by_provider_id
+    description: |
+      User providers are merged into the base config by provider_id.
+      Matching IDs: user provider replaces the base provider.
+      Unmatched user IDs: appended to the base provider list.
+      Unmatched base IDs: preserved in the final config.
+      This is intentional, it preserves base config providers that the
+      user did not explicitly override (e.g., inline::sentence-transformers
+      for embeddings, inline::meta-reference for agents).
 
   storage:
     strategy: merge_by_subsection
@@ -102,14 +93,11 @@ merge_rules:
 # --- Secret Resolution ---
 secret_resolution:
   description: >
-    Secrets are resolved from two explicit typed fields only: apiKey and secretRefs.
+    Secrets are resolved from the explicit secretRefs field only.
     The settings map is NEVER inspected for secret references. This eliminates
     heuristic matching (any map with name+key fields) and provides a clear,
     unambiguous boundary for secret resolution.
   sources:
-    - field: "apiKey.secretKeyRef"
-      env_var_suffix: "API_KEY"
-      description: "Standard API key authentication"
     - field: "secretRefs.<key>.secretKeyRef"
       env_var_suffix: "<KEY uppercased, hyphens to underscores>"
       description: "Named secret references for provider-specific connection fields"
@@ -120,7 +108,7 @@ secret_resolution:
       env_var: "LLSD_PGVECTOR_HOST"
       config_value: "${env.LLSD_PGVECTOR_HOST}"
     - provider_id: "vllm-primary"
-      field: "apiKey"
+      field: "api_key"
       secret: {name: vllm-creds, key: token}
       env_var: "LLSD_VLLM_PRIMARY_API_KEY"
       config_value: "${env.LLSD_VLLM_PRIMARY_API_KEY}"

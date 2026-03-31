@@ -23,7 +23,7 @@ As a developer, I want to deploy a llama-stack instance with a vLLM backend usin
 **Acceptance Scenarios**:
 
 1. **Given** a LLSD CR with `providers.inference: [{provider: vllm, endpoint: "http://vllm:8000"}]`, **When** I apply the CR, **Then** the operator generates a valid config.yaml with the vLLM provider configured
-2. **Given** a LLSD CR with `providers.inference.apiKey.secretKeyRef`, **When** I apply the CR, **Then** the secret value is injected via environment variable and the provider can authenticate
+2. **Given** a LLSD CR with `providers.inference.secretRefs.api_key`, **When** I apply the CR, **Then** the secret value is injected via environment variable and the provider can authenticate
 3. **Given** a LLSD CR with only `distribution.name: starter`, **When** I apply the CR, **Then** the distribution's default config.yaml is used unchanged
 
 ### User Story 2 - Multiple Providers Configuration (Priority: P1)
@@ -80,7 +80,7 @@ As a platform operator, I want to expose the llama-stack service externally with
 
 1. **Given** a LLSD CR with `networking.expose: true`, **When** I apply the CR, **Then** an Ingress/Route is created with an auto-generated hostname
 2. **Given** a LLSD CR with `networking.expose: {hostname: "llama.example.com"}`, **When** I apply the CR, **Then** an Ingress/Route is created with the specified hostname
-3. **Given** a LLSD CR with `networking.tls: {enabled: true, secretName: "..."}`, **When** I apply the CR, **Then** the server uses the specified TLS certificate
+3. **Given** a LLSD CR with `networking.tls: {caBundle: {configMapName: "..."}}`, **When** I apply the CR, **Then** the server uses the specified CA certificates
 
 ### User Story 6 - Full ConfigMap Override (Priority: P2)
 
@@ -165,7 +165,7 @@ As a platform operator, I want to update the LLSD CR (e.g., add a provider, chan
 
 - **Secret references via settings vs secretRefs**:
   - What: User puts a secretKeyRef inside `settings` instead of using the `secretRefs` field
-  - Expected: The `settings` map is passed through to config.yaml as-is without any secret resolution. Only the explicit `apiKey` and `secretRefs` fields trigger secret-to-env-var resolution. This is a clear, unambiguous boundary (no heuristic matching of map shapes).
+  - Expected: The `settings` map is passed through to config.yaml as-is without any secret resolution. Only the explicit `secretRefs` field triggers secret-to-env-var resolution. This is a clear, unambiguous boundary (no heuristic matching of map shapes).
 
 - **Tools specified without toolRuntime provider**:
   - What: User specifies `resources.tools: [websearch]` but does not configure `providers.toolRuntime`
@@ -185,13 +185,13 @@ As a platform operator, I want to update the LLSD CR (e.g., add a provider, chan
 - **FR-002**: The `spec.distribution` field MUST support both `name` (mapped) and `image` (direct) forms, mutually exclusive
 - **FR-003**: The `spec.providers` section MUST support provider types: `inference`, `safety`, `vectorIo`, `toolRuntime`, `telemetry`
 - **FR-004**: Each provider field MUST be a list of `ProviderConfig` objects (`[]ProviderConfig`). A single provider is expressed as a one-element list. This ensures kubebuilder validation markers apply to all provider fields and CEL rules can inspect provider IDs for uniqueness.
-- **FR-005**: Each `ProviderConfig` MUST support fields: `id` (unique provider identifier), `provider` (type, required), `endpoint`, `apiKey` (secretKeyRef), `secretRefs` (named secret references map), `settings` (escape hatch). Provider-specific connection fields (e.g., `host` for vectorIo) MUST use `secretRefs` entries rather than embedding `secretKeyRef` inside `settings`. The `secretRefs` field is a `map[string]SecretKeyRef` where each key becomes the env var field suffix. The `settings` map is passed through to config.yaml as-is without secret resolution.
+- **FR-005**: Each `ProviderConfig` MUST support fields: `id` (unique provider identifier), `provider` (type, required), `endpoint`, `secretRefs` (named secret references map), `settings` (escape hatch). Provider-specific connection fields (e.g., `api_key`, `host` for vectorIo) MUST use `secretRefs` entries rather than embedding `secretKeyRef` inside `settings`. The `secretRefs` field is a `map[string]SecretKeyRef` where each key becomes the env var field suffix. The `settings` map is passed through to config.yaml as-is without secret resolution.
 - **FR-006**: The `spec.resources` section MUST support: `models`, `tools`, `shields`
 - **FR-007**: `resources.models` MUST be a list of `ModelConfig` objects (`[]ModelConfig`), where only the `name` field is required. Simple model references use `ModelConfig` with just `name` set. `resources.tools` and `resources.shields` MUST be lists of strings.
 - **FR-008**: The `spec.storage` section MUST have subsections: `kv` (key-value) and `sql` (relational)
 - **FR-009**: The `spec.disabled` field MUST be a list of API names to disable
 - **FR-010**: The `spec.networking` section MUST consolidate: `port`, `tls`, `expose`, `allowedFrom`
-- **FR-011**: The `networking.expose` field MUST be an object with optional `enabled` (bool) and `hostname` (string) fields. When `enabled` is true (or when the object is present with defaults), an Ingress/Route is created. When `hostname` is specified, it is used for the Ingress/Route hostname.
+- **FR-011**: The `networking.expose` field MUST be an optional object with an optional `hostname` (string) field. Presence of the `expose` object (non-nil) enables Ingress/Route creation. When `hostname` is specified, it is used for the Ingress/Route hostname.
 - **FR-012**: The `spec.workload` section MUST contain K8s deployment settings: `replicas`, `workers`, `resources`, `autoscaling`, `storage`, `podDisruptionBudget`, `topologySpreadConstraints`, `overrides`
 - **FR-013**: The `spec.overrideConfig` field MUST be mutually exclusive with `providers`, `resources`, `storage`, `disabled`. The referenced ConfigMap MUST reside in the same namespace as the LLSD CR (consistent with namespace-scoped RBAC, constitution section 1.1)
 - **FR-014**: The `spec.externalProviders` field MUST remain for integration with spec 001
@@ -239,8 +239,8 @@ The base config extraction follows a phased approach. Phase 1 provides an implem
 #### Provider Configuration
 
 - **FR-030**: Provider `provider` field MUST map to `provider_type` with `remote::` prefix (e.g., `vllm` becomes `remote::vllm`)
-- **FR-031**: Provider `endpoint` field MUST map to `config.url` in config.yaml
-- **FR-032**: Provider `apiKey.secretKeyRef` and `secretRefs` entries MUST be resolved to environment variables and referenced as `${env.LLSD_<PROVIDER_ID>_<FIELD>}`, where `<PROVIDER_ID>` is the provider's unique `id` (explicit or auto-generated per FR-035), uppercased with hyphens replaced by underscores. For `apiKey`, the field suffix is `API_KEY`. For `secretRefs`, the map key is uppercased with hyphens replaced by underscores. Example: provider ID `vllm-primary` with `apiKey` produces `LLSD_VLLM_PRIMARY_API_KEY`; `secretRefs.host` produces `LLSD_VLLM_PRIMARY_HOST`.
+- **FR-031**: Provider `endpoint` field MUST map to `config.base_url` in config.yaml
+- **FR-032**: Provider `secretRefs` entries MUST be resolved to environment variables and referenced as `${env.LLSD_<PROVIDER_ID>_<FIELD>}`, where `<PROVIDER_ID>` is the provider's unique `id` (explicit or auto-generated per FR-035), uppercased with hyphens replaced by underscores. The `secretRefs` map key is uppercased with hyphens replaced by underscores. Example: provider ID `vllm-primary` with `secretRefs.api_key` produces `LLSD_VLLM_PRIMARY_API_KEY`; `secretRefs.host` produces `LLSD_VLLM_PRIMARY_HOST`.
 - **FR-033**: Provider `settings` MUST be merged into the provider's `config` section in config.yaml
 - **FR-034**: When multiple providers are specified for the same API type, each MUST have an explicit `id` field. CEL validation enforces this at admission time.
 - **FR-035**: A single provider (one-element list) without `id` MUST auto-generate `provider_id` from the `provider` field value
@@ -270,10 +270,10 @@ The base config extraction follows a phased approach. Phase 1 provides an implem
 #### Networking Configuration
 
 - **FR-060**: `networking.port` MUST default to 8321 if not specified
-- **FR-061**: `networking.tls.enabled: true` MUST configure the server for TLS
-- **FR-062**: `networking.tls.secretName` MUST reference a Kubernetes TLS secret
+- **FR-061**: Presence of `networking.tls` MUST indicate TLS-related configuration is active
+- **FR-062**: *(removed — secretName dropped; no server-side TLS termination implemented)*
 - **FR-063**: `networking.tls.caBundle` MUST support custom CA certificates via ConfigMap reference
-- **FR-064**: `networking.expose: true` MUST create an Ingress/Route with auto-generated hostname
+- **FR-064**: Presence of `networking.expose` (non-nil) MUST create an Ingress/Route with auto-generated hostname
 - **FR-065**: `networking.expose.hostname` MUST create an Ingress/Route with the specified hostname
 - **FR-066**: `networking.allowedFrom` MUST configure NetworkPolicy for namespace-based access control
 
@@ -285,10 +285,10 @@ The base config extraction follows a phased approach. Phase 1 provides an implem
 - **FR-073**: Controller validation MUST verify referenced Secrets exist before generating config
 - **FR-074**: Controller validation MUST verify referenced ConfigMaps exist for `overrideConfig` and `caBundle`
 - **FR-075**: Validation errors MUST include actionable messages with field paths
-- **FR-076**: A validating admission webhook MUST validate CR creation and update operations for constraints that cannot be expressed in CEL (e.g., Secret existence checks, ConfigMap existence for `overrideConfig`, cross-field semantic validation such as provider ID references in resources)
+- **FR-076**: A validating admission webhook MUST validate CR creation and update operations for constraints that cannot be expressed in CEL (e.g., provider ID uniqueness, provider ID references in resources, and any cross-field semantic validation over `apiextensionsv1.JSON` fields)
 - **FR-077**: The validating webhook MUST return structured error responses with field paths and actionable messages following Kubernetes API conventions
 - **FR-078**: The validating webhook MUST be deployed as part of the operator installation and configured via the operator's kustomize manifests with appropriate certificate management
-- **FR-079**: CEL validation MUST enforce that `networking.tls.secretName` is required when `networking.tls.enabled` is true: `!self.tls.enabled || has(self.tls.secretName)`
+- **FR-079**: *(removed — TLSSpec no longer has `enabled` or `secretName`; presence of `tls` implies active config)*
 - **FR-079a**: CEL validation MUST enforce that `storage.kv.endpoint` is required when `storage.kv.type` is `redis`: `self.storage.kv.type != 'redis' || has(self.storage.kv.endpoint)`
 - **FR-079b**: CEL validation MUST enforce that `storage.sql.connectionString` is required when `storage.sql.type` is `postgres`: `self.storage.sql.type != 'postgres' || has(self.storage.sql.connectionString)`
 - **FR-079c**: CEL validation SHOULD warn when `storage.kv.endpoint` or `storage.kv.password` are specified with `storage.kv.type: sqlite` (unused fields)
@@ -377,7 +377,7 @@ crane mutate ${IMAGE}:build \
 - **StorageSpec**: Configuration for state storage (kv and sql backends)
 - **NetworkingSpec**: Configuration for network exposure (port, TLS, expose, allowedFrom)
 - **WorkloadSpec**: Kubernetes deployment settings (replicas, resources, autoscaling)
-- **ExposeConfig**: Expose configuration with `enabled` (bool) and `hostname` (string) fields
+- **ExposeConfig**: Expose configuration with optional `hostname` (string) field; presence implies enabled
 - **ResolvedDistributionStatus**: Tracks the resolved image reference, config source (embedded/oci-label), and config hash for change detection
 
 ## CRD Schema
@@ -398,8 +398,8 @@ spec:
       - id: vllm-primary
         provider: vllm
         endpoint: "http://vllm:8000"
-        apiKey:
-          secretKeyRef: {name: vllm-creds, key: token}
+        secretRefs:
+          api_key: {name: vllm-creds, key: token}
         settings:
           max_tokens: 8192
     safety:
@@ -437,12 +437,9 @@ spec:
   networking:
     port: 8321
     tls:
-      enabled: true
-      secretName: llama-tls
       caBundle:
         configMapName: custom-ca
     expose:
-      enabled: true
       # hostname: "llama.example.com"  # Optional: custom hostname
     allowedFrom:
       namespaces: ["app-ns"]

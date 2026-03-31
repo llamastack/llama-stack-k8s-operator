@@ -1,0 +1,60 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# v1alpha1-only deployment: single API version, no webhooks, no cert-manager.
+# Use this when v1alpha2 is not needed. For full v1alpha2 support use config/default.
+#
+# Usage:
+#   make deploy KUSTOMIZE_OVERLAY=config/v1alpha1-only
+#   make undeploy KUSTOMIZE_OVERLAY=config/v1alpha1-only
+
+namespace: llama-stack-k8s-operator-system
+
+namePrefix: llama-stack-k8s-operator-
+
+resources:
+- ../crd
+- ../rbac
+- ../manager
+
+labels:
+- includeSelectors: true
+  pairs:
+    app.kubernetes.io/name: llama-stack-k8s-operator
+
+patches:
+# Remove the conversion webhook from the CRD (set strategy to None).
+- target:
+    kind: CustomResourceDefinition
+    name: llamastackdistributions.llamastack.io
+  patch: |-
+    - op: replace
+      path: /spec/conversion
+      value:
+        strategy: None
+# Remove cert-manager CA injection annotation.
+- target:
+    kind: CustomResourceDefinition
+    name: llamastackdistributions.llamastack.io
+  patch: |-
+    - op: remove
+      path: /metadata/annotations/cert-manager.io~1inject-ca-from
+# Remove the v1alpha2 version so the CRD is single-version,
+# and mark v1alpha1 as the storage version.
+- target:
+    kind: CustomResourceDefinition
+    name: llamastackdistributions.llamastack.io
+  patch: |-
+    - op: remove
+      path: /spec/versions/1
+    - op: replace
+      path: /spec/versions/0/storage
+      value: true
+# Disable webhooks in the manager (no cert-manager available).
+- target:
+    kind: Deployment
+    name: controller-manager
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: --enable-webhooks=false

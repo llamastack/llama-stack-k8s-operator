@@ -2,6 +2,7 @@
 
 ## Packages
 - [llamastack.io/v1alpha1](#llamastackiov1alpha1)
+- [llamastack.io/v1alpha2](#llamastackiov1alpha2)
 
 ## llamastack.io/v1alpha1
 
@@ -203,7 +204,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `serviceAccountName` _string_ | ServiceAccountName allows users to specify their own ServiceAccount<br />If not specified, the operator will use the default ServiceAccount |  |  |
-| `terminationGracePeriodSeconds` _integer_ | TerminationGracePeriodSeconds is the time allowed for graceful pod shutdown.<br />If not specified, Kubernetes defaults to 30 seconds. |  |  |
+| `terminationGracePeriodSeconds` _[int64](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#int64-v1-core)_ | TerminationGracePeriodSeconds is the time allowed for graceful pod shutdown.<br />If not specified, Kubernetes defaults to 30 seconds. |  |  |
 | `volumes` _[Volume](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volume-v1-core) array_ |  |  |  |
 | `volumeMounts` _[VolumeMount](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volumemount-v1-core) array_ |  |  |  |
 
@@ -299,3 +300,470 @@ _Appears in:_
 | `operatorVersion` _string_ | OperatorVersion is the version of the operator managing this distribution |  |  |
 | `llamaStackServerVersion` _string_ | LlamaStackServerVersion is the version of the LlamaStack server |  |  |
 | `lastUpdated` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | LastUpdated represents when the version information was last updated |  |  |
+
+## llamastack.io/v1alpha2
+
+Package v1alpha2 contains API Schema definitions for the v1alpha2 API group.
+v1alpha2 introduces operator-generated server configuration, enabling the operator
+to generate config.yaml from a high-level specification in the CR.
+
+### Resource Types
+- [LlamaStackDistribution](#llamastackdistribution)
+- [LlamaStackDistributionList](#llamastackdistributionlist)
+
+#### AllowedFromSpec
+
+AllowedFromSpec defines namespace-based access controls for NetworkPolicies.
+
+_Appears in:_
+- [NetworkingSpec](#networkingspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `namespaces` _string array_ | Namespaces is an explicit list of namespace names allowed to access the service.<br />Use "*" to allow all namespaces. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `labels` _string array_ | Labels is a list of namespace label keys that grant access (OR semantics). |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+
+#### AutoscalingSpec
+
+AutoscalingSpec configures HorizontalPodAutoscaler targets.
+
+_Appears in:_
+- [WorkloadSpec](#workloadspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `minReplicas` _integer_ | MinReplicas is the lower bound replica count. |  | Minimum: 1 <br /> |
+| `maxReplicas` _integer_ | MaxReplicas is the upper bound replica count. |  | Minimum: 1 <br />Required: \{\} <br /> |
+| `targetCPUUtilizationPercentage` _integer_ | TargetCPUUtilizationPercentage configures CPU-based scaling. |  | Maximum: 100 <br />Minimum: 1 <br /> |
+| `targetMemoryUtilizationPercentage` _integer_ | TargetMemoryUtilizationPercentage configures memory-based scaling. |  | Maximum: 100 <br />Minimum: 1 <br /> |
+
+#### CABundleConfig
+
+CABundleConfig defines the CA bundle configuration for custom certificates.
+
+_Appears in:_
+- [TLSSpec](#tlsspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing CA bundle certificates.<br />Must be in the same namespace as the CR. |  | MinLength: 1 <br />Required: \{\} <br /> |
+
+#### ConfigGenerationStatus
+
+ConfigGenerationStatus tracks config generation details.
+
+_Appears in:_
+- [LlamaStackDistributionStatus](#llamastackdistributionstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `configMapName` _string_ | ConfigMapName is the name of the generated ConfigMap. |  |  |
+| `generatedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | GeneratedAt is the timestamp of the last generation. |  |  |
+| `providerCount` _integer_ | ProviderCount is the number of configured providers. |  |  |
+| `resourceCount` _integer_ | ResourceCount is the number of registered resources. |  |  |
+| `configVersion` _integer_ | ConfigVersion is the config.yaml schema version. |  |  |
+
+#### DistributionConfig
+
+DistributionConfig represents configuration info from the providers endpoint.
+
+_Appears in:_
+- [LlamaStackDistributionStatus](#llamastackdistributionstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `activeDistribution` _string_ |  |  |  |
+| `providers` _[ProviderInfo](#providerinfo) array_ |  |  |  |
+| `availableDistributions` _object (keys:string, values:string)_ |  |  |  |
+
+#### DistributionPhase
+
+_Underlying type:_ _string_
+
+DistributionPhase represents the current phase of the LlamaStackDistribution.
+
+_Validation:_
+- Enum: [Pending Initializing Ready Failed Terminating]
+
+_Appears in:_
+- [LlamaStackDistributionStatus](#llamastackdistributionstatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` |  |
+| `Initializing` |  |
+| `Ready` |  |
+| `Failed` |  |
+| `Terminating` |  |
+
+#### DistributionSpec
+
+DistributionSpec identifies the LlamaStack distribution image to deploy.
+Exactly one of name or image must be specified.
+
+_Appears in:_
+- [LlamaStackDistributionSpec](#llamastackdistributionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the distribution name that maps to a supported distribution (e.g., "starter", "remote-vllm").<br />Resolved to a container image via distributions.json and image-overrides. |  |  |
+| `image` _string_ | Image is a direct container image reference to use. |  |  |
+
+#### ExposeConfig
+
+ExposeConfig controls external service exposure via Ingress/Route.
+Presence of this field (non-nil) enables external access.
+
+_Appears in:_
+- [NetworkingSpec](#networkingspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `hostname` _string_ | Hostname sets a custom hostname for the Ingress/Route.<br />When omitted, an auto-generated hostname is used. |  |  |
+
+#### ExternalProviderRef
+
+ExternalProviderRef references an external provider image.
+
+_Appears in:_
+- [ExternalProvidersSpec](#externalprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `providerId` _string_ | ProviderID is the unique provider identifier. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `image` _string_ | Image is the container image containing the provider implementation. |  | MinLength: 1 <br />Required: \{\} <br /> |
+
+#### ExternalProvidersSpec
+
+ExternalProvidersSpec defines external provider injection (from spec 001).
+
+_Appears in:_
+- [LlamaStackDistributionSpec](#llamastackdistributionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `inference` _[ExternalProviderRef](#externalproviderref) array_ | Inference lists external inference providers to inject. |  | MinItems: 1 <br /> |
+
+#### KVStorageSpec
+
+KVStorageSpec configures the key-value storage backend.
+
+_Appears in:_
+- [StateStorageSpec](#statestoragespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `type` _string_ | Type is the KV storage backend type. | sqlite | Enum: [sqlite redis] <br /> |
+| `endpoint` _string_ | Endpoint is the Redis endpoint URL. Required when type is "redis". |  |  |
+| `password` _[SecretKeyRef](#secretkeyref)_ | Password references a Secret for Redis authentication. |  |  |
+
+#### LlamaStackDistribution
+
+LlamaStackDistribution is the Schema for the llamastackdistributions API.
+
+_Appears in:_
+- [LlamaStackDistributionList](#llamastackdistributionlist)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `llamastack.io/v1alpha2` | | |
+| `kind` _string_ | `LlamaStackDistribution` | | |
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  |  |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  |  |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[LlamaStackDistributionSpec](#llamastackdistributionspec)_ |  |  |  |
+| `status` _[LlamaStackDistributionStatus](#llamastackdistributionstatus)_ |  |  |  |
+
+#### LlamaStackDistributionList
+
+LlamaStackDistributionList contains a list of LlamaStackDistribution.
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `llamastack.io/v1alpha2` | | |
+| `kind` _string_ | `LlamaStackDistributionList` | | |
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  |  |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  |  |
+| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `items` _[LlamaStackDistribution](#llamastackdistribution) array_ |  |  |  |
+
+#### LlamaStackDistributionSpec
+
+LlamaStackDistributionSpec defines the desired state of LlamaStackDistribution.
+
+_Appears in:_
+- [LlamaStackDistribution](#llamastackdistribution)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `distribution` _[DistributionSpec](#distributionspec)_ | Distribution identifies the LlamaStack distribution to deploy. |  | Required: \{\} <br /> |
+| `providers` _[ProvidersSpec](#providersspec)_ | Providers configures LlamaStack providers by API type.<br />Mutually exclusive with overrideConfig. |  |  |
+| `resources` _[ResourcesSpec](#resourcesspec)_ | Resources declares models and tools to register.<br />Mutually exclusive with overrideConfig. |  |  |
+| `storage` _[StateStorageSpec](#statestoragespec)_ | Storage configures state storage backends (KV and SQL).<br />Mutually exclusive with overrideConfig. |  |  |
+| `disabled` _string array_ | Disabled lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MinItems: 1 <br />items:Enum: [agents inference telemetry tool_runtime vector_io] <br /> |
+| `networking` _[NetworkingSpec](#networkingspec)_ | Networking consolidates network configuration. |  |  |
+| `workload` _[WorkloadSpec](#workloadspec)_ | Workload consolidates Kubernetes deployment settings. |  |  |
+| `externalProviders` _[ExternalProvidersSpec](#externalprovidersspec)_ | ExternalProviders configures external provider injection (from spec 001). |  |  |
+| `overrideConfig` _[OverrideConfigSpec](#overrideconfigspec)_ | OverrideConfig specifies a user-provided ConfigMap for full config.yaml override.<br />Mutually exclusive with providers, resources, storage, and disabled. |  |  |
+
+#### LlamaStackDistributionStatus
+
+LlamaStackDistributionStatus defines the observed state of LlamaStackDistribution.
+
+_Appears in:_
+- [LlamaStackDistribution](#llamastackdistribution)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `phase` _[DistributionPhase](#distributionphase)_ | Phase represents the current phase of the distribution. |  | Enum: [Pending Initializing Ready Failed Terminating] <br /> |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta) array_ | Conditions represent the latest available observations of the distribution's current state. |  |  |
+| `resolvedDistribution` _[ResolvedDistributionStatus](#resolveddistributionstatus)_ | ResolvedDistribution tracks the resolved image and config source. |  |  |
+| `configGeneration` _[ConfigGenerationStatus](#configgenerationstatus)_ | ConfigGeneration tracks config generation details. |  |  |
+| `version` _[VersionInfo](#versioninfo)_ | Version contains version information for both operator and deployment. |  |  |
+| `distributionConfig` _[DistributionConfig](#distributionconfig)_ | DistributionConfig contains configuration info from the providers endpoint. |  |  |
+| `availableReplicas` _integer_ | AvailableReplicas is the number of available replicas. |  |  |
+| `serviceURL` _string_ | ServiceURL is the internal Kubernetes service URL. |  |  |
+| `routeURL` _string_ | RouteURL is the external URL when external access is configured. |  |  |
+
+#### ModelConfig
+
+ModelConfig defines a model registration with optional provider assignment and metadata.
+
+_Appears in:_
+- [ResourcesSpec](#resourcesspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the model identifier (e.g., "llama3.2-8b"). |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `provider` _string_ | Provider is the ID of the provider to register this model with.<br />Defaults to the first inference provider when omitted. |  |  |
+| `contextLength` _integer_ | ContextLength is the model context window size. |  |  |
+| `modelType` _string_ | ModelType is the model type classification. |  |  |
+| `quantization` _string_ | Quantization is the quantization method. |  |  |
+
+#### NetworkingSpec
+
+NetworkingSpec consolidates network configuration for the LlamaStack service.
+
+_Appears in:_
+- [LlamaStackDistributionSpec](#llamastackdistributionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `port` _integer_ | Port is the server listen port. | 8321 | Maximum: 65535 <br />Minimum: 1 <br /> |
+| `tls` _[TLSSpec](#tlsspec)_ | TLS configures TLS for the server. |  |  |
+| `expose` _[ExposeConfig](#exposeconfig)_ | Expose controls external service exposure via Ingress/Route. |  |  |
+| `allowedFrom` _[AllowedFromSpec](#allowedfromspec)_ | AllowedFrom configures NetworkPolicy for namespace-based access control. |  |  |
+
+#### OverrideConfigSpec
+
+OverrideConfigSpec specifies a user-provided ConfigMap for full config.yaml override.
+Mutually exclusive with providers, resources, storage, and disabled.
+
+_Appears in:_
+- [LlamaStackDistributionSpec](#llamastackdistributionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing config.yaml.<br />Must be in the same namespace as the CR. |  | MinLength: 1 <br />Required: \{\} <br /> |
+
+#### PVCStorageSpec
+
+PVCStorageSpec defines PVC storage for persistent data.
+
+_Appears in:_
+- [WorkloadSpec](#workloadspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `size` _[Quantity](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#quantity-resource-api)_ | Size is the size of the PVC. |  |  |
+| `mountPath` _string_ | MountPath is the container mount path for the PVC. | /.llama |  |
+
+#### PodDisruptionBudgetSpec
+
+PodDisruptionBudgetSpec defines voluntary disruption controls.
+
+_Appears in:_
+- [WorkloadSpec](#workloadspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `minAvailable` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | MinAvailable is the minimum number of pods that must remain available. |  |  |
+| `maxUnavailable` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | MaxUnavailable is the maximum number of pods that can be disrupted simultaneously. |  |  |
+
+#### ProviderConfig
+
+ProviderConfig defines the configuration for a single LlamaStack provider instance.
+
+_Appears in:_
+- [ProvidersSpec](#providersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Required when multiple providers are<br />configured for the same API type. Auto-generated from provider when omitted<br />for single-provider configurations. |  |  |
+| `provider` _string_ | Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").<br />Maps to provider_type with "remote::" prefix in config.yaml. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `endpoint` _string_ | Endpoint is the provider endpoint URL. Maps to config.url in config.yaml. |  |  |
+| `secretRefs` _object (keys:string, values:[SecretKeyRef](#secretkeyref))_ | SecretRefs is a map of named secret references for provider-specific<br />connection fields (e.g., host, password). Each key becomes the env var<br />field suffix and maps to config.<key> with env var substitution:<br />$\{env.LLSD_<PROVIDER_ID>_<KEY>\}. Use this instead of embedding<br />secretKeyRef inside settings. |  | MinProperties: 1 <br /> |
+| `settings` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | Settings contains provider-specific settings merged into the provider's<br />config section in config.yaml. Acts as an escape hatch for fields not<br />directly exposed in the CRD schema. Passed through as-is without any<br />secret resolution. Use secretRefs for secret values. |  |  |
+
+#### ProviderHealthStatus
+
+ProviderHealthStatus represents the health status of a provider.
+
+_Appears in:_
+- [ProviderInfo](#providerinfo)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `status` _string_ |  |  |  |
+| `message` _string_ |  |  |  |
+
+#### ProviderInfo
+
+ProviderInfo represents a single provider from the providers endpoint.
+
+_Appears in:_
+- [DistributionConfig](#distributionconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `api` _string_ |  |  |  |
+| `provider_id` _string_ |  |  |  |
+| `provider_type` _string_ |  |  |  |
+| `config` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ |  |  |  |
+| `health` _[ProviderHealthStatus](#providerhealthstatus)_ |  |  |  |
+
+#### ProvidersSpec
+
+ProvidersSpec contains typed provider slices for each LlamaStack API type.
+
+_Appears in:_
+- [LlamaStackDistributionSpec](#llamastackdistributionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `inference` _[ProviderConfig](#providerconfig) array_ | Inference configures inference providers (e.g., vLLM, TGI). |  | MinItems: 1 <br /> |
+| `vectorIo` _[ProviderConfig](#providerconfig) array_ | VectorIo configures vector I/O providers (e.g., pgvector, chromadb). |  | MinItems: 1 <br /> |
+| `toolRuntime` _[ProviderConfig](#providerconfig) array_ | ToolRuntime configures tool runtime providers. |  | MinItems: 1 <br /> |
+| `telemetry` _[ProviderConfig](#providerconfig) array_ | Telemetry configures telemetry providers (e.g., opentelemetry). |  | MinItems: 1 <br /> |
+
+#### ResolvedDistributionStatus
+
+ResolvedDistributionStatus tracks the resolved distribution image for change detection.
+
+_Appears in:_
+- [LlamaStackDistributionStatus](#llamastackdistributionstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `image` _string_ | Image is the resolved container image reference (with digest when available). |  |  |
+| `configSource` _string_ | ConfigSource indicates the config origin: "embedded" or "oci-label". |  |  |
+| `configHash` _string_ | ConfigHash is the SHA256 hash of the base config used. |  |  |
+
+#### ResourcesSpec
+
+ResourcesSpec defines declarative registration of models and tools.
+
+_Appears in:_
+- [LlamaStackDistributionSpec](#llamastackdistributionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `models` _[ModelConfig](#modelconfig) array_ | Models to register with inference providers. |  | MinItems: 1 <br /> |
+| `tools` _string array_ | Tools are tool group names to register with the toolRuntime provider. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+
+#### SQLStorageSpec
+
+SQLStorageSpec configures the relational storage backend.
+
+_Appears in:_
+- [StateStorageSpec](#statestoragespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `type` _string_ | Type is the SQL storage backend type. | sqlite | Enum: [sqlite postgres] <br /> |
+| `connectionString` _[SecretKeyRef](#secretkeyref)_ | ConnectionString references a Secret containing the database connection string.<br />Required when type is "postgres". |  |  |
+
+#### SecretKeyRef
+
+SecretKeyRef references a specific key in a Kubernetes Secret.
+
+_Appears in:_
+- [KVStorageSpec](#kvstoragespec)
+- [ProviderConfig](#providerconfig)
+- [SQLStorageSpec](#sqlstoragespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the name of the Kubernetes Secret. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `key` _string_ | Key is the key within the Secret. |  | MinLength: 1 <br />Required: \{\} <br /> |
+
+#### StateStorageSpec
+
+StateStorageSpec configures state storage backends for the LlamaStack server.
+
+_Appears in:_
+- [LlamaStackDistributionSpec](#llamastackdistributionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `kv` _[KVStorageSpec](#kvstoragespec)_ | KV configures the key-value storage backend (sqlite or redis). |  |  |
+| `sql` _[SQLStorageSpec](#sqlstoragespec)_ | SQL configures the relational storage backend (sqlite or postgres). |  |  |
+
+#### TLSSpec
+
+TLSSpec configures TLS for the LlamaStack server.
+Presence of this field indicates TLS-related configuration is active.
+
+_Appears in:_
+- [NetworkingSpec](#networkingspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `caBundle` _[CABundleConfig](#cabundleconfig)_ | CABundle configures custom CA certificates via ConfigMap reference. |  |  |
+
+#### VersionInfo
+
+VersionInfo contains version-related information.
+
+_Appears in:_
+- [LlamaStackDistributionStatus](#llamastackdistributionstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `operatorVersion` _string_ |  |  |  |
+| `llamaStackServerVersion` _string_ |  |  |  |
+| `lastUpdated` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ |  |  |  |
+
+#### WorkloadOverrides
+
+WorkloadOverrides allows low-level customization of the Pod template.
+
+_Appears in:_
+- [WorkloadSpec](#workloadspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `serviceAccountName` _string_ | ServiceAccountName specifies a custom ServiceAccount. |  |  |
+| `env` _[EnvVar](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#envvar-v1-core) array_ | Env specifies additional environment variables. |  | MinItems: 1 <br /> |
+| `command` _string array_ | Command overrides the container command. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `args` _string array_ | Args overrides the container arguments. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `volumes` _[Volume](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volume-v1-core) array_ | Volumes adds additional volumes to the Pod. |  | MinItems: 1 <br /> |
+| `volumeMounts` _[VolumeMount](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volumemount-v1-core) array_ | VolumeMounts adds additional volume mounts to the container. |  | MinItems: 1 <br /> |
+
+#### WorkloadSpec
+
+WorkloadSpec consolidates Kubernetes deployment settings.
+
+_Appears in:_
+- [LlamaStackDistributionSpec](#llamastackdistributionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `replicas` _integer_ | Replicas is the desired Pod replica count. | 1 | Minimum: 0 <br /> |
+| `workers` _integer_ | Workers configures the number of uvicorn worker processes. |  | Minimum: 1 <br /> |
+| `resources` _[ResourceRequirements](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#resourcerequirements-v1-core)_ | Resources specifies CPU/memory requests and limits. |  |  |
+| `autoscaling` _[AutoscalingSpec](#autoscalingspec)_ | Autoscaling configures HPA. |  |  |
+| `storage` _[PVCStorageSpec](#pvcstoragespec)_ | Storage configures PVC for persistent data. |  |  |
+| `podDisruptionBudget` _[PodDisruptionBudgetSpec](#poddisruptionbudgetspec)_ | PodDisruptionBudget configures PDB. |  |  |
+| `topologySpreadConstraints` _[TopologySpreadConstraint](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#topologyspreadconstraint-v1-core) array_ | TopologySpreadConstraints defines Pod spreading rules. |  | MinItems: 1 <br /> |
+| `overrides` _[WorkloadOverrides](#workloadoverrides)_ | Overrides provides low-level Pod template customization. |  |  |
