@@ -92,6 +92,22 @@ type NetworkSpec struct {
 	// By default, only the LLSD namespace and the operator namespace are allowed.
 	// +optional
 	AllowedFrom *AllowedFromSpec `json:"allowedFrom,omitempty"`
+
+	// AllowedTo defines egress destinations the LlamaStack pods are allowed to reach.
+	// When set, egress is restricted to these destinations plus DNS and the Kubernetes API server.
+	// When explicitly empty (allowedTo: []), egress is restricted to DNS and API server only.
+	// When not set (nil), egress is unrestricted.
+	// +optional
+	AllowedTo *[]EgressRule `json:"allowedTo,omitempty"`
+}
+
+// EgressRule defines an allowed egress destination.
+type EgressRule struct {
+	// Namespace is the target namespace to allow egress to.
+	Namespace string `json:"namespace"`
+	// Port is the destination port. If not specified, all ports are allowed.
+	// +optional
+	Port *int32 `json:"port,omitempty"`
 }
 
 // AllowedFromSpec defines namespace-based access controls for NetworkPolicies.

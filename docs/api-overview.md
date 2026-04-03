@@ -111,6 +111,18 @@ _Appears in:_
 | `name` _string_ | Name is the distribution name that maps to supported distributions. |  |  |
 | `image` _string_ | Image is the direct container image reference to use |  |  |
 
+#### EgressRule
+
+EgressRule defines an allowed egress destination.
+
+_Appears in:_
+- [NetworkSpec](#networkspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `namespace` _string_ | Namespace is the target namespace to allow egress to. |  |  |
+| `port` _integer_ | Port is the destination port. If not specified, all ports are allowed. |  |  |
+
 #### LlamaStackDistribution
 
 _Appears in:_
@@ -180,6 +192,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `exposeRoute` _boolean_ | ExposeRoute when true, creates an Ingress for external access.<br />Default is false (internal access only). | false |  |
 | `allowedFrom` _[AllowedFromSpec](#allowedfromspec)_ | AllowedFrom defines which namespaces are allowed to access the LlamaStack service.<br />By default, only the LLSD namespace and the operator namespace are allowed. |  |  |
+| `allowedTo` _[EgressRule](#egressrule)_ | AllowedTo defines egress destinations the LlamaStack pods are allowed to reach.<br />When set, egress is restricted to these destinations plus DNS and the Kubernetes API server.<br />When explicitly empty (allowedTo: []), egress is restricted to DNS and API server only.<br />When not set (nil), egress is unrestricted. |  |  |
 
 #### PodDisruptionBudgetSpec
 

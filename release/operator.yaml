@@ -90,6 +90,28 @@ spec:
                           type: string
                         type: array
                     type: object
+                  allowedTo:
+                    description: |-
+                      AllowedTo defines egress destinations the LlamaStack pods are allowed to reach.
+                      When set, egress is restricted to these destinations plus DNS and the Kubernetes API server.
+                      When explicitly empty (allowedTo: []), egress is restricted to DNS and API server only.
+                      When not set (nil), egress is unrestricted.
+                    items:
+                      description: EgressRule defines an allowed egress destination.
+                      properties:
+                        namespace:
+                          description: Namespace is the target namespace to allow
+                            egress to.
+                          type: string
+                        port:
+                          description: Port is the destination port. If not specified,
+                            all ports are allowed.
+                          format: int32
+                          type: integer
+                      required:
+                      - namespace
+                      type: object
+                    type: array
                   exposeRoute:
                     default: false
                     description: |-
