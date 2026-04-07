@@ -22,6 +22,7 @@ package v1alpha1
 //nolint:gci
 import (
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -92,6 +93,15 @@ type NetworkSpec struct {
 	// By default, only the LLSD namespace and the operator namespace are allowed.
 	// +optional
 	AllowedFrom *AllowedFromSpec `json:"allowedFrom,omitempty"`
+
+	// AllowedTo defines egress destinations the LlamaStack pods are allowed to reach.
+	// Uses the standard Kubernetes NetworkPolicyEgressRule type for full flexibility
+	// (namespace selectors, pod selectors, IP blocks, port ranges).
+	// When set, egress is restricted to these destinations plus DNS and the Kubernetes API server.
+	// When explicitly empty (allowedTo: []), egress is restricted to DNS and API server only.
+	// When not set (nil), egress is unrestricted.
+	// +optional
+	AllowedTo *[]networkingv1.NetworkPolicyEgressRule `json:"allowedTo,omitempty"`
 }
 
 // AllowedFromSpec defines namespace-based access controls for NetworkPolicies.
