@@ -1541,17 +1541,7 @@ func initializeOperatorConfigMap(ctx context.Context, c client.Client, operatorN
 
 	err := c.Get(ctx, configMapName, configMap)
 	if err == nil {
-		// Ensure the watch label exists (upgrade path)
-		if configMap.Labels == nil || configMap.Labels[WatchLabelKey] != WatchLabelValue {
-			if configMap.Labels == nil {
-				configMap.Labels = make(map[string]string)
-			}
-			configMap.Labels[WatchLabelKey] = WatchLabelValue
-			if updateErr := c.Update(ctx, configMap); updateErr != nil {
-				return nil, fmt.Errorf("failed to add watch label to operator config ConfigMap: %w", updateErr)
-			}
-		}
-		return configMap, nil
+		return upgradeOperatorConfigMap(ctx, c, configMap, configMapName)
 	}
 
 	if !k8serrors.IsNotFound(err) {
@@ -1569,6 +1559,68 @@ func initializeOperatorConfigMap(ctx context.Context, c client.Client, operatorN
 	}
 
 	return configMap, nil
+}
+
+// upgradeOperatorConfigMap ensures an existing operator ConfigMap has the watch
+// label and up-to-date feature-flag defaults, patching only when changes are needed.
+func upgradeOperatorConfigMap(ctx context.Context, c client.Client, configMap *corev1.ConfigMap, configMapName types.NamespacedName) (*corev1.ConfigMap, error) {
+	needsUpdate := false
+	patch := client.MergeFrom(configMap.DeepCopy())
+
+	// Ensure the watch label exists (upgrade path)
+	if configMap.Labels == nil {
+		configMap.Labels = make(map[string]string)
+	}
+	if configMap.Labels[WatchLabelKey] != WatchLabelValue {
+		configMap.Labels[WatchLabelKey] = WatchLabelValue
+		needsUpdate = true
+	}
+
+	// Check if we need to update feature flags (upgrade scenario)
+	if needsConfigMapUpdate(ctx, c) {
+		newConfigMap, genErr := createDefaultConfigMap(configMapName)
+		if genErr != nil {
+			return nil, fmt.Errorf("failed to generate default configMap: %w", genErr)
+		}
+		if configMap.Data == nil {
+			configMap.Data = make(map[string]string)
+		}
+		// Only update the featureFlags key, preserve other keys (like image-overrides)
+		configMap.Data[featureflags.FeatureFlagsKey] = newConfigMap.Data[featureflags.FeatureFlagsKey]
+		needsUpdate = true
+	}
+
+	if needsUpdate {
+		if patchErr := c.Patch(ctx, configMap, patch); patchErr != nil {
+			return nil, fmt.Errorf("failed to patch ConfigMap: %w", patchErr)
+		}
+	}
+
+	return configMap, nil
+}
+
+// needsConfigMapUpdate checks if the ConfigMap needs to be updated with new defaults.
+func needsConfigMapUpdate(ctx context.Context, c client.Client) bool {
+	list := &llamav1alpha1.LlamaStackDistributionList{}
+	if err := c.List(ctx, list); err != nil {
+		return false
+	}
+
+	currentVersion := os.Getenv("OPERATOR_VERSION")
+	hasCRWithVersion := false
+
+	for _, cr := range list.Items {
+		if cr.Status.Version.OperatorVersion != "" {
+			hasCRWithVersion = true
+			// Version mismatch means upgrade
+			if cr.Status.Version.OperatorVersion != currentVersion {
+				return true
+			}
+		}
+	}
+
+	// No CRs with version info - update ConfigMap
+	return !hasCRWithVersion
 }
 
 func ParseImageMappingOverrides(ctx context.Context, configMapData map[string]string) map[string]string {
