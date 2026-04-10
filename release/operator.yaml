@@ -3209,8 +3209,8 @@ spec:
         - name: GOMEMLIMIT
           value: 800MiB
         - name: OPERATOR_VERSION
-          value: latest
-        image: quay.io/llamastack/llama-stack-k8s-operator:latest
+          value: 0.9.0
+        image: quay.io/llamastack/llama-stack-k8s-operator:v0.9.0
         imagePullPolicy: Always
         livenessProbe:
           httpGet:
